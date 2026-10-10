@@ -13,10 +13,18 @@ use crate::modal::{
     ModalResult,
 };
 use crate::modal::{IntegrationAction, ModalOutcome};
-use crate::models::{CustomClaudeButton, Repository, Worktree};
+use crate::models::{CustomClaudeButton, Repository, WorkItemLink, Worktree};
+use crate::prompt;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+/// A worktree created to start work in: the work item it records, and the
+/// first message Claude is started with once it exists.
+struct WorkStart {
+    link: WorkItemLink,
+    first_prompt: String,
+}
 
 /// Gather the branch and remote lists and deliver them to `target`.
 ///
@@ -138,14 +146,46 @@ impl App {
                 name,
                 branch,
                 new_branch,
-            } => self.create_worktree(repo_id, name, branch, new_branch, None, false),
+            } => self.create_worktree(repo_id, name, branch, new_branch, None, false, None),
             ModalResult::WorktreeFromIssue {
                 repo_id,
+                issue_number,
+                issue_title,
                 name,
                 branch,
                 pull_first,
                 base_branch,
-            } => self.create_worktree(repo_id, name, branch, true, base_branch, pull_first),
+            } => {
+                let Some(repo) = self.state.find_repository(repo_id) else {
+                    return;
+                };
+                let first_prompt = prompt::fill(
+                    prompt::ISSUE_TEMPLATE,
+                    &prompt::TemplateVars {
+                        number: Some(issue_number),
+                        title: &issue_title,
+                        branch: &branch,
+                        worktree: &name,
+                        repo: &repo.name,
+                        body: None,
+                    },
+                );
+                let start = WorkStart {
+                    link: WorkItemLink::Issue {
+                        number: issue_number,
+                    },
+                    first_prompt,
+                };
+                self.create_worktree(
+                    repo_id,
+                    name,
+                    branch,
+                    true,
+                    base_branch,
+                    pull_first,
+                    Some(start),
+                );
+            }
             ModalResult::SettingsSaved(settings) => {
                 self.settings = *settings;
                 // On every path that reaches Save the picker has already made
@@ -324,7 +364,7 @@ impl App {
                 // Confirmed with the fork warning on screen; the guard is
                 // deliberately not consulted again.
                 let custom = custom_button.and_then(|index| self.custom_button(index));
-                self.start_claude(&path, Some(&session_id), yolo, custom, seed);
+                self.start_claude(&path, Some(&session_id), yolo, custom, seed, None);
             }
         }
     }
@@ -587,11 +627,11 @@ impl App {
             Action::Editor => self.open_in_editor(&path),
             Action::Terminal => self.open_in_terminal(&path),
             Action::Files => self.open_in_file_manager(&path),
-            Action::ClaudeNew => self.start_claude(&path, None, false, None, None),
-            Action::ClaudeYolo => self.start_claude(&path, None, true, None, None),
+            Action::ClaudeNew => self.start_claude(&path, None, false, None, None, None),
+            Action::ClaudeYolo => self.start_claude(&path, None, true, None, None, None),
             Action::ClaudeCustom(index) => {
                 if let Some(button) = self.custom_button(index) {
-                    self.start_claude(&path, None, false, Some(button), None);
+                    self.start_claude(&path, None, false, Some(button), None, None);
                 }
             }
             Action::ResumeSession(index) => {
@@ -599,7 +639,7 @@ impl App {
                     && let Some(id) = self.session_id(index)
                 {
                     let seed = self.session_window_name(index);
-                    self.start_claude(&path, Some(&id), false, None, seed);
+                    self.start_claude(&path, Some(&id), false, None, seed, None);
                 }
             }
             Action::ResumeYolo(index) => {
@@ -607,7 +647,7 @@ impl App {
                     && let Some(id) = self.session_id(index)
                 {
                     let seed = self.session_window_name(index);
-                    self.start_claude(&path, Some(&id), true, None, seed);
+                    self.start_claude(&path, Some(&id), true, None, seed, None);
                 }
             }
             Action::ResumeCustom { button, session } => {
@@ -616,7 +656,7 @@ impl App {
                         (self.session_id(session), self.custom_button(button))
                 {
                     let seed = self.session_window_name(session);
-                    self.start_claude(&path, Some(&id), false, Some(button), seed);
+                    self.start_claude(&path, Some(&id), false, Some(button), seed, None);
                 }
             }
             Action::RenameSession(index) => self.action_rename_session(index, &path),
@@ -807,13 +847,14 @@ impl App {
         }
     }
 
-    fn start_claude(
+    pub(super) fn start_claude(
         &mut self,
         path: &str,
         resume_session_id: Option<&str>,
         yolo: bool,
         custom: Option<CustomClaudeButton>,
         seed_name: Option<String>,
+        first_prompt: Option<&str>,
     ) {
         let opening_name = tmux::opening_window_name(
             seed_name.as_deref(),
@@ -831,6 +872,7 @@ impl App {
                 custom_prefix: custom.as_ref().map(|b| b.prefix.as_str()),
                 remote_control: self.settings.remote_control
                     && crate::services::claude_cli::remote_control_supported(),
+                first_prompt,
             },
         );
 
@@ -965,6 +1007,7 @@ impl App {
         self.scan_worktrees(repo_id);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn create_worktree(
         &mut self,
         repo_id: Uuid,
@@ -973,6 +1016,7 @@ impl App {
         new_branch: bool,
         base_branch: Option<String>,
         pull_first: bool,
+        start: Option<WorkStart>,
     ) {
         let Some(repo) = self.state.find_repository(repo_id) else {
             return;
@@ -1023,10 +1067,16 @@ impl App {
             );
             worktree.base_branch = base;
             worktree.created_from_ref = base_ref;
+            let (work_item, first_prompt) = match start {
+                Some(start) => (Some(start.link), Some(start.first_prompt)),
+                None => (None, None),
+            };
+            worktree.work_item = work_item;
 
             tx.send(AppEvent::WorktreeAdded {
                 repo_id,
                 worktree: Box::new(worktree),
+                first_prompt,
             });
         });
     }

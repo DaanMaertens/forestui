@@ -526,6 +526,8 @@ pub struct ClaudeLaunch<'a> {
     pub custom_prefix: Option<&'a str>,
     /// Start with Remote Control on (the Settings checkbox).
     pub remote_control: bool,
+    /// The session's first message, sent as Claude's positional prompt.
+    pub first_prompt: Option<&'a str>,
 }
 
 /// The command line a Claude window runs.
@@ -579,6 +581,19 @@ pub fn claude_command_line(
         if let Some(id) = new_session_id {
             cmd.push_str(&format!(" --session-id {}", sh_quote(id)));
         }
+    }
+    // Last, and after a flag that takes a value, so no optional-valued flag
+    // ahead of it can take it as its own. Line breaks become spaces rather
+    // than vanishing, so a template's paragraphs do not run their words
+    // together.
+    if let Some(prompt) = launch.first_prompt {
+        let flat = prompt
+            .lines()
+            .map(str::trim_end)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        cmd.push_str(&format!(" {}", sh_quote(&flat)));
     }
     single_line(&cmd)
 }
@@ -848,6 +863,9 @@ fn launch_lines(
     let remembered = claude_command_line(
         &ClaudeLaunch {
             resume_session_id: Some(session_id),
+            // The up arrow resumes the conversation; it must not send the
+            // work a second time into the middle of it.
+            first_prompt: None,
             ..*launch
         },
         window_name,
@@ -1027,6 +1045,7 @@ mod tests {
                     custom_command,
                     custom_prefix,
                     remote_control: false,
+                    first_prompt: None,
                 },
                 "claude:wt",
                 None,
@@ -1140,6 +1159,7 @@ mod tests {
                     custom_command: custom.map(|(command, _)| command),
                     custom_prefix: custom.map(|(_, prefix)| prefix),
                     remote_control: true,
+                    first_prompt: None,
                 };
                 let line = claude_command_line(&launch, "claude:wt", Some("id-1"));
                 let words: Vec<&str> = line.split(' ').collect();
@@ -1183,6 +1203,37 @@ mod tests {
         let (line, remembered) = launch_lines(&resume, "claude:wt", "id-2");
         assert_eq!(line, "claude --remote-control -r 'id-2'");
         assert_eq!(remembered, line);
+    }
+
+    /// A first prompt is foreign text — a filled-in template quoting an
+    /// issue's title — so it is quoted literally, flattened to one line, and
+    /// comes last: after `--remote-control`, so the flag never takes it as its
+    /// name, and after `-n`, which keeps the ordering the tests above hold.
+    #[test]
+    fn a_first_prompt_is_quoted_flattened_and_last() {
+        let launch = ClaudeLaunch {
+            remote_control: true,
+            first_prompt: Some("Fix #3: it's `$(rm -rf ~)`!\n\nThen  wait.\r\n"),
+            ..ClaudeLaunch::default()
+        };
+        assert_eq!(
+            claude_command_line(&launch, "issue-3-fix", Some("id-1")),
+            "claude --remote-control -n 'issue-3-fix' --session-id 'id-1' \
+             'Fix #3: it'\\''s `$(rm -rf ~)`! Then  wait.'"
+        );
+    }
+
+    /// The up arrow restarts the conversation; sending the first prompt again
+    /// would hand Claude the same work twice in the middle of it.
+    #[test]
+    fn the_history_line_never_repeats_the_first_prompt() {
+        let launch = ClaudeLaunch {
+            first_prompt: Some("Work on issue 3"),
+            ..ClaudeLaunch::default()
+        };
+        let (line, remembered) = launch_lines(&launch, "issue-3-fix", "id-1");
+        assert!(line.ends_with(" 'Work on issue 3'"), "{line}");
+        assert_eq!(remembered, "claude -r 'id-1'");
     }
 
     /// A custom button is Claude too — it already gets `-n`, `-r` and
