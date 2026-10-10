@@ -57,9 +57,9 @@ pub enum ModalEffect {
     /// dialog stays open and re-reads its status, so the result of the action
     /// is visible where the action was taken.
     ClaudePlugin(IntegrationAction),
-    /// Start work picked an issue: load the branches and open the confirm
-    /// screen for it on top of the picker.
-    ConfirmIssue(Box<GitHubIssue>),
+    /// Start work picked an issue in a work mode: load the branches and open
+    /// the confirm screen for it on top of the picker.
+    ConfirmIssue(Box<GitHubIssue>, WorkMode),
 }
 
 /// What the integration dialog can do, given what is currently on disk.
@@ -679,7 +679,9 @@ pub struct StartWorkModal {
     pub step: StartWorkStep,
     /// The highlighted mode on the mode step, and the chosen one after it.
     pub mode: WorkMode,
-    /// `None` while the issues are still loading.
+    /// Every loaded issue; the picker holds the ones `mode` lists.
+    issues: Option<Vec<GitHubIssue>>,
+    /// The issues `mode` lists. `None` while the issues are still loading.
     pub picker: Option<SearchPicker<IssueEntry>>,
     /// One of the `FOCUS_*` constants; see [`StartWorkModal::ring`].
     pub focus: usize,
@@ -701,6 +703,7 @@ impl StartWorkModal {
             repo_path: repo.source_path.clone(),
             step: StartWorkStep::Mode,
             mode: WorkMode::Issue,
+            issues: None,
             picker: None,
             focus: Self::FOCUS_LIST,
         };
@@ -710,17 +713,38 @@ impl StartWorkModal {
         modal
     }
 
-    /// Fill the item list once the issues have loaded. A list already on
-    /// screen is kept: replacing it under a half-typed query would move the
+    /// Fill the item list once the issues have loaded. Issues already loaded
+    /// are kept: replacing the list under a half-typed query would move the
     /// selection out from under the user.
     pub fn set_issues(&mut self, issues: Vec<GitHubIssue>) {
-        if self.picker.is_none() {
-            let entries = issues.into_iter().map(IssueEntry::new).collect();
-            self.picker = Some(SearchPicker::new(
-                entries,
-                "Type a number or part of a title...",
-            ));
+        if self.issues.is_none() {
+            self.issues = Some(issues);
+            self.fill_picker();
         }
+    }
+
+    /// Choose a mode, listing its issues. Re-choosing the current one keeps
+    /// the list, query and all.
+    fn set_mode(&mut self, mode: WorkMode) {
+        if mode != self.mode {
+            self.mode = mode;
+            self.picker = None;
+            self.fill_picker();
+        }
+    }
+
+    fn fill_picker(&mut self) {
+        let Some(issues) = self.issues.as_deref() else {
+            return;
+        };
+        let entries = work::issues_for(self.mode, issues, work::DEFAULT_FEATURE_LABELS)
+            .into_iter()
+            .map(IssueEntry::new)
+            .collect();
+        self.picker = Some(SearchPicker::new(
+            entries,
+            "Type a number or part of a title...",
+        ));
     }
 
     /// The focus stops on the current step, in Tab order.
@@ -744,7 +768,7 @@ impl StartWorkModal {
                 if let Some(mode) = WorkMode::ALL.get(row).copied()
                     && mode.is_enabled()
                 {
-                    self.mode = mode;
+                    self.set_mode(mode);
                 }
             }
             StartWorkStep::Item => {
@@ -773,7 +797,7 @@ impl StartWorkModal {
             }
             position = next as usize;
             if modes[position].is_enabled() {
-                self.mode = modes[position];
+                self.set_mode(modes[position]);
                 return;
             }
         }
@@ -831,6 +855,7 @@ impl StartWorkModal {
                             return match picker.selected() {
                                 Some(entry) => ModalOutcome::Effect(ModalEffect::ConfirmIssue(
                                     Box::new(entry.issue.clone()),
+                                    self.mode,
                                 )),
                                 None => ModalOutcome::None,
                             };
@@ -864,6 +889,8 @@ pub struct StartWorkConfirmModal {
     pub repo_id: Uuid,
     pub repo_name: String,
     pub repo_path: String,
+    /// `issue` or `feature`: decides the names and the prompt template.
+    pub mode: WorkMode,
     pub issue_number: i64,
     pub issue_title: String,
     pub branches: BranchList,
@@ -894,23 +921,25 @@ impl StartWorkConfirmModal {
 
     pub fn new(
         repo: &Repository,
+        mode: WorkMode,
         issue: &GitHubIssue,
         branches: BranchList,
         forest_dir: PathBuf,
         has_parent: bool,
     ) -> Self {
-        let names = work::names(WorkMode::Issue, issue.number, &issue.title);
+        let names = work::names(mode, issue.number, &issue.title);
         let base = default_base_branch(&branches);
         Self {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
             repo_path: repo.source_path.clone(),
+            mode,
             issue_number: issue.number,
             issue_title: issue.title.clone(),
             branches,
             forest_dir,
             name: TextInput::new(names.worktree).with_placeholder("worktree-name"),
-            branch: TextInput::new(names.branch).with_placeholder("fix/branch-name"),
+            branch: TextInput::new(names.branch).with_placeholder("branch-name"),
             base_branch: TextInput::new(base).with_placeholder("origin/main"),
             pull_first: true,
             is_fetching: false,
@@ -930,7 +959,7 @@ impl StartWorkConfirmModal {
     /// what the screen shows is exactly what Claude is started with.
     pub fn prompt(&self) -> String {
         prompt::fill(
-            prompt::ISSUE_TEMPLATE,
+            self.mode.template(),
             &prompt::TemplateVars {
                 number: Some(self.issue_number),
                 title: &self.issue_title,

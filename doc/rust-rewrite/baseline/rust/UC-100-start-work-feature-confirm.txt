@@ -1,0 +1,44 @@
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work: Feature #77                                                    │
+                              │                                                                              │
+                              │  Dark mode for the dashboard                                                 │
+                              │  Worktree Name                                                               │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │feat-77-dark-mode-for-the-dashboard                                     │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  Path: <ROOT>/forest/beta/feat-77-dark-mode-for-the-dashboar  │
+                              │  Branch Name                                                                 │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │feat/feat-77-dark-mode-for-the-dashboard                                │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  Base Branch                                                                 │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │main                                                                    │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │                                                                              │
+                              │  ┌────────┐ ┌───────────────────────────────┐                                │
+                              │  │ Fetch  │ │ [x] Pull repo before creating │                                │
+                              │  └────────┘ └───────────────────────────────┘                                │
+                              │  Prompt                                                                      │
+                              │   Build the feature from GitHub issue #77: Dark mode for the dashboard       │
+                              │                                                                              │
+                              │   Start by reading it with `gh issue view 77 --comments`, so you have its    │
+                              │   current text and every comment.                                            │
+                              │                                                                              │
+                              │   You are in the `feat-77-dark-mode-for-the-dashboard` worktree of beta, on  │
+                              │   the branch `feat/feat-77-dark-mode-for-the-dashboard`.                     │
+                              │                                                                              │
+                              │   Explore the code it touches and write a plan: what you will change,        │
+                              │   where, and how you will test it. Do not change any code until I have       │
+                              │   approved the plan.                                                         │
+                              │                                                                              │
+                              │                            ┌────────┐ ┌────────┐                             │
+                              │                            │ Launch │ │  Back  │                             │
+                              │                            └────────┘ └────────┘                             │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

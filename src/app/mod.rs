@@ -232,7 +232,7 @@ pub struct App {
     pub(crate) rename_target: Option<Uuid>,
     /// Issue whose modal is waiting on a branch list to finish loading.
     /// The issue a Create-WT click captured, held across the branch load.
-    pub(crate) pending_issue: Option<crate::models::GitHubIssue>,
+    pub(crate) pending_issue: Option<(crate::models::GitHubIssue, crate::work::WorkMode)>,
 }
 
 impl App {
@@ -3804,22 +3804,110 @@ mod tests {
         assert!(matches!(app.modals.last(), Some(Modal::StartWork(_))));
     }
 
-    /// Only `issue` exists so far: the other modes are listed but the
-    /// highlight skips them, so Enter can never choose one.
+    /// `pr-review` does not exist yet: it is listed, but the highlight stops
+    /// on `feature` and a click on it picks nothing, so Enter can never
+    /// choose it.
     #[tokio::test]
-    async fn only_the_issue_mode_can_be_chosen() {
+    async fn pr_review_cannot_be_chosen_yet() {
         let (_dir, mut app, _) = app_with_issues(Vec::new());
         app.handle_key(key(KeyCode::Char('s')));
 
         app.handle_key(key(KeyCode::Down));
         app.handle_key(key(KeyCode::Down));
-        assert_eq!(start_work(&app).mode, crate::work::WorkMode::Issue);
+        assert_eq!(start_work(&app).mode, crate::work::WorkMode::Feature);
 
-        // A click on a greyed-out row does not pick it either.
         if let Some(modal) = app.modals.last_mut() {
-            modal.set_row(1);
+            modal.set_row(2);
         }
-        assert_eq!(start_work(&app).mode, crate::work::WorkMode::Issue);
+        assert_eq!(start_work(&app).mode, crate::work::WorkMode::Feature);
+    }
+
+    fn labelled_issue(number: i64, title: &str, labels: &[&str]) -> crate::models::GitHubIssue {
+        let mut issue = open_issue(number, title);
+        issue.labels = labels
+            .iter()
+            .map(|name| crate::models::GitHubLabel {
+                name: (*name).into(),
+            })
+            .collect();
+        issue
+    }
+
+    fn listed(app: &App) -> Vec<i64> {
+        let picker = start_work(app).picker.as_ref().expect("issues loaded");
+        picker.entries().map(|e| e.issue.number).collect()
+    }
+
+    /// The two modes split the issues by the feature label: a `bug` that is
+    /// also an `enhancement` is a feature, and appears only there.
+    #[tokio::test]
+    async fn issue_and_feature_list_disjoint_issues() {
+        let (_dir, mut app, _) = app_with_issues(vec![
+            labelled_issue(1, "Crash on save", &["bug"]),
+            labelled_issue(2, "Dark mode", &["enhancement"]),
+            labelled_issue(3, "Faster startup", &["bug", "enhancement"]),
+            open_issue(4, "Typo in README"),
+        ]);
+        app.handle_key(key(KeyCode::Char('s')));
+        assert_eq!(listed(&app), vec![1, 4]);
+
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        let flow = start_work(&app);
+        assert_eq!(flow.mode, crate::work::WorkMode::Feature);
+        assert_eq!(flow.step, crate::modal::StartWorkStep::Item);
+        assert_eq!(listed(&app), vec![2, 3]);
+
+        // Back to the mode step and over to `issue` swaps the list back.
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Up));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(listed(&app), vec![1, 4]);
+    }
+
+    /// A feature is named `feat-<n>-<slug>` on `feat/...` and started with the
+    /// plan-first template.
+    #[tokio::test]
+    async fn a_feature_confirms_with_feat_names_and_the_feature_prompt() {
+        let (_dir, mut app, _) = app_with_issues(vec![
+            labelled_issue(42, "Fix login bug", &["bug"]),
+            labelled_issue(7, "Dark mode", &["enhancement"]),
+        ]);
+        app.handle_key(key(KeyCode::Char('s')));
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            app.pending_issue
+                .as_ref()
+                .map(|(i, mode)| (i.number, *mode)),
+            Some((7, crate::work::WorkMode::Feature))
+        );
+        let loaded = branches_loaded(&app);
+        app.handle_event(loaded);
+
+        let confirm = confirm_screen(&app);
+        assert_eq!(confirm.mode, crate::work::WorkMode::Feature);
+        assert_eq!(confirm.name.value(), "feat-7-dark-mode");
+        assert_eq!(confirm.branch.value(), "feat/feat-7-dark-mode");
+        let prompt = confirm.prompt();
+        assert!(prompt.contains("feature from GitHub issue #7"), "{prompt}");
+        assert!(prompt.contains("approved the plan"), "{prompt}");
+    }
+
+    /// The issue card's Create WT stays an `issue` launch until it learns to
+    /// read labels.
+    #[tokio::test]
+    async fn the_issue_card_still_starts_an_issue() {
+        let (_dir, mut app, _) = app_with_issues(Vec::new());
+        app.issues = Some(vec![labelled_issue(7, "Dark mode", &["enhancement"])]);
+
+        app.run_action(Action::CreateFromIssue(0));
+
+        assert_eq!(
+            app.pending_issue.as_ref().map(|(_, mode)| *mode),
+            Some(crate::work::WorkMode::Issue)
+        );
     }
 
     #[tokio::test]
@@ -3846,7 +3934,7 @@ mod tests {
 
         app.handle_key(key(KeyCode::Enter));
         // The confirm screen waits for the branches; the item step stays up.
-        assert_eq!(app.pending_issue.as_ref().map(|i| i.number), Some(7));
+        assert_eq!(app.pending_issue.as_ref().map(|(i, _)| i.number), Some(7));
         assert!(matches!(app.modals.last(), Some(Modal::StartWork(_))));
 
         let loaded = branches_loaded(&app);
@@ -4003,7 +4091,7 @@ mod tests {
 
         app.push_hit(rect(10, 11, 30, 1), pick(1));
         app.handle_mouse(click(12, 11));
-        assert_eq!(app.pending_issue.as_ref().map(|i| i.number), Some(7));
+        assert_eq!(app.pending_issue.as_ref().map(|(i, _)| i.number), Some(7));
     }
 
     /// The flow draws on a real frame: every step renders its title and the

@@ -1615,7 +1615,8 @@ being diffed stops short of the content the case exists to compare.
 **Steps:** with beta selected, `s` → `Enter` (mode `issue`) → type `metrics`
 → `Enter` (issue #298) → `Enter` (Launch, from the focused name field).
 **Expected:** the mode step lists `issue`, `feature` and `pr-review`, the last
-two greyed out with `(not yet)`. The item step lists `#326` and `#298`. The
+greyed out with `(not yet)`. The item step lists `#326` and `#298`, but not the
+`enhancement`-labelled `#77`, which belongs to `feature` (UC-100). The
 confirm screen is titled `Start Work: Issue #298`, names the worktree
 `issue-298-proactive-metrics-coalesced-fire-rows-ov` on
 `fix/issue-298-proactive-metrics-coalesced-fire-rows-ov`, has the base branch,
@@ -1626,6 +1627,21 @@ config, and opens a window named after the worktree running Claude with `-n`
 set to the same name and the prompt as its first message.
 **Fails if:** any step is skipped, the worktree or branch is named otherwise,
 the link is missing from the config, or the window carries a mode prefix.
+
+### UC-100 — Start work for a feature
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** after UC-99, with beta still selected, `s` → `Down` `Enter` (mode
+`feature`) → `Enter` (issue #77) → `Enter` (Launch).
+**Expected:** the item step lists only `#77 Dark mode for the dashboard`, the
+one issue labelled `enhancement`; `#326` and `#298` are not in it. The confirm
+screen is titled `Start Work: Feature #77`, names the worktree
+`feat-77-dark-mode-for-the-dashboard` on
+`feat/feat-77-dark-mode-for-the-dashboard`, and its prompt asks Claude to write
+a plan and change no code until the plan is approved. Launch creates the
+worktree on that branch and records `{"kind": "issue", "number": 77}` as its
+`work_item`.
+**Fails if:** a non-feature issue is listed, the worktree or branch is named
+otherwise, the prompt is the `issue` template, or the link is missing.
 
 ---
 
@@ -1670,10 +1686,10 @@ composite shows a difference not listed above, treat it as a regression.
 | Hand-driven, unscripted | 71–77 | 4 |
 | Flows & mouse | 78–89 | 8 |
 | Visual parity | 90–94 (93 retired) | 1 |
-| Start work | 99 | 1 |
+| Start work | 99–100 | 2 |
 
-**96 numbered use cases, 3 retired with the `?` binding (UC-26, 59, 93) —
-93 active · 52 P0 · 78 executed live · 17 written from source only.**
+**97 numbered use cases, 3 retired with the `?` binding (UC-26, 59, 93) —
+94 active · 53 P0 · 79 executed live · 17 written from source only.**
 
 UC-01–52 were written against the Python build on 2026-08-14 (35 executed).
 UC-53–70 are the automated sweep and have been executed against **both** builds
