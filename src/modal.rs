@@ -5,13 +5,15 @@
 //! three deep: Settings → Custom Buttons → Edit Button. A child that closes with
 //! a value hands it to its parent through [`Modal::receive_child`].
 
+use crate::fuzzy::{self, BranchEntry, Searchable};
 use crate::models::{
     CustomClaudeButton, GitHubIssue, MAX_BUTTON_LABEL_LENGTH, MAX_BUTTON_PREFIX_LENGTH,
     MAX_CLAUDE_COMMAND_LENGTH, Repository, Settings, derive_prefix, validate_button_label,
     validate_button_prefix, validate_claude_command,
 };
+use crate::picker::SearchPicker;
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
-use crate::{fuzzy, util};
+use crate::util;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -264,17 +266,12 @@ impl Modal {
     pub fn set_row(&mut self, row: usize) {
         match self {
             Modal::AddWorktree(m) => {
-                let count = m.matches().len();
-                if count > 0 {
-                    m.search_index = row.min(count - 1);
-                    // Picking a row commits it, the way Enter does from the
-                    // keyboard. Only `search` is read by `selected_branch` and
-                    // `can_create`, so highlighting alone left Create disabled
-                    // and a mouse-only user with no way to choose a branch.
-                    if let Some((branch, _)) = m.matches().into_iter().nth(m.search_index) {
-                        m.search.set_value(branch);
-                    }
-                }
+                m.picker.select_row(row);
+                // Picking a row commits it, the way Enter does from the
+                // keyboard. Only the query is read by `selected_branch` and
+                // `can_create`, so highlighting alone left Create disabled
+                // and a mouse-only user with no way to choose a branch.
+                m.pick_selected();
             }
             Modal::CustomButtons(m) if !m.buttons.is_empty() => {
                 m.selected = row.min(m.buttons.len() - 1);
@@ -417,14 +414,13 @@ pub struct AddWorktreeModal {
     pub repo_id: Uuid,
     pub repo_name: String,
     pub branches: Vec<String>,
-    pub remotes: Vec<String>,
     pub forest_dir: PathBuf,
     pub branch_prefix: String,
     pub name: TextInput,
     pub branch: TextInput,
-    pub search: TextInput,
+    /// The existing-branch search. Its query is the chosen branch.
+    pub picker: SearchPicker<BranchEntry>,
     pub new_branch: bool,
-    pub search_index: usize,
     pub error: String,
     /// One of the `FOCUS_*` constants, or [`AddWorktreeModal::create_index`] /
     /// [`AddWorktreeModal::cancel_index`], whose positions depend on the mode.
@@ -447,18 +443,20 @@ impl AddWorktreeModal {
         forest_dir: PathBuf,
         branch_prefix: String,
     ) -> Self {
+        let entries = branches
+            .iter()
+            .map(|b| BranchEntry::new(b, &remotes))
+            .collect();
         Self {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
             branches,
-            remotes,
             forest_dir,
             branch_prefix: branch_prefix.clone(),
             name: TextInput::new("").with_placeholder("my-feature"),
             branch: TextInput::new("").with_placeholder(format!("{branch_prefix}my-feature")),
-            search: TextInput::new("").with_placeholder("Start typing to search branches..."),
+            picker: SearchPicker::new(entries, "Start typing to search branches..."),
             new_branch: true,
-            search_index: 0,
             error: String::new(),
             focus: Self::FOCUS_NAME,
         }
@@ -488,13 +486,12 @@ impl AddWorktreeModal {
         }
     }
 
-    pub fn matches(&self) -> Vec<(String, f64)> {
-        fuzzy::fuzzy_match_branches(
-            self.search.value(),
-            &self.branches,
-            &self.remotes,
-            util::MAX_DROPDOWN_RESULTS,
-        )
+    /// Commit the highlighted branch into the query, which is what
+    /// `selected_branch` and `can_create` read.
+    fn pick_selected(&mut self) {
+        if let Some(branch) = self.picker.selected().map(|b| b.search_text().to_string()) {
+            self.picker.set_query(&branch);
+        }
     }
 
     /// Sanitised worktree name: alphanumerics, `-` and `_` only.
@@ -518,7 +515,7 @@ impl AddWorktreeModal {
         if self.new_branch {
             self.branch.value().to_string()
         } else {
-            self.search.value().to_string()
+            self.picker.query().value().to_string()
         }
     }
 
@@ -582,39 +579,25 @@ impl AddWorktreeModal {
             return ModalOutcome::None;
         }
         if self.focus == Self::FOCUS_BRANCH {
-            let input = if self.new_branch {
-                &mut self.branch
+            let used = if self.new_branch {
+                edit_input(&mut self.branch, key)
             } else {
-                &mut self.search
+                self.picker.edit_query(key)
             };
-            if edit_input(input, key) {
+            if used {
                 self.error.clear();
-                self.search_index = 0;
                 return ModalOutcome::None;
             }
         }
 
-        // The results list owns Up/Down when it has focus.
+        // The results list owns Up/Down and Enter when it has focus.
         if self.results_index() == Some(self.focus) {
-            let count = self.matches().len();
-            match key.code {
-                KeyCode::Up => {
-                    self.search_index = self.search_index.saturating_sub(1);
-                    return ModalOutcome::None;
-                }
-                KeyCode::Down => {
-                    if count > 0 {
-                        self.search_index = (self.search_index + 1).min(count - 1);
-                    }
-                    return ModalOutcome::None;
-                }
-                KeyCode::Enter => {
-                    if let Some((branch, _)) = self.matches().into_iter().nth(self.search_index) {
-                        self.search.set_value(branch);
-                    }
-                    return ModalOutcome::None;
-                }
-                _ => {}
+            if self.picker.move_selection(key) {
+                return ModalOutcome::None;
+            }
+            if key.code == KeyCode::Enter {
+                self.pick_selected();
+                return ModalOutcome::None;
             }
         }
 
@@ -1656,13 +1639,13 @@ mod tests {
         );
         modal.name.set_value("wt");
         modal.new_branch = false;
-        modal.search.set_value("nope");
+        modal.picker.set_query("nope");
         assert!(!modal.can_create());
         modal.focus = modal.create_index();
         modal.handle_key(key(KeyCode::Enter));
         assert!(modal.error.contains("does not exist"));
 
-        modal.search.set_value("main");
+        modal.picker.set_query("main");
         assert!(modal.can_create());
         assert!(matches!(
             modal.handle_key(key(KeyCode::Enter)),
@@ -1671,7 +1654,7 @@ mod tests {
     }
 
     /// Clicking a branch row has to *pick* the branch, not just light it up:
-    /// `can_create` reads `search`, so a mouse-only user was left with Create
+    /// `can_create` reads the query, so a mouse-only user was left with Create
     /// permanently disabled and no way to choose.
     #[test]
     fn clicking_a_branch_row_selects_that_branch() {
@@ -1687,7 +1670,11 @@ mod tests {
             m.name.set_value("wt");
             m.new_branch = false;
             assert!(!m.can_create(), "nothing is picked yet");
-            m.matches()[1].0.clone()
+            m.picker
+                .matches()
+                .nth(1)
+                .map(|b| b.search_text().to_string())
+                .unwrap()
         } else {
             panic!("add worktree modal expected")
         };

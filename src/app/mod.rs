@@ -3149,7 +3149,11 @@ mod tests {
 
         match app.modals.last() {
             Some(Modal::AddWorktree(m)) => {
-                assert_eq!(m.search_index, 2, "the clicked row was not selected");
+                assert_eq!(
+                    m.selected_branch(),
+                    "feat/other",
+                    "the clicked row was not selected"
+                );
                 assert_eq!(m.focus, 3, "focus did not move to the results list");
             }
             _ => panic!("add-worktree modal expected"),

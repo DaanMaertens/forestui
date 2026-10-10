@@ -7,14 +7,16 @@
 //! struct rather than repeating a number, so there is one place to change.
 
 use crate::app::{App, Direction, HitTarget, ModalClick};
+use crate::fuzzy::{self, Searchable};
 use crate::modal::{
     AddRepositoryModal, AddWorktreeModal, ClaudeIntegrationModal, ConfirmModal,
     CreateFromIssueModal, CustomButtonsModal, EDITORS, EditButtonModal, Modal, RenameSessionModal,
     SPINNER, SettingsModal, ThemePickerModal,
 };
+use crate::picker::SearchPicker;
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
-use crate::{fuzzy, util};
+use crate::util;
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Modifier, Style};
@@ -424,12 +426,11 @@ fn add_repository(frame: &mut Frame, modal: &AddRepositoryModal, area: Rect, hit
 // ------------------------------------------------------------- Add worktree
 
 fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &mut Hits) {
-    let matches = modal.matches();
     // The dropdown only exists in existing-branch mode: a count line plus rows.
     let dropdown = if modal.new_branch {
         0
     } else {
-        matches.len().min(DROPDOWN_ROWS) + 1
+        modal.picker.matches().count().min(DROPDOWN_ROWS) + 1
     };
     // Repo, label, input, preview, label, toggle, input, error, gap, buttons.
     let rect = widgets::centered_rect(WIDTH, CHROME + 18 + dropdown as u16, area);
@@ -476,7 +477,7 @@ fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &
     let branch_input = if modal.new_branch {
         &modal.branch
     } else {
-        &modal.search
+        modal.picker.query()
     };
     column.input(
         frame,
@@ -486,36 +487,25 @@ fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &
         AddWorktreeModal::FOCUS_BRANCH,
     );
     if !modal.new_branch {
-        let query = modal.search.value();
         column.text(
             frame,
-            match_count(query, matches.len(), modal.branches.len()),
+            match_count(&modal.picker, "branches"),
             theme::muted(),
         );
 
         // Leave room for the error line, the gap and the buttons below the list.
         let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
-        let visible = DROPDOWN_ROWS.min(space);
-        let first = modal.search_index.saturating_sub(visible.saturating_sub(1));
-        // The list is one focus stop, so every row carries the same index.
         let results = AddWorktreeModal::FOCUS_RESULTS;
-        let focused = modal.focus == results;
-        for (offset, (branch, _)) in matches.iter().skip(first).take(visible).enumerate() {
-            let selected = first + offset == modal.search_index;
-            let style = match (selected, focused) {
-                (true, true) => theme::cursor(),
-                (true, false) => theme::cursor_unfocused(),
-                (false, _) => theme::primary(),
-            };
-            column.row(
-                frame,
-                hits,
-                branch_line(branch, query, style),
-                style,
-                results,
-                first + offset,
-            );
-        }
+        picker_results(
+            frame,
+            &mut column,
+            hits,
+            &modal.picker,
+            DROPDOWN_ROWS.min(space),
+            results,
+            modal.focus == results,
+            |branch, query, style| branch_line(branch.search_text(), query, style),
+        );
     }
 
     column.text(frame, modal.error.clone(), theme::destructive());
@@ -550,13 +540,50 @@ fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &
     );
 }
 
-/// The dropdown's count line, worded exactly as `branch_search.py` worded it.
-fn match_count(query: &str, shown: usize, total: usize) -> String {
-    if query.trim().is_empty() {
+/// A picker's visible rows, scrolled to keep the selection in view. The list
+/// is one focus stop, so every row carries the same `focus_index`; `line`
+/// draws one entry given the query, so each list decides how a row looks.
+#[allow(clippy::too_many_arguments)]
+fn picker_results<T: Searchable>(
+    frame: &mut Frame,
+    column: &mut Column,
+    hits: &mut Hits,
+    picker: &SearchPicker<T>,
+    visible: usize,
+    focus_index: usize,
+    focused: bool,
+    line: impl Fn(&T, &str, Style) -> Line<'static>,
+) {
+    let query = picker.query().value();
+    let selected_index = picker.selected_index();
+    let first = selected_index.saturating_sub(visible.saturating_sub(1));
+    for (offset, entry) in picker.matches().skip(first).take(visible).enumerate() {
+        let selected = first + offset == selected_index;
+        let style = match (selected, focused) {
+            (true, true) => theme::cursor(),
+            (true, false) => theme::cursor_unfocused(),
+            (false, _) => theme::primary(),
+        };
+        column.row(
+            frame,
+            hits,
+            line(entry, query, style),
+            style,
+            focus_index,
+            first + offset,
+        );
+    }
+}
+
+/// A picker's count line, worded exactly as `branch_search.py` worded it.
+fn match_count<T: Searchable>(picker: &SearchPicker<T>, noun: &str) -> String {
+    let shown = picker.matches().count();
+    let total = picker.entry_count();
+    if picker.query().value().trim().is_empty() {
         if shown < total {
-            format!("{shown} of {total} branches")
+            format!("{shown} of {total} {noun}")
         } else {
-            format!("{total} branches")
+            format!("{total} {noun}")
         }
     } else if shown == 0 {
         "No matches".to_string()
@@ -1478,7 +1505,7 @@ mod tests {
         let Modal::AddWorktree(mut modal) = worktree_modal(false) else {
             panic!("wrong modal");
         };
-        modal.search.set_value("main");
+        modal.picker.set_query("main");
         modal.focus = AddWorktreeModal::FOCUS_RESULTS;
         let screen = render(&Modal::AddWorktree(modal), 100, 40);
         // Two of the three branches match "main", so the count line says so.
