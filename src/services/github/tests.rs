@@ -29,11 +29,17 @@ fn signal_killed_process_is_a_plain_failure() {
     assert_eq!(code, KILLED);
 }
 
+// The cache tests below each hold their own `IssueCache`. The process-wide one
+// is shared by every test thread, so a test that read its generation could see
+// another test's invalidation bump it before its own store landed — which made
+// `empty_answers_are_cached_as_already_stale` fail now and then.
+
 /// The synchronous peek is what lets the render thread paint cached issues
 /// on selection change instead of flashing "Loading…" (#29).
 #[test]
 fn peek_reports_freshness_without_io() {
-    assert!(peek_issues("/nowhere/never-seen").is_none());
+    let mut cache = IssueCache::default();
+    assert!(cache.peek("/nowhere/never-seen").is_none());
 
     let issue: GitHubIssue = serde_json::from_str(
         r#"{"number":1,"title":"T","state":"OPEN","url":"https://x/1",
@@ -42,22 +48,30 @@ fn peek_reports_freshness_without_io() {
     )
     .unwrap();
 
-    seed_cache_for_test("/repo/fresh", vec![issue.clone()], Utc::now());
-    let (issues, fresh) = peek_issues("/repo/fresh").expect("cached");
+    cache.store_if_current(
+        cache.generation,
+        "/repo/fresh",
+        std::slice::from_ref(&issue),
+        true,
+    );
+    let (issues, fresh) = cache.peek("/repo/fresh").expect("cached");
     assert_eq!(issues.len(), 1);
     assert!(fresh);
 
     let old = Utc::now() - chrono::Duration::seconds(CACHE_TTL_SECONDS + 10);
-    seed_cache_for_test("/repo/stale", vec![issue], old);
-    let (_, fresh) = peek_issues("/repo/stale").expect("cached");
+    cache.entries.insert(
+        "/repo/stale".into(),
+        Cached {
+            issues: vec![issue],
+            fetched_at: old,
+        },
+    );
+    let (_, fresh) = cache.peek("/repo/stale").expect("cached");
     assert!(!fresh, "an expired entry must read as stale");
 
-    invalidate_cache("/repo/fresh");
-    assert!(peek_issues("/repo/fresh").is_none());
-    assert!(
-        peek_issues("/repo/stale").is_some(),
-        "targeted invalidation"
-    );
+    cache.invalidate("/repo/fresh");
+    assert!(cache.peek("/repo/fresh").is_none());
+    assert!(cache.peek("/repo/stale").is_some(), "targeted invalidation");
 }
 
 /// A fetch that started before an invalidation must not store afterwards:
@@ -65,33 +79,27 @@ fn peek_reports_freshness_without_io() {
 /// refresh the user just asked for.
 #[test]
 fn an_invalidation_fences_out_older_fetches() {
-    let before = state().lock().unwrap().generation;
-    invalidate_cache("/repo/fenced");
-    store_if_current(before, "/repo/fenced", Vec::new(), true);
+    let mut cache = IssueCache::default();
+    let before = cache.generation;
+    cache.invalidate("/repo/fenced");
+    cache.store_if_current(before, "/repo/fenced", &[], true);
     assert!(
-        peek_issues("/repo/fenced").is_none(),
+        cache.peek("/repo/fenced").is_none(),
         "a pre-invalidation fetch must not repopulate the cache"
     );
 
-    // Re-read and retry: another test may invalidate concurrently, and
-    // only a store with the *current* generation may land.
-    for _ in 0..10 {
-        let current = state().lock().unwrap().generation;
-        store_if_current(current, "/repo/fenced", Vec::new(), true);
-        if peek_issues("/repo/fenced").is_some() {
-            break;
-        }
-    }
-    assert!(peek_issues("/repo/fenced").is_some());
+    // A fetch that started after the invalidation stores normally.
+    cache.store_if_current(cache.generation, "/repo/fenced", &[], true);
+    assert!(cache.peek("/repo/fenced").is_some());
 }
 
 /// Negative answers render instantly but re-check on the next visit — a
 /// transient failure must not read as a confident fresh "No issues found".
 #[test]
 fn empty_answers_are_cached_as_already_stale() {
-    let generation = state().lock().unwrap().generation;
-    store_if_current(generation, "/repo/negative", Vec::new(), false);
-    let (issues, fresh) = peek_issues("/repo/negative").expect("cached");
+    let mut cache = IssueCache::default();
+    cache.store_if_current(cache.generation, "/repo/negative", &[], false);
+    let (issues, fresh) = cache.peek("/repo/negative").expect("cached");
     assert!(issues.is_empty());
     assert!(!fresh, "a negative answer must not count as fresh");
 }
