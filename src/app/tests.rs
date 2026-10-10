@@ -696,6 +696,29 @@ async fn a_scan_prunes_worktrees_git_no_longer_lists() {
     );
 }
 
+/// The wiring half of the in-flight rule: WorktreeSync names the worktrees
+/// a listing must leave alone, and the fold has to pass them on to the
+/// reconcile. git may already have deleted the directory, but the removal's
+/// own fold owns both the state change and the toast.
+#[tokio::test]
+async fn a_scan_leaves_a_worktree_with_a_change_in_flight_alone() {
+    let (_dir, mut app) = app_with_fixture();
+    let repo_id = app.state.repositories()[0].id;
+    let worktree_id = app.state.repositories()[0].worktrees[0].id;
+    let _removal = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
+
+    let mut listed = scan_listing(&app, &[]);
+    let removed_path = app.state.repositories()[0].worktrees[0].path.clone();
+    listed.retain(|info| info.path != removed_path);
+
+    let event = scanned(&mut app, repo_id, listed);
+    app.handle_event(event);
+    assert!(
+        app.state.find_worktree(worktree_id).is_some(),
+        "the scan pruned an entry whose removal fold still owns it"
+    );
+}
+
 /// Focus return and the periodic tick are the standing triggers — the
 /// promise that an agent's worktree appears without being asked for.
 /// A minimal session card for the refresh tests.
