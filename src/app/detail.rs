@@ -30,12 +30,16 @@ pub enum Action {
     ClaudeCustom(usize),
     ResumeSession(usize),
     ResumeYolo(usize),
-    ResumeCustom { button: usize, session: usize },
+    ResumeCustom {
+        button: usize,
+        session: usize,
+    },
     RenameSession(usize),
     TogglePinSession(usize),
     DeleteSession(usize),
     RefreshIssues,
-    CreateFromIssue(usize),
+    /// An issue card's Start work: the confirm screen for that issue.
+    StartWorkOnIssue(usize),
     RemoveRepository,
     Archive,
     Unarchive,
@@ -648,7 +652,7 @@ fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
         }
         // The button floats beside the text instead of taking a full-width
         // band, same as the session cards: title, a blank, the meta on the
-        // left; Create WT's three rows share those same lines on the right.
+        // left; Start work's three rows share those same lines on the right.
         nodes.push(DetailNode::CardBody {
             left: vec![
                 vec![(
@@ -663,8 +667,8 @@ fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
                 vec![(meta, theme::muted())],
             ],
             rows: vec![vec![ControlSpec::new(
-                Action::CreateFromIssue(index),
-                "Create WT",
+                Action::StartWorkOnIssue(index),
+                "Start work",
                 theme::Variant::Normal,
             )]],
         });

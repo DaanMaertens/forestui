@@ -3074,7 +3074,7 @@ mod tests {
         app.push_hit(rect(40, 5, 20, 1), HitTarget::DetailItem(index));
 
         // Issues finish loading before the click is handled; the live list
-        // grows and `index` would now point at CreateFromIssue(0).
+        // grows and `index` would now point at StartWorkOnIssue(0).
         let path = app
             .state
             .selected_repository()
@@ -3093,12 +3093,12 @@ mod tests {
         });
         assert_eq!(
             app.detail_items().get(index),
-            Some(&DetailItem::Action(Action::CreateFromIssue(0))),
+            Some(&DetailItem::Action(Action::StartWorkOnIssue(0))),
             "precondition: the live list did remap the index"
         );
 
         app.handle_mouse(click(45, 5));
-        // Remove Repository opens the confirm modal; CreateFromIssue would
+        // Remove Repository opens the confirm modal; StartWorkOnIssue would
         // instead have started a branch load with no modal.
         assert!(
             matches!(app.modals.last(), Some(Modal::Confirm(_))),
@@ -3922,19 +3922,56 @@ mod tests {
         assert!(prompt.contains("approved the plan"), "{prompt}");
     }
 
-    /// The issue card's Create WT stays an `issue` launch until it learns to
-    /// read labels.
+    /// Every issue card carries Start work, and Create WT is gone.
     #[tokio::test]
-    async fn the_issue_card_still_starts_an_issue() {
+    async fn the_issue_card_offers_start_work() {
         let (_dir, mut app, _) = app_with_issues(Vec::new());
-        app.issues = Some(vec![labelled_issue(7, "Dark mode", &["enhancement"])]);
+        app.sessions = Some(Vec::new());
+        app.issues = Some(vec![
+            labelled_issue(42, "Fix login bug", &["bug"]),
+            labelled_issue(7, "Dark mode", &["enhancement"]),
+        ]);
 
-        app.run_action(Action::CreateFromIssue(0));
+        let items = app.detail_items();
+        assert!(items.contains(&DetailItem::Action(Action::StartWorkOnIssue(0))));
+        assert!(items.contains(&DetailItem::Action(Action::StartWorkOnIssue(1))));
+        let screen = rendered(&mut app);
+        assert!(!screen.contains("Create WT"), "{screen}");
+        // The pane's own Start work, then the first card's — the second card
+        // is below the fold of the test terminal.
+        assert_eq!(screen.matches("Start work").count(), 2, "{screen}");
+    }
 
-        assert_eq!(
-            app.pending_issue.as_ref().map(|(_, mode)| *mode),
-            Some(crate::work::WorkMode::Issue)
-        );
+    /// The card skips the mode and item steps: the confirm screen opens on
+    /// its own, in the mode the issue's labels put it in.
+    #[tokio::test]
+    async fn the_issue_card_opens_the_confirm_screen_in_its_mode() {
+        let (_dir, mut app, _) = app_with_issues(Vec::new());
+        app.issues = Some(vec![
+            labelled_issue(42, "Fix login bug", &["bug"]),
+            labelled_issue(7, "Dark mode", &["Enhancement"]),
+        ]);
+
+        app.run_action(Action::StartWorkOnIssue(1));
+        let loaded = branches_loaded(&app);
+        app.handle_event(loaded);
+
+        let confirm = confirm_screen(&app);
+        assert_eq!(confirm.mode, crate::work::WorkMode::Feature);
+        assert_eq!(confirm.issue_number, 7);
+        assert_eq!(confirm.name.value(), "feat-7-dark-mode");
+        assert!(!confirm.has_parent, "nothing beneath to go back to");
+        assert_eq!(app.modals.len(), 1);
+        app.handle_key(key(KeyCode::Esc));
+        assert!(app.modals.is_empty());
+
+        app.run_action(Action::StartWorkOnIssue(0));
+        let loaded = branches_loaded(&app);
+        app.handle_event(loaded);
+
+        let confirm = confirm_screen(&app);
+        assert_eq!(confirm.mode, crate::work::WorkMode::Issue);
+        assert_eq!(confirm.name.value(), "issue-42-fix-login-bug");
     }
 
     #[tokio::test]
@@ -4347,6 +4384,29 @@ mod tests {
 
         assert!(
             !notified(&app).iter().any(|n| n.contains("claude:demo:wt")),
+            "{:?}",
+            notified(&app)
+        );
+    }
+
+    /// The card keeps one work item to one worktree too: a started issue
+    /// jumps to its worktree instead of opening the confirm screen.
+    #[tokio::test]
+    async fn the_issue_card_jumps_to_a_started_issue() {
+        let (_dir, mut app, _) = app_with_issues(Vec::new());
+        app.issues = Some(two_issues());
+        let (beta, path) = link_worktree(&mut app, "beta", 7);
+        let worktrees = app.state.repositories()[0].worktrees.len();
+
+        app.run_action(Action::StartWorkOnIssue(1));
+
+        assert!(app.modals.is_empty(), "no confirm screen: {:?}", app.modals);
+        assert!(app.pending_issue.is_none(), "no branch load");
+        assert_eq!(app.state.selection.worktree_id, Some(beta));
+        assert_eq!(app.meta.path, path);
+        assert_eq!(app.state.repositories()[0].worktrees.len(), worktrees);
+        assert!(
+            notified(&app).contains(&"Issue #7 is already in worktree 'beta'"),
             "{:?}",
             notified(&app)
         );

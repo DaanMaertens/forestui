@@ -456,7 +456,7 @@ key and `Focus` is ignored — that is the whole of Textual's `ModalScreen` sema
 pub enum Modal {
     AddRepository(AddRepoForm),
     AddWorktree(AddWorktreeForm),
-    CreateFromIssue(IssueForm),
+    StartWorkConfirm(StartWorkConfirmForm),
     Settings(SettingsForm),
     CustomButtons(ButtonsForm),
     EditButton(EditButtonForm),
@@ -487,7 +487,7 @@ pub enum Action {
     ClaudeNew, ClaudeYolo, ClaudeCustom(usize),
     ResumeSession(String), ResumeYolo(String), ResumeCustom(usize, String),
     Sync, AddWorktree, RemoveRepo, Archive, Unarchive, Delete,
-    CreateFromIssue(u64), RefreshIssues,
+    StartWorkOnIssue(usize), RefreshIssues,
 }
 pub fn detail_actions(app: &App) -> Vec<(Action, Rect)>;   // built during layout, cached per frame
 ```
@@ -531,7 +531,7 @@ Textual needs — "who sent this?" — is irrelevant when there is one `App`.
 | `ContinueClaude*Session(session_id, path[, button])` | `Action::ResumeSession(id)` / `ResumeYolo(id)` / `ResumeCustom(i, id)` |
 | `Sidebar.RepositorySelected` / `.WorktreeSelected` | direct mutation of `app.selection` in the key handler, then `app.spawn_detail_fetch()` |
 | `Sidebar.AddRepositoryRequested`, `.AddWorktreeRequested` | `app.modals.push(Modal::AddRepository(..))` |
-| `RepositoryDetail.SyncRequested` / `.RemoveRepositoryRequested` / `.RefreshIssuesRequested` / `.CreateWorktreeFromIssue` | `Action::Sync` / `RemoveRepo` / `RefreshIssues` / `CreateFromIssue(n)` |
+| `RepositoryDetail.SyncRequested` / `.RemoveRepositoryRequested` / `.RefreshIssuesRequested` / `.CreateWorktreeFromIssue` | `Action::Sync` / `RemoveRepo` / `RefreshIssues` / `StartWorkOnIssue(n)` (opens Start work's confirm screen) |
 | `WorktreeDetail.Archive/Unarchive/Delete/Rename*/SyncRequested` | `Action::Archive` / `Unarchive` / `Delete` / rename via the detail-pane inputs |
 | `*Modal.WorktreeCreated` / `.RepositoryAdded` / `.FetchRequested` | handled when the modal pops; `FetchRequested` spawns and returns `AppEvent::Branches { after_fetch: true }` |
 | `BranchSearchInput.Changed` / `.BranchSelected` | local to the modal's form state; no event needed |

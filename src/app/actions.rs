@@ -13,10 +13,10 @@ use crate::modal::{
     StartWorkConfirmModal, StartWorkModal,
 };
 use crate::modal::{IntegrationAction, ModalOutcome};
-use crate::models::{CustomClaudeButton, Repository, WorkItemLink, Worktree};
+use crate::models::{CustomClaudeButton, GitHubIssue, Repository, WorkItemLink, Worktree};
 use crate::services::live::LivePlace;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
-use crate::work::WorkMode;
+use crate::work::{self, WorkMode};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -141,19 +141,7 @@ impl App {
                     return;
                 };
                 let repo_id = flow.repo_id;
-                // One work item, one worktree: an item already started goes to
-                // its worktree instead of the confirm screen. Checked against
-                // the state now, not the marker the list drew at open.
-                let link = WorkItemLink::Issue {
-                    number: issue.number,
-                };
-                if let Some(worktree) = self.state.linked_worktree(repo_id, &link) {
-                    let worktree_id = worktree.id;
-                    self.jump_to_worktree(repo_id, worktree_id, issue.number);
-                    return;
-                }
-                self.pending_issue = Some((*issue, mode));
-                self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
+                self.start_work_on_issue(repo_id, *issue, mode);
             }
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
@@ -473,6 +461,23 @@ impl App {
             self.notify(format!("Window {window_name} is gone"), Severity::Warning);
             self.scan_live_sessions();
         }
+    }
+
+    /// Start work on a picked issue: the confirm screen once the branches
+    /// load, or — one work item, one worktree — a jump to the worktree it was
+    /// already started in. Checked against the state now, not the marker the
+    /// list drew at open.
+    fn start_work_on_issue(&mut self, repo_id: Uuid, issue: GitHubIssue, mode: WorkMode) {
+        let link = WorkItemLink::Issue {
+            number: issue.number,
+        };
+        if let Some(worktree) = self.state.linked_worktree(repo_id, &link) {
+            let worktree_id = worktree.id;
+            self.jump_to_worktree(repo_id, worktree_id, issue.number);
+            return;
+        }
+        self.pending_issue = Some((issue, mode));
+        self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
     }
 
     /// Go to the worktree an issue was already started in, closing Start work.
@@ -804,7 +809,7 @@ impl App {
                     self.fetch_issues();
                 }
             }
-            Action::CreateFromIssue(index) => {
+            Action::StartWorkOnIssue(index) => {
                 // The issue is captured here rather than looked up again when
                 // the branches land: `issues` is replaced wholesale by every
                 // refresh and by selecting another repository, so an index held
@@ -814,8 +819,8 @@ impl App {
                 if let Some(repo_id) = self.state.selection.repository_id
                     && let Some(issue) = self.issues.as_ref().and_then(|i| i.get(index)).cloned()
                 {
-                    self.pending_issue = Some((issue, WorkMode::Issue));
-                    self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
+                    let mode = work::mode_for(&issue, work::DEFAULT_FEATURE_LABELS);
+                    self.start_work_on_issue(repo_id, issue, mode);
                 }
             }
             Action::RemoveRepository | Action::Delete => self.action_delete(),

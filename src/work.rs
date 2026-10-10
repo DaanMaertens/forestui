@@ -66,22 +66,28 @@ pub fn is_feature(issue: &GitHubIssue, feature_labels: &[&str]) -> bool {
     })
 }
 
+/// The mode an issue belongs to: `feature` if it carries a feature label —
+/// which wins over anything else it carries, so a `bug` + `enhancement`
+/// issue is a feature — and `issue` otherwise. An issue card starts in it
+/// directly, and [`issues_for`] lists by it, so the two never disagree.
+pub fn mode_for(issue: &GitHubIssue, feature_labels: &[&str]) -> WorkMode {
+    if is_feature(issue, feature_labels) {
+        WorkMode::Feature
+    } else {
+        WorkMode::Issue
+    }
+}
+
 /// The issues a mode lists. Every issue lands in exactly one of `issue` and
-/// `feature`: a feature label wins over anything else it carries, so a
-/// `bug` + `enhancement` issue is a feature. `pr-review` lists no issues.
+/// `feature`; `pr-review` lists no issues.
 pub fn issues_for(
     mode: WorkMode,
     issues: &[GitHubIssue],
     feature_labels: &[&str],
 ) -> Vec<GitHubIssue> {
-    let want_feature = match mode {
-        WorkMode::Issue => false,
-        WorkMode::Feature => true,
-        WorkMode::PrReview => return Vec::new(),
-    };
     issues
         .iter()
-        .filter(|issue| is_feature(issue, feature_labels) == want_feature)
+        .filter(|issue| mode_for(issue, feature_labels) == mode)
         .cloned()
         .collect()
 }
@@ -262,6 +268,30 @@ mod tests {
         assert_eq!(
             numbers(&issues_for(WorkMode::Feature, &issues, &labels)),
             vec![1, 2]
+        );
+    }
+
+    /// An issue picked without the mode step starts in the list it would
+    /// have been picked from.
+    #[test]
+    fn an_issue_starts_in_the_mode_that_lists_it() {
+        let issues = vec![labelled(1, &["bug"]), labelled(2, &["bug", "Enhancement"])];
+        for issue in &issues {
+            let mode = mode_for(issue, DEFAULT_FEATURE_LABELS);
+            let listed = issues_for(mode, &issues, DEFAULT_FEATURE_LABELS);
+            assert!(
+                numbers(&listed).contains(&issue.number),
+                "#{}",
+                issue.number
+            );
+        }
+        assert_eq!(
+            mode_for(&issues[0], DEFAULT_FEATURE_LABELS),
+            WorkMode::Issue
+        );
+        assert_eq!(
+            mode_for(&issues[1], DEFAULT_FEATURE_LABELS),
+            WorkMode::Feature
         );
     }
 

@@ -35,3 +35,9 @@ PASS UC-101    linked-item-marked                             expected=yes      
 PASS UC-101    switched-to-claude-window                      expected=yes                          actual=yes
 PASS UC-101    nothing-created                                expected=4                            actual=4
 PASS UC-101    worktree-selected                              expected=yes                          actual=yes
+PASS UC-102    card-offers-start-work                         expected=no                           actual=no
+PASS UC-102    straight-to-confirm                            expected=yes                          actual=yes
+PASS UC-102    mode-step-skipped                              expected=no                           actual=no
+PASS UC-102    cancel-closes-it                               expected=no                           actual=no
+PASS UC-102    started-card-jumps                             expected=yes                          actual=yes
+PASS UC-102    nothing-created                                expected=4                            actual=4
