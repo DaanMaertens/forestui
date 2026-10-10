@@ -11,7 +11,7 @@ use crate::models::{
     validate_button_prefix, validate_claude_command,
 };
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
-use crate::util;
+use crate::{fuzzy, util};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -489,7 +489,7 @@ impl AddWorktreeModal {
     }
 
     pub fn matches(&self) -> Vec<(String, f64)> {
-        util::fuzzy_match_branches(
+        fuzzy::fuzzy_match_branches(
             self.search.value(),
             &self.branches,
             &self.remotes,
@@ -737,7 +737,7 @@ impl CreateFromIssueModal {
         if value.is_empty() {
             return None;
         }
-        util::fuzzy_match_branches(value, &self.branches, &self.remotes, 1)
+        fuzzy::fuzzy_match_branches(value, &self.branches, &self.remotes, 1)
             .into_iter()
             .next()
             .map(|(b, _)| b)

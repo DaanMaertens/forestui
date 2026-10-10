@@ -3,6 +3,7 @@
 mod app;
 mod cli;
 mod event;
+mod fuzzy;
 mod modal;
 mod models;
 mod services;

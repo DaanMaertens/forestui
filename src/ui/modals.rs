@@ -14,7 +14,7 @@ use crate::modal::{
 };
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
-use crate::util;
+use crate::{fuzzy, util};
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Modifier, Style};
@@ -572,7 +572,7 @@ fn branch_line(branch: &str, query: &str, style: Style) -> Line<'static> {
     let mut spans = vec![Span::styled(" ", style)];
     // The offsets come from a lowercased copy, so they can land mid-character
     // for exotic casing; fall back to a plain row rather than panicking.
-    match util::highlight_range(query, branch)
+    match fuzzy::highlight_range(query, branch)
         .filter(|(start, end)| branch.is_char_boundary(*start) && branch.is_char_boundary(*end))
     {
         Some((start, end)) => {
