@@ -5,6 +5,7 @@
 //! Everything lands in one `mpsc::UnboundedReceiver<AppEvent>`, so the main loop
 //! stays a plain `while let Some(event) = rx.recv().await`.
 
+use crate::app::worktree_sync::{ChangeTicket, CreateTicket, ScanTicket};
 use crate::models::{ClaudeSession, GitHubIssue, Worktree};
 use crate::services::github::AuthStatus;
 use chrono::{DateTime, Utc};
@@ -127,7 +128,7 @@ pub enum AppEvent {
     /// themselves, so there is exactly one writer and a user action mid-flight
     /// cannot clobber a task's save (or the other way around).
     WorktreeAdded {
-        repo_id: Uuid,
+        create: CreateTicket,
         worktree: Box<Worktree>,
         /// Start Claude in the new worktree with this as its first message.
         /// Launched by the fold, so a result it drops starts nothing.
@@ -135,6 +136,10 @@ pub enum AppEvent {
         /// That launch uses the built-in YOLO flag.
         yolo: bool,
     },
+    /// A create task ended without a worktree. The error itself was already
+    /// notified; this hands the ticket back so the create stops holding back
+    /// its repository's scans.
+    WorktreeAddFailed { create: CreateTicket },
     /// The editor opened on Start work's prompt closed. `Ok` is the text it
     /// left; the fold applies it only to the confirm screen it was opened
     /// from, if that is still on top.
@@ -150,38 +155,37 @@ pub enum AppEvent {
     /// "there are none" and prune every tracked worktree.
     /// Single-writer for the same reason as [`AppEvent::WorktreeAdded`].
     ///
-    /// `epoch` is the repository's mutation counter at the moment the scan
-    /// was spawned. A create, remove, or rename folding while git ran bumps
-    /// the counter, and the fold discards a mismatched result: that listing
-    /// describes a state the config has already moved past, and reconciling
-    /// against it would revert the newer change.
+    /// `scan` goes back to [`WorktreeSync`](crate::app::worktree_sync::WorktreeSync),
+    /// which decides whether the listing is still current enough to reconcile.
     WorktreesScanned {
-        repo_id: Uuid,
-        epoch: u64,
+        scan: ScanTicket,
         listed: Option<Vec<crate::services::git::WorktreeInfo>>,
     },
     /// A rename task ended without renaming (the target existed, or the move
     /// itself failed). Exists so the fold can release the rename's
     /// reconcile-protection; the error itself was already notified.
-    WorktreeRenameAborted { worktree_id: Uuid },
+    WorktreeRenameAborted { change: ChangeTicket },
     /// A worktree's directory was renamed on disk; fold the new name and path
     /// into state. Single-writer for the same reason as
     /// [`AppEvent::WorktreeAdded`].
     WorktreeRenamed {
-        worktree_id: Uuid,
+        change: ChangeTicket,
         name: String,
         path: String,
     },
     /// A worktree's branch was renamed by git. Folded only on success: the
     /// config used to take the new name before `git branch -m` ran and keep it
     /// when the rename failed, leaving a branch recorded that does not exist.
-    WorktreeBranchRenamed { worktree_id: Uuid, branch: String },
+    WorktreeBranchRenamed {
+        change: ChangeTicket,
+        branch: String,
+    },
     /// A worktree removal attempt finished. Success is folded into state on
     /// the main loop (single-writer, same reason as [`AppEvent::WorktreeAdded`]);
     /// a dirty refusal opens the second confirmation; an error surfaces git's
     /// message and leaves the entry in place.
     WorktreeRemoveResult {
-        worktree_id: Uuid,
+        change: ChangeTicket,
         outcome: Result<crate::services::git::RemoveOutcome, String>,
     },
     /// Reload the detail pane only.

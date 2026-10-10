@@ -279,7 +279,7 @@ fn worktree(nodes: &mut Vec<DetailNode>, app: &App) {
     let branch = selected.map(|(_, w)| w.branch.as_str()).unwrap_or_default();
     let archived = selected.map(|(_, w)| w.is_archived).unwrap_or(false);
     let deleting = selected
-        .map(|(_, w)| app.removals_in_flight.contains(&w.id))
+        .map(|(_, w)| app.worktree_sync.is_removing(w.id))
         .unwrap_or(false);
 
     nodes.push(DetailNode::Section("WORKTREE"));

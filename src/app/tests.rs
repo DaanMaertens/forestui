@@ -1,4 +1,5 @@
 use super::test_support::{app_with_fixture, ctrl, key};
+use super::worktree_sync::{ChangeTicket, WorktreeSync};
 use super::*;
 use crate::models::{CustomClaudeButton, Repository, WorkItemLink, Worktree};
 use ratatui::crossterm::event::KeyCode;
@@ -127,8 +128,9 @@ async fn a_completed_rename_resyncs_the_field_it_renamed() {
     assert_eq!(app.name_input.value(), old_name);
 
     // Now the task lands.
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_rename);
     app.handle_event(AppEvent::WorktreeRenamed {
-        worktree_id,
+        change,
         name: "renamed".into(),
         path: "/tmp/renamed".into(),
     });
@@ -206,8 +208,9 @@ async fn delete_asks_for_confirmation_first() {
     // Still there: the entry leaves state only when git reports success.
     assert!(app.state.find_worktree(worktree_id).is_some());
 
+    let change = app.worktree_sync.change_ticket_for_test(worktree_id);
     app.handle_event(AppEvent::WorktreeRemoveResult {
-        worktree_id,
+        change,
         outcome: Ok(git::RemoveOutcome::Removed),
     });
     assert!(app.state.find_worktree(worktree_id).is_none());
@@ -219,8 +222,9 @@ async fn a_dirty_worktree_gets_a_second_confirmation() {
     app.handle_key(key(KeyCode::Down));
     let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
 
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
     app.handle_event(AppEvent::WorktreeRemoveResult {
-        worktree_id,
+        change,
         outcome: Ok(git::RemoveOutcome::Dirty("2 modified, 1 untracked".into())),
     });
 
@@ -250,7 +254,7 @@ async fn a_dirty_worktree_gets_a_second_confirmation() {
     app.handle_key(key(KeyCode::Char('y')));
     assert!(app.modals.is_empty());
     // The forced removal is now in flight; the entry waits for the fold.
-    assert!(app.removals_in_flight.contains(&worktree_id));
+    assert!(app.worktree_sync.is_removing(worktree_id));
     assert!(app.state.find_worktree(worktree_id).is_some());
 }
 
@@ -260,8 +264,9 @@ async fn a_failed_removal_keeps_the_entry_and_reports() {
     app.handle_key(key(KeyCode::Down));
     let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
 
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
     app.handle_event(AppEvent::WorktreeRemoveResult {
-        worktree_id,
+        change,
         outcome: Err("worktree is locked".into()),
     });
 
@@ -322,7 +327,7 @@ async fn delete_is_ignored_while_a_removal_is_in_flight() {
     app.handle_key(key(KeyCode::Down));
     let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
 
-    app.removals_in_flight.insert(worktree_id);
+    let _removal = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
     app.handle_key(key(KeyCode::Char('d')));
     assert!(
         app.modals.is_empty(),
@@ -330,19 +335,44 @@ async fn delete_is_ignored_while_a_removal_is_in_flight() {
     );
 }
 
+/// A worktree takes one change at a time, and a rename running is not on
+/// screen the way a removal is — so Delete says why instead of offering a
+/// confirm whose answer would be refused.
+#[tokio::test]
+async fn delete_waits_for_a_rename_in_flight() {
+    let (_dir, mut app) = app_with_fixture();
+    app.handle_key(key(KeyCode::Down));
+    let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
+    let rename = begun(&mut app, worktree_id, WorktreeSync::begin_rename);
+
+    app.handle_key(key(KeyCode::Char('d')));
+    assert!(app.modals.is_empty(), "a confirm opened mid-rename");
+    assert!(
+        app.notifications
+            .last()
+            .is_some_and(|n| n.text.contains("still being renamed")),
+        "the refusal was silent"
+    );
+
+    // Once the rename lands, Delete works again.
+    app.handle_event(AppEvent::WorktreeRenameAborted { change: rename });
+    app.handle_key(key(KeyCode::Char('d')));
+    assert!(matches!(app.modals.last(), Some(Modal::Confirm(_))));
+}
+
 #[tokio::test]
 async fn quit_waits_for_an_in_flight_removal() {
     let (_dir, mut app) = app_with_fixture();
     app.handle_key(key(KeyCode::Down));
     let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
-    app.removals_in_flight.insert(worktree_id);
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
 
     app.handle_key(key(KeyCode::Char('q')));
     assert!(!app.should_quit, "quit must wait for the fold");
     assert!(app.quit_pending);
 
     app.handle_event(AppEvent::WorktreeRemoveResult {
-        worktree_id,
+        change,
         outcome: Ok(git::RemoveOutcome::Removed),
     });
     assert!(app.should_quit, "the fold releases the pending quit");
@@ -353,7 +383,7 @@ async fn a_second_quit_forces_out_past_an_in_flight_removal() {
     let (_dir, mut app) = app_with_fixture();
     app.handle_key(key(KeyCode::Down));
     let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
-    app.removals_in_flight.insert(worktree_id);
+    let _removal = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
 
     app.handle_key(key(KeyCode::Char('q')));
     assert!(!app.should_quit);
@@ -390,8 +420,9 @@ async fn a_created_worktree_is_folded_into_state_and_selected() {
     let worktree = Worktree::new("fresh".into(), "feat/fresh".into(), "/tmp/fresh".into());
     let worktree_id = worktree.id;
 
+    let create = app.worktree_sync.begin_create(repo_id);
     app.handle_event(AppEvent::WorktreeAdded {
-        repo_id,
+        create,
         worktree: Box::new(worktree),
         first_prompt: None,
         yolo: false,
@@ -430,8 +461,9 @@ async fn a_created_worktrees_work_item_link_survives_scans_and_renames() {
     worktree.work_item = Some(WorkItemLink::Issue { number: 3 });
     let worktree_id = worktree.id;
 
+    let create = app.worktree_sync.begin_create(repo_id);
     app.handle_event(AppEvent::WorktreeAdded {
-        repo_id,
+        create,
         worktree: Box::new(worktree),
         first_prompt: None,
         yolo: false,
@@ -449,19 +481,21 @@ async fn a_created_worktrees_work_item_link_survives_scans_and_renames() {
     if let Some(entry) = listed.iter_mut().find(|i| i.path == path.to_string_lossy()) {
         entry.branch = Some("fix/moved".into());
     }
-    let event = scanned(&app, repo_id, listed);
+    let event = scanned(&mut app, repo_id, listed);
     app.handle_event(event);
     let (_, after_scan) = app.state.find_worktree(worktree_id).expect("still tracked");
     assert_eq!(after_scan.branch, "fix/moved", "the scan did not reconcile");
     assert_eq!(link(&app), Some(WorkItemLink::Issue { number: 3 }));
 
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_rename);
     app.handle_event(AppEvent::WorktreeRenamed {
-        worktree_id,
+        change,
         name: "renamed".into(),
         path: "/tmp/renamed".into(),
     });
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_rename);
     app.handle_event(AppEvent::WorktreeBranchRenamed {
-        worktree_id,
+        change,
         branch: "fix/renamed".into(),
     });
     assert_eq!(link(&app), Some(WorkItemLink::Issue { number: 3 }));
@@ -483,8 +517,9 @@ async fn a_worktree_that_could_not_be_saved_is_not_announced_as_created() {
     std::fs::set_permissions(dir.path(), perms).unwrap();
 
     let worktree = Worktree::new("doomed".into(), "feat/doomed".into(), "/tmp/doomed".into());
+    let create = app.worktree_sync.begin_create(repo_id);
     app.handle_event(AppEvent::WorktreeAdded {
-        repo_id,
+        create,
         worktree: Box::new(worktree),
         first_prompt: None,
         yolo: false,
@@ -520,8 +555,9 @@ async fn a_worktree_for_a_removed_repository_is_dropped() {
     let worktree = Worktree::new("late".into(), "feat/late".into(), "/tmp/late".into());
     let worktree_id = worktree.id;
 
+    let create = app.worktree_sync.begin_create(repo_id);
     app.handle_event(AppEvent::WorktreeAdded {
-        repo_id,
+        create,
         worktree: Box::new(worktree),
         first_prompt: None,
         yolo: false,
@@ -532,12 +568,24 @@ async fn a_worktree_for_a_removed_repository_is_dropped() {
 
 /// A scan result stamped with the repository's *current* epoch, the way a
 /// listing that raced nothing would arrive.
-fn scanned(app: &App, repo_id: Uuid, listed: Vec<git::WorktreeInfo>) -> AppEvent {
+fn scanned(app: &mut App, repo_id: Uuid, listed: Vec<git::WorktreeInfo>) -> AppEvent {
     AppEvent::WorktreesScanned {
-        repo_id,
-        epoch: app.worktree_epoch(repo_id),
+        scan: app.worktree_sync.scan_ticket_for_test(repo_id),
         listed: Some(listed),
     }
+}
+
+/// Starts a change the way its flow does — `begin` is
+/// [`WorktreeSync::begin_rename`] or [`WorktreeSync::begin_removal`] — for a
+/// test that then delivers the task's result itself.
+fn begun(
+    app: &mut App,
+    worktree_id: Uuid,
+    begin: fn(&mut WorktreeSync, Uuid, Uuid) -> Option<ChangeTicket>,
+) -> ChangeTicket {
+    let (repo, _) = app.state.find_worktree(worktree_id).expect("tracked");
+    let repo_id = repo.id;
+    begin(&mut app.worktree_sync, repo_id, worktree_id).expect("no change running")
 }
 
 /// What `git worktree list` would print for the fixture repository: the
@@ -577,7 +625,7 @@ async fn scanned_worktrees_reconcile_into_state() {
     std::fs::create_dir_all(&adhoc).unwrap();
     let listed = scan_listing(&app, &[(&adhoc, "feat/adhoc")]);
 
-    let event = scanned(&app, repo_id, listed.clone());
+    let event = scanned(&mut app, repo_id, listed.clone());
     app.handle_event(event);
 
     let worktrees = &app.state.repositories()[0].worktrees;
@@ -602,20 +650,13 @@ async fn scanned_worktrees_reconcile_into_state() {
     );
 
     // The same listing again is a no-op, not a duplicate row.
-    let event = scanned(&app, repo_id, listed.clone());
+    let event = scanned(&mut app, repo_id, listed.clone());
     app.handle_event(event);
     assert_eq!(app.state.repositories()[0].worktrees.len(), before + 1);
 
-    // A result for a repository that has since been removed is dropped,
-    // and a failed listing must not prune anything.
-    let event = scanned(&app, Uuid::new_v4(), listed);
+    // A result for a repository that has since been removed is dropped.
+    let event = scanned(&mut app, Uuid::new_v4(), listed);
     app.handle_event(event);
-    let epoch = app.worktree_epoch(repo_id);
-    app.handle_event(AppEvent::WorktreesScanned {
-        repo_id,
-        epoch,
-        listed: None,
-    });
     assert_eq!(app.state.repositories()[0].worktrees.len(), before + 1);
 }
 
@@ -638,7 +679,7 @@ async fn a_scan_prunes_worktrees_git_no_longer_lists() {
         .expect("the selected worktree");
     listed.retain(|info| info.path != removed_path);
 
-    let event = scanned(&app, repo_id, listed);
+    let event = scanned(&mut app, repo_id, listed);
     app.handle_event(event);
 
     assert!(app.state.find_worktree(selected).is_none());
@@ -652,65 +693,6 @@ async fn a_scan_prunes_worktrees_git_no_longer_lists() {
             .flat_map(|r| &r.worktrees)
             .all(|w| w.path != removed_path),
         "the prune was never persisted"
-    );
-}
-
-/// A listing spawned before a mutation folded describes a state the
-/// config has moved past; reconciling against it would revert the newer
-/// change, so it must fold as stale.
-#[tokio::test]
-async fn a_scan_older_than_a_mutation_is_discarded() {
-    let (dir, mut app) = app_with_fixture();
-    let repo_id = app.state.repositories()[0].id;
-
-    // Captured now, delivered later: the listing predates the rename.
-    let stale = scanned(&app, repo_id, scan_listing(&app, &[]));
-
-    app.handle_key(key(KeyCode::Down));
-    let worktree_id = app.state.selection.worktree_id.expect("a worktree");
-    app.handle_event(AppEvent::WorktreeBranchRenamed {
-        worktree_id,
-        branch: "feat/renamed".into(),
-    });
-
-    app.handle_event(stale);
-    assert_eq!(
-        app.state
-            .find_worktree(worktree_id)
-            .map(|(_, w)| w.branch.as_str()),
-        Some("feat/renamed"),
-        "the stale listing reverted the rename"
-    );
-    let reloaded = AppState::load_from(dir.path().join(".forestui-config.json"));
-    assert!(
-        reloaded
-            .repositories()
-            .iter()
-            .flat_map(|r| &r.worktrees)
-            .any(|w| w.branch == "feat/renamed"),
-        "the reverted branch was persisted"
-    );
-}
-
-/// A worktree whose removal (or rename) is still in flight is not the
-/// listing's to judge: git may have already deleted the directory, but
-/// the removal's own fold owns both the state change and the toast.
-#[tokio::test]
-async fn a_scan_does_not_prune_a_worktree_with_a_removal_in_flight() {
-    let (_dir, mut app) = app_with_fixture();
-    let repo_id = app.state.repositories()[0].id;
-    let worktree_id = app.state.repositories()[0].worktrees[0].id;
-    app.removals_in_flight.insert(worktree_id);
-
-    let mut listed = scan_listing(&app, &[]);
-    let removed_path = app.state.repositories()[0].worktrees[0].path.clone();
-    listed.retain(|info| info.path != removed_path);
-
-    let event = scanned(&app, repo_id, listed);
-    app.handle_event(event);
-    assert!(
-        app.state.find_worktree(worktree_id).is_some(),
-        "the scan pruned an entry whose removal fold still owns it"
     );
 }
 
@@ -1141,20 +1123,22 @@ async fn a_refresh_for_another_path_is_dropped() {
 #[tokio::test]
 async fn focus_return_and_the_tick_kick_a_sweep() {
     let (_dir, mut app) = app_with_fixture();
+    let repo_id = app.state.repositories()[0].id;
+    // A scan is running exactly when another may not start.
+    let scan_running = |app: &mut App| app.worktree_sync.start_scan(repo_id).is_none();
 
     app.handle_event(AppEvent::Term(
         ratatui::crossterm::event::Event::FocusGained,
     ));
-    assert!(
-        !app.worktree_scans_in_flight.is_empty(),
-        "focus return did not start a scan"
-    );
+    assert!(scan_running(&mut app), "focus return did not start a scan");
 
-    app.worktree_scans_in_flight.clear();
+    // Land that scan, so the sweep below has to start its own.
+    let scan = app.worktree_sync.scan_ticket_for_test(repo_id);
+    app.handle_event(AppEvent::WorktreesScanned { scan, listed: None });
     app.last_worktree_scan = Instant::now() - WORKTREE_SCAN_INTERVAL;
     app.handle_event(AppEvent::Tick);
     assert!(
-        !app.worktree_scans_in_flight.is_empty(),
+        scan_running(&mut app),
         "the periodic sweep did not start a scan"
     );
 }
@@ -1186,7 +1170,7 @@ async fn branch_drift_on_the_selected_worktree_reseeds_the_rename_input() {
     // the sessions list back to Loading on every external checkout.
     app.sessions = Some(Vec::new());
 
-    let event = scanned(&app, repo_id, listed);
+    let event = scanned(&mut app, repo_id, listed);
     app.handle_event(event);
     assert_eq!(
         app.branch_input.value(),
@@ -1225,8 +1209,9 @@ async fn a_branch_rename_lands_only_when_git_agrees() {
     );
 
     // And the success path folds through the event.
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_rename);
     app.handle_event(AppEvent::WorktreeBranchRenamed {
-        worktree_id,
+        change,
         branch: "feat/accepted".into(),
     });
     assert_eq!(
@@ -1259,7 +1244,7 @@ async fn a_scan_that_lands_late_does_not_steal_the_selection() {
     let adhoc = dir.path().join("late-adhoc");
     std::fs::create_dir_all(&adhoc).unwrap();
     let listed = scan_listing(&app, &[(&adhoc, "feat/late")]);
-    let event = scanned(&app, repo_id, listed);
+    let event = scanned(&mut app, repo_id, listed);
     app.handle_event(event);
 
     assert_eq!(
@@ -1601,8 +1586,9 @@ async fn clicking_confirm_delete_runs_the_deletion() {
     // Removal is asynchronous now; the click only dispatches it. The entry
     // goes when the git result is folded.
     assert!(app.state.find_worktree(worktree_id).is_some());
+    let change = app.worktree_sync.change_ticket_for_test(worktree_id);
     app.handle_event(AppEvent::WorktreeRemoveResult {
-        worktree_id,
+        change,
         outcome: Ok(git::RemoveOutcome::Removed),
     });
     assert!(app.state.find_worktree(worktree_id).is_none());

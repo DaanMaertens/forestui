@@ -10,6 +10,7 @@ mod actions;
 pub mod detail;
 mod keys;
 mod mouse;
+pub mod worktree_sync;
 
 pub use detail::{Action, DetailItem, Field};
 pub use keys::BINDINGS;
@@ -147,9 +148,9 @@ pub struct App {
     /// concurrent duplicate fetches for identical results.
     issues_in_flight: std::collections::HashSet<String>,
     sessions_in_flight: std::collections::HashSet<String>,
-    /// Repositories with a `git worktree list` scan already running — the same
-    /// duplicate-work guard as above, keyed by repository.
-    worktree_scans_in_flight: std::collections::HashSet<Uuid>,
+    /// Worktree scans and the changes they must not undo; see
+    /// [`worktree_sync`].
+    worktree_sync: worktree_sync::WorktreeSync,
     /// When the last periodic worktree sweep started.
     last_worktree_scan: Instant,
     /// When the last periodic session refresh started.
@@ -163,19 +164,6 @@ pub struct App {
     pub live_sessions: std::collections::HashMap<String, crate::services::live::LiveSession>,
     /// One live scan at a time — it shells out to tmux once per sweep.
     live_scan_in_flight: bool,
-    /// Per-repository worktree mutation counter; see
-    /// [`AppEvent::WorktreesScanned`]. Missing means 0 — repositories only
-    /// enter the map once something about their worktrees changes.
-    worktree_epochs: std::collections::HashMap<Uuid, u64>,
-    /// Worktrees with a directory or branch rename running. Like
-    /// [`App::removals_in_flight`], the reconcile must not act on what a
-    /// listing says about these — it may describe the half-done rename.
-    renames_in_flight: std::collections::HashSet<Uuid>,
-    /// Worktrees with a removal running in the background. Guards duplicate
-    /// removals, disables the Delete control, and holds quit until the results
-    /// are folded (an orphaned git child would remove the tree on disk after
-    /// the config was last saved).
-    pub removals_in_flight: std::collections::HashSet<Uuid>,
     /// Quit was requested while removals were in flight; honoured when the
     /// last one folds. A second request quits immediately.
     pub quit_pending: bool,
@@ -287,15 +275,12 @@ impl App {
             should_quit: false,
             issues_in_flight: std::collections::HashSet::new(),
             sessions_in_flight: std::collections::HashSet::new(),
-            worktree_scans_in_flight: std::collections::HashSet::new(),
+            worktree_sync: worktree_sync::WorktreeSync::default(),
             last_worktree_scan: Instant::now(),
             last_session_refresh: Instant::now(),
             sessions_refreshing: std::collections::HashSet::new(),
             live_sessions: std::collections::HashMap::new(),
             live_scan_in_flight: false,
-            worktree_epochs: std::collections::HashMap::new(),
-            renames_in_flight: std::collections::HashSet::new(),
-            removals_in_flight: std::collections::HashSet::new(),
             quit_pending: false,
             hits: Vec::new(),
             hovered: None,
@@ -338,7 +323,7 @@ impl App {
     /// never folded, so the saved config keeps a phantom entry. A second
     /// request forces the quit anyway.
     pub(super) fn request_quit(&mut self) {
-        if self.removals_in_flight.is_empty() || self.quit_pending {
+        if !self.worktree_sync.any_removal_running() || self.quit_pending {
             self.should_quit = true;
         } else {
             self.quit_pending = true;
@@ -610,40 +595,15 @@ impl App {
         let Some(repo) = self.state.find_repository(repo_id) else {
             return;
         };
-        if !self.worktree_scans_in_flight.insert(repo_id) {
-            return;
-        }
         let source = repo.source_path.clone();
-        let epoch = self.worktree_epoch(repo_id);
+        let Some(scan) = self.worktree_sync.start_scan(repo_id) else {
+            return;
+        };
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let listed = git::list_worktrees(&source).await.ok();
-            tx.send(AppEvent::WorktreesScanned {
-                repo_id,
-                epoch,
-                listed,
-            });
+            tx.send(AppEvent::WorktreesScanned { scan, listed });
         });
-    }
-
-    fn worktree_epoch(&self, repo_id: Uuid) -> u64 {
-        self.worktree_epochs.get(&repo_id).copied().unwrap_or(0)
-    }
-
-    /// Record that a repository's worktrees changed, so any scan spawned
-    /// before this moment is folded as stale rather than reconciled.
-    pub(super) fn bump_worktree_epoch(&mut self, repo_id: Uuid) {
-        let counter = self.worktree_epochs.entry(repo_id).or_insert(0);
-        *counter = counter.wrapping_add(1);
-    }
-
-    /// Bump the epoch of whichever repository owns a worktree, for the folds
-    /// that arrive keyed by worktree alone.
-    fn bump_worktree_epoch_for(&mut self, worktree_id: Uuid) {
-        if let Some((repo, _)) = self.state.find_worktree(worktree_id) {
-            let repo_id = repo.id;
-            self.bump_worktree_epoch(repo_id);
-        }
     }
 
     /// Keep the binary current, the way the Python build did on every launch.
@@ -1220,11 +1180,13 @@ impl App {
             AppEvent::Notify(text, severity) => self.notify(text, severity),
             AppEvent::UpdateChecked(status) => self.apply_update_status(status),
             AppEvent::WorktreeAdded {
-                repo_id,
+                create,
                 worktree,
                 first_prompt,
                 yolo,
             } => {
+                let repo_id = create.repo_id();
+                self.worktree_sync.finish_create(create);
                 // The repository can be removed while git runs; dropping the
                 // result beats resurrecting an entry nothing owns.
                 if self.state.find_repository(repo_id).is_none() {
@@ -1233,7 +1195,6 @@ impl App {
                 let worktree_id = worktree.id;
                 let name = worktree.name.clone();
                 let path = worktree.path.clone();
-                self.bump_worktree_epoch(repo_id);
                 self.state.add_worktree(repo_id, *worktree);
                 // Selecting a row a collapsed repository hides would leave the
                 // cursor pointing at nothing, so the fold opens to reveal what
@@ -1282,34 +1243,17 @@ impl App {
                     }
                 }
             }
-            AppEvent::WorktreesScanned {
-                repo_id,
-                epoch,
-                listed,
-            } => {
-                // Release the guard even for a result the checks below drop.
-                self.worktree_scans_in_flight.remove(&repo_id);
-                // A failed listing keeps state as-is: "could not list" must
-                // never read as "there are none" and prune the whole tree.
-                let Some(listed) = listed else { return };
+            AppEvent::WorktreesScanned { scan, listed } => {
+                let repo_id = scan.repo_id();
+                let worktree_sync::ScanVerdict::Reconcile { listed, protected } =
+                    self.worktree_sync.judge_scan(scan, listed)
+                else {
+                    return;
+                };
                 // The repository can be removed while git runs.
                 if self.state.find_repository(repo_id).is_none() {
                     return;
                 }
-                // A create, remove, or rename folded while git ran: the
-                // listing describes a state the config has moved past, and
-                // reconciling against it would revert the newer change (a
-                // renamed branch back to its old name, most visibly).
-                if epoch != self.worktree_epoch(repo_id) {
-                    return;
-                }
-                // Mutations still in flight are not the listing's to judge
-                // either way; their own fold lands the truth.
-                let protected: std::collections::HashSet<Uuid> = self
-                    .removals_in_flight
-                    .union(&self.renames_in_flight)
-                    .copied()
-                    .collect();
                 let selected = self.state.selection;
                 let Some(outcome) = self.state.reconcile_worktrees(repo_id, &listed, &protected)
                 else {
@@ -1363,13 +1307,9 @@ impl App {
                     self.notify_saved(parts.join("; "));
                 }
             }
-            AppEvent::WorktreeRenamed {
-                worktree_id,
-                name,
-                path,
-            } => {
-                self.renames_in_flight.remove(&worktree_id);
-                self.bump_worktree_epoch_for(worktree_id);
+            AppEvent::WorktreeRenamed { change, name, path } => {
+                let worktree_id = change.worktree_id();
+                self.worktree_sync.finish(change);
                 self.state.update_worktree(worktree_id, |worktree| {
                     worktree.name = name;
                     worktree.path = path;
@@ -1385,12 +1325,9 @@ impl App {
                 self.reload_detail();
                 self.report_save_error();
             }
-            AppEvent::WorktreeBranchRenamed {
-                worktree_id,
-                branch,
-            } => {
-                self.renames_in_flight.remove(&worktree_id);
-                self.bump_worktree_epoch_for(worktree_id);
+            AppEvent::WorktreeBranchRenamed { change, branch } => {
+                let worktree_id = change.worktree_id();
+                self.worktree_sync.finish(change);
                 self.state
                     .update_worktree(worktree_id, |worktree| worktree.branch = branch);
                 self.rename_target = None;
@@ -1399,13 +1336,11 @@ impl App {
                 self.reload_detail();
                 self.report_save_error();
             }
-            AppEvent::WorktreeRemoveResult {
-                worktree_id,
-                outcome,
-            } => self.on_worktree_remove_result(worktree_id, outcome),
-            AppEvent::WorktreeRenameAborted { worktree_id } => {
-                self.renames_in_flight.remove(&worktree_id);
+            AppEvent::WorktreeRemoveResult { change, outcome } => {
+                self.on_worktree_remove_result(change, outcome)
             }
+            AppEvent::WorktreeRenameAborted { change } => self.worktree_sync.finish(change),
+            AppEvent::WorktreeAddFailed { create } => self.worktree_sync.finish_create(create),
             AppEvent::ReloadDetail => self.reload_detail(),
         }
     }
@@ -1415,12 +1350,13 @@ impl App {
     /// the user's uncommitted work) fully intact.
     fn on_worktree_remove_result(
         &mut self,
-        worktree_id: Uuid,
+        change: worktree_sync::ChangeTicket,
         outcome: Result<git::RemoveOutcome, String>,
     ) {
-        self.removals_in_flight.remove(&worktree_id);
+        let worktree_id = change.worktree_id();
+        self.worktree_sync.finish(change);
         // A quit that waited on this removal can go through now.
-        if self.quit_pending && self.removals_in_flight.is_empty() {
+        if self.quit_pending && !self.worktree_sync.any_removal_running() {
             self.should_quit = true;
         }
         // The entry may have been removed by other means while git ran.
@@ -1430,7 +1366,6 @@ impl App {
         let name = worktree.name.clone();
         match outcome {
             Ok(git::RemoveOutcome::Removed) => {
-                self.bump_worktree_epoch_for(worktree_id);
                 self.state.remove_worktree(worktree_id);
                 self.rebuild_rows();
                 self.sync_sidebar_index();
