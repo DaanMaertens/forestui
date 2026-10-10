@@ -561,8 +561,12 @@ able to produce a torn file.
 
 ## Testing
 
-Unit tests live beside the code in `#[cfg(test)] mod tests` and run with
-`make test`. Async code uses `#[tokio::test]`. Rendering is tested against
+Unit tests live in a sibling file, not inline: `foo.rs` ends with
+`#[cfg(test)] mod tests;` and the tests are in `foo/tests.rs` (`bar/mod.rs` →
+`bar/tests.rs`). As a child module they still reach private items through
+`use super::*`. Keep new tests there rather than growing the source file; note
+that an `include_str!` in a test file resolves one directory deeper than in its
+parent. They run with `make test`. Async code uses `#[tokio::test]`. Rendering is tested against
 `ratatui::backend::TestBackend`, which renders into an in-memory buffer you can
 assert on.
 
