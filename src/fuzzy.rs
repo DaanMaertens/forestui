@@ -1,4 +1,4 @@
-//! Fuzzy branch search: score branches against a query, best first.
+//! Fuzzy search: score a list's entries against a query, best first.
 
 /// Anything the fuzzy matcher can search.
 pub trait Searchable {
@@ -101,7 +101,7 @@ fn levenshtein_distance(s1: &[char], s2: &[char]) -> usize {
 }
 
 /// Strip a remote prefix (e.g. `origin/`) using the repository's real remotes.
-pub fn strip_remote_prefix<'a>(branch: &'a str, remotes: &[String]) -> &'a str {
+fn strip_remote_prefix<'a>(branch: &'a str, remotes: &[String]) -> &'a str {
     if let Some((prefix, rest)) = branch.split_once('/')
         && remotes.iter().any(|r| r == prefix)
     {
@@ -114,33 +114,33 @@ pub fn strip_remote_prefix<'a>(branch: &'a str, remotes: &[String]) -> &'a str {
 /// `short` is the entry's short form; without one, the full text stands in.
 ///
 /// Scoring tiers (identical to the Textual implementation):
-/// `0.0` exact, `0.5` exact on local name, `1.0` prefix on full name,
-/// `1.5` prefix on local name, `2.0` substring at a word boundary,
-/// `3.0` substring anywhere, `4.0+` fuzzy (Levenshtein) on path segments.
-fn match_score(query: &str, branch: &str, short: Option<&str>) -> Option<f64> {
+/// `0.0` exact, `0.5` exact on the short form, `1.0` prefix on the full text,
+/// `1.5` prefix on the short form, `2.0` substring at a word boundary,
+/// `3.0` substring anywhere, `4.0+` fuzzy (Levenshtein) on words.
+fn match_score(query: &str, text: &str, short: Option<&str>) -> Option<f64> {
     let q = query.to_lowercase();
-    let b = branch.to_lowercase();
+    let t = text.to_lowercase();
 
     if q.is_empty() {
         return Some(0.0);
     }
-    if q == b {
+    if q == t {
         return Some(0.0);
     }
 
-    let local = short.map_or_else(|| b.clone(), str::to_lowercase);
+    let short = short.map_or_else(|| t.clone(), str::to_lowercase);
 
-    if q == local {
+    if q == short {
         return Some(0.5);
     }
-    if b.starts_with(&q) {
+    if t.starts_with(&q) {
         return Some(1.0);
     }
-    if local.starts_with(&q) {
+    if short.starts_with(&q) {
         return Some(1.5);
     }
 
-    for target in [&b, &local] {
+    for target in [&t, &short] {
         if let Some(idx) = target.find(&q) {
             let boundary = idx == 0
                 || target[..idx]
@@ -156,7 +156,7 @@ fn match_score(query: &str, branch: &str, short: Option<&str>) -> Option<f64> {
         let mut best: Option<f64> = None;
         let threshold = q_chars.len().div_ceil(3).max(1);
 
-        for seg in b.split(['/', '-', '_', '.']) {
+        for seg in t.split(['/', '-', '_', '.']) {
             if seg.is_empty() {
                 continue;
             }
@@ -165,7 +165,7 @@ fn match_score(query: &str, branch: &str, short: Option<&str>) -> Option<f64> {
             let dist = levenshtein_distance(&q_chars, &seg_chars);
             if dist <= threshold {
                 let score = 4.0 + dist as f64 * 0.1;
-                best = Some(best.map_or(score, |b: f64| b.min(score)));
+                best = Some(best.map_or(score, |best: f64| best.min(score)));
             }
 
             if seg_chars.len() > q_chars.len() {
@@ -173,7 +173,7 @@ fn match_score(query: &str, branch: &str, short: Option<&str>) -> Option<f64> {
                 let prefix_dist = levenshtein_distance(&q_chars, &prefix);
                 if prefix_dist <= threshold {
                     let score = 4.5 + prefix_dist as f64 * 0.1;
-                    best = Some(best.map_or(score, |b: f64| b.min(score)));
+                    best = Some(best.map_or(score, |best: f64| best.min(score)));
                 }
             }
         }
@@ -200,12 +200,12 @@ pub fn fuzzy_match_branches(
         .collect()
 }
 
-/// Byte range of the literal `query` inside `branch`, for highlighting.
-pub fn highlight_range(query: &str, branch: &str) -> Option<(usize, usize)> {
+/// Byte range of the literal `query` inside `text`, for highlighting.
+pub fn highlight_range(query: &str, text: &str) -> Option<(usize, usize)> {
     if query.is_empty() {
         return None;
     }
-    let idx = branch.to_lowercase().find(&query.to_lowercase())?;
+    let idx = text.to_lowercase().find(&query.to_lowercase())?;
     Some((idx, idx + query.len()))
 }
 

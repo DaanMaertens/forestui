@@ -430,7 +430,7 @@ fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &
     let dropdown = if modal.new_branch {
         0
     } else {
-        modal.picker.matches().count().min(DROPDOWN_ROWS) + 1
+        modal.picker.match_count().min(DROPDOWN_ROWS) + 1
     };
     // Repo, label, input, preview, label, toggle, input, error, gap, buttons.
     let rect = widgets::centered_rect(WIDTH, CHROME + 18 + dropdown as u16, area);
@@ -487,23 +487,17 @@ fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &
         AddWorktreeModal::FOCUS_BRANCH,
     );
     if !modal.new_branch {
-        column.text(
-            frame,
-            match_count(&modal.picker, "branches"),
-            theme::muted(),
-        );
+        column.text(frame, count_line(&modal.picker, "branches"), theme::muted());
 
         // Leave room for the error line, the gap and the buttons below the list.
         let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
-        let results = AddWorktreeModal::FOCUS_RESULTS;
         picker_results(
             frame,
             &mut column,
             hits,
             &modal.picker,
             DROPDOWN_ROWS.min(space),
-            results,
-            modal.focus == results,
+            ListFocus::of(AddWorktreeModal::FOCUS_RESULTS, modal.focus),
             |branch, query, style| branch_line(branch.search_text(), query, style),
         );
     }
@@ -540,18 +534,33 @@ fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &
     );
 }
 
-/// A picker's visible rows, scrolled to keep the selection in view. The list
-/// is one focus stop, so every row carries the same `focus_index`; `line`
+/// A list's place in its dialog's focus ring. The list is one focus stop, so
+/// every row carries the same `index`.
+#[derive(Clone, Copy)]
+struct ListFocus {
+    index: usize,
+    focused: bool,
+}
+
+impl ListFocus {
+    /// The list at `index`, while the dialog's focus is on `current`.
+    fn of(index: usize, current: usize) -> Self {
+        Self {
+            index,
+            focused: index == current,
+        }
+    }
+}
+
+/// A picker's visible rows, scrolled to keep the selection in view. `line`
 /// draws one entry given the query, so each list decides how a row looks.
-#[allow(clippy::too_many_arguments)]
 fn picker_results<T: Searchable>(
     frame: &mut Frame,
     column: &mut Column,
     hits: &mut Hits,
     picker: &SearchPicker<T>,
     visible: usize,
-    focus_index: usize,
-    focused: bool,
+    focus: ListFocus,
     line: impl Fn(&T, &str, Style) -> Line<'static>,
 ) {
     let query = picker.query().value();
@@ -559,7 +568,7 @@ fn picker_results<T: Searchable>(
     let first = selected_index.saturating_sub(visible.saturating_sub(1));
     for (offset, entry) in picker.matches().skip(first).take(visible).enumerate() {
         let selected = first + offset == selected_index;
-        let style = match (selected, focused) {
+        let style = match (selected, focus.focused) {
             (true, true) => theme::cursor(),
             (true, false) => theme::cursor_unfocused(),
             (false, _) => theme::primary(),
@@ -569,15 +578,15 @@ fn picker_results<T: Searchable>(
             hits,
             line(entry, query, style),
             style,
-            focus_index,
+            focus.index,
             first + offset,
         );
     }
 }
 
 /// A picker's count line, worded exactly as `branch_search.py` worded it.
-fn match_count<T: Searchable>(picker: &SearchPicker<T>, noun: &str) -> String {
-    let shown = picker.matches().count();
+fn count_line<T: Searchable>(picker: &SearchPicker<T>, noun: &str) -> String {
+    let shown = picker.match_count();
     let total = picker.entry_count();
     if picker.query().value().trim().is_empty() {
         if shown < total {

@@ -3,8 +3,6 @@
 use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
 
-pub const MAX_DROPDOWN_RESULTS: usize = 50;
-
 /// The user's home directory, falling back to the current directory.
 ///
 /// `std::env::home_dir` was un-deprecated in Rust 1.87 with corrected

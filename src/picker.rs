@@ -3,8 +3,10 @@
 
 use crate::fuzzy::{self, Searchable};
 use crate::ui::widgets::TextInput;
-use crate::util;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
+
+/// The most entries a picker lists for any one query.
+const MAX_RESULTS: usize = 50;
 
 #[derive(Debug)]
 pub struct SearchPicker<T> {
@@ -80,6 +82,10 @@ impl<T: Searchable> SearchPicker<T> {
         self.matches.iter().map(|&i| &self.items[i])
     }
 
+    pub fn match_count(&self) -> usize {
+        self.matches.len()
+    }
+
     /// Position of the highlighted entry among `matches`, for drawing.
     pub fn selected_index(&self) -> usize {
         self.selected_index
@@ -90,6 +96,11 @@ impl<T: Searchable> SearchPicker<T> {
         self.items.len()
     }
 
+    /// Every entry, matching or not, in the order given.
+    pub fn entries(&self) -> impl Iterator<Item = &T> {
+        self.items.iter()
+    }
+
     /// The highlighted entry, or `None` when nothing matches.
     pub fn selected(&self) -> Option<&T> {
         let position = self.matches.get(self.selected_index)?;
@@ -98,11 +109,10 @@ impl<T: Searchable> SearchPicker<T> {
 
     /// Match again and put the selection back on the best match.
     fn refresh(&mut self) {
-        self.matches =
-            fuzzy::fuzzy_match(self.query.value(), &self.items, util::MAX_DROPDOWN_RESULTS)
-                .into_iter()
-                .map(|(i, _score)| i)
-                .collect();
+        self.matches = fuzzy::fuzzy_match(self.query.value(), &self.items, MAX_RESULTS)
+            .into_iter()
+            .map(|(i, _score)| i)
+            .collect();
         self.selected_index = 0;
     }
 }
@@ -110,8 +120,8 @@ impl<T: Searchable> SearchPicker<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fuzzy::{BranchEntry, Searchable};
-    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use crate::fuzzy::BranchEntry;
+    use ratatui::crossterm::event::{KeyEventKind, KeyEventState, KeyModifiers};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent {

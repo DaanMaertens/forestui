@@ -268,9 +268,8 @@ impl Modal {
             Modal::AddWorktree(m) => {
                 m.picker.select_row(row);
                 // Picking a row commits it, the way Enter does from the
-                // keyboard. Only the query is read by `selected_branch` and
-                // `can_create`, so highlighting alone left Create disabled
-                // and a mouse-only user with no way to choose a branch.
+                // keyboard: highlighting alone left Create disabled and a
+                // mouse-only user with no way to choose a branch.
                 m.pick_selected();
             }
             Modal::CustomButtons(m) if !m.buttons.is_empty() => {
@@ -413,7 +412,6 @@ impl AddRepositoryModal {
 pub struct AddWorktreeModal {
     pub repo_id: Uuid,
     pub repo_name: String,
-    pub branches: Vec<String>,
     pub forest_dir: PathBuf,
     pub branch_prefix: String,
     pub name: TextInput,
@@ -450,7 +448,6 @@ impl AddWorktreeModal {
         Self {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
-            branches,
             forest_dir,
             branch_prefix: branch_prefix.clone(),
             name: TextInput::new("").with_placeholder("my-feature"),
@@ -524,8 +521,11 @@ impl AddWorktreeModal {
         if self.new_branch {
             return true;
         }
-        let branch = self.selected_branch();
-        self.branches.contains(&branch)
+        self.branch_exists(&self.selected_branch())
+    }
+
+    fn branch_exists(&self, name: &str) -> bool {
+        self.picker.entries().any(|b| b.search_text() == name)
     }
 
     fn set_mode(&mut self, new_branch: bool) {
@@ -545,7 +545,7 @@ impl AddWorktreeModal {
             self.error = "Branch name is required".into();
             return ModalOutcome::None;
         }
-        if !self.new_branch && !self.branches.contains(&branch) {
+        if !self.new_branch && !self.branch_exists(&branch) {
             self.error = format!("Branch '{branch}' does not exist");
             return ModalOutcome::None;
         }
