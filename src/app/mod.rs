@@ -1184,7 +1184,11 @@ impl App {
             }
             AppEvent::Notify(text, severity) => self.notify(text, severity),
             AppEvent::UpdateChecked(status) => self.apply_update_status(status),
-            AppEvent::WorktreeAdded { repo_id, worktree } => {
+            AppEvent::WorktreeAdded {
+                repo_id,
+                worktree,
+                first_prompt,
+            } => {
                 // The repository can be removed while git runs; dropping the
                 // result beats resurrecting an entry nothing owns.
                 if self.state.find_repository(repo_id).is_none() {
@@ -1192,6 +1196,7 @@ impl App {
                 }
                 let worktree_id = worktree.id;
                 let name = worktree.name.clone();
+                let path = worktree.path.clone();
                 self.bump_worktree_epoch(repo_id);
                 self.state.add_worktree(repo_id, *worktree);
                 // Selecting a row a collapsed repository hides would leave the
@@ -1207,6 +1212,11 @@ impl App {
                 // worktree that is not in the config — and `notify_saved`
                 // extends that to a write that was attempted and failed.
                 self.notify_saved(format!("Created worktree '{name}'"));
+                // Named after the worktree itself, with no prefix: the window,
+                // the session and the worktree carry one recognisable name.
+                if let Some(prompt) = first_prompt {
+                    self.start_claude(&path, None, false, None, Some(name), Some(&prompt));
+                }
             }
             AppEvent::WorktreesScanned {
                 repo_id,
@@ -1519,7 +1529,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::{app_with_fixture, ctrl, key};
     use super::*;
-    use crate::models::{CustomClaudeButton, Repository, Worktree};
+    use crate::models::{CustomClaudeButton, Repository, WorkItemLink, Worktree};
     use ratatui::crossterm::event::KeyCode;
     use std::path::PathBuf;
 
@@ -1912,6 +1922,7 @@ mod tests {
         app.handle_event(AppEvent::WorktreeAdded {
             repo_id,
             worktree: Box::new(worktree),
+            first_prompt: None,
         });
 
         assert!(app.state.find_worktree(worktree_id).is_some());
@@ -1930,6 +1941,63 @@ mod tests {
         );
     }
 
+    /// The work item link arrives on the created worktree and is the config's
+    /// own annotation from then on: a scan that corrects the branch and a
+    /// rename of the worktree or its branch all leave it in place, on disk too.
+    #[tokio::test]
+    async fn a_created_worktrees_work_item_link_survives_scans_and_renames() {
+        let (dir, mut app) = app_with_fixture();
+        let repo_id = app.state.repositories()[0].id;
+        let path = dir.path().join("issue-3");
+        std::fs::create_dir_all(&path).unwrap();
+        let mut worktree = Worktree::new(
+            "issue-3".into(),
+            "fix/issue-3".into(),
+            path.to_string_lossy().to_string(),
+        );
+        worktree.work_item = Some(WorkItemLink::Issue { number: 3 });
+        let worktree_id = worktree.id;
+
+        app.handle_event(AppEvent::WorktreeAdded {
+            repo_id,
+            worktree: Box::new(worktree),
+            first_prompt: None,
+        });
+        let link = |app: &App| {
+            app.state
+                .find_worktree(worktree_id)
+                .and_then(|(_, w)| w.work_item.clone())
+        };
+        assert_eq!(link(&app), Some(WorkItemLink::Issue { number: 3 }));
+
+        // git reports the branch under another name: reconciling corrects the
+        // branch and keeps the annotation.
+        let mut listed = scan_listing(&app, &[]);
+        if let Some(entry) = listed.iter_mut().find(|i| i.path == path.to_string_lossy()) {
+            entry.branch = Some("fix/moved".into());
+        }
+        let event = scanned(&app, repo_id, listed);
+        app.handle_event(event);
+        let (_, after_scan) = app.state.find_worktree(worktree_id).expect("still tracked");
+        assert_eq!(after_scan.branch, "fix/moved", "the scan did not reconcile");
+        assert_eq!(link(&app), Some(WorkItemLink::Issue { number: 3 }));
+
+        app.handle_event(AppEvent::WorktreeRenamed {
+            worktree_id,
+            name: "renamed".into(),
+            path: "/tmp/renamed".into(),
+        });
+        app.handle_event(AppEvent::WorktreeBranchRenamed {
+            worktree_id,
+            branch: "fix/renamed".into(),
+        });
+        assert_eq!(link(&app), Some(WorkItemLink::Issue { number: 3 }));
+
+        let reloaded = AppState::load_from(dir.path().join(".forestui-config.json"));
+        let (_, saved) = reloaded.find_worktree(worktree_id).expect("persisted");
+        assert_eq!(saved.work_item, Some(WorkItemLink::Issue { number: 3 }));
+    }
+
     #[tokio::test]
     async fn a_worktree_that_could_not_be_saved_is_not_announced_as_created() {
         let (dir, mut app) = app_with_fixture();
@@ -1945,6 +2013,7 @@ mod tests {
         app.handle_event(AppEvent::WorktreeAdded {
             repo_id,
             worktree: Box::new(worktree),
+            first_prompt: None,
         });
 
         let last = app.notifications.last().expect("a toast");
@@ -1980,6 +2049,7 @@ mod tests {
         app.handle_event(AppEvent::WorktreeAdded {
             repo_id,
             worktree: Box::new(worktree),
+            first_prompt: None,
         });
 
         assert!(app.state.find_worktree(worktree_id).is_none());

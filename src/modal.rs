@@ -159,6 +159,8 @@ pub enum ModalResult {
     },
     WorktreeFromIssue {
         repo_id: Uuid,
+        issue_number: i64,
+        issue_title: String,
         name: String,
         branch: String,
         pull_first: bool,
@@ -797,6 +799,8 @@ impl CreateFromIssueModal {
                 let base = self.base_branch.value().to_string();
                 ModalOutcome::Submit(ModalResult::WorktreeFromIssue {
                     repo_id: self.repo_id,
+                    issue_number: self.issue_number,
+                    issue_title: self.issue_title.clone(),
                     name: self.name.value().to_string(),
                     branch: self.branch.value().to_string(),
                     pull_first: self.pull_first,

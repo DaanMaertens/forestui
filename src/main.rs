@@ -7,6 +7,7 @@ mod fuzzy;
 mod modal;
 mod models;
 mod picker;
+mod prompt;
 mod services;
 mod state;
 mod terminal;

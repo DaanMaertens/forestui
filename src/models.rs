@@ -136,6 +136,33 @@ pub struct Worktree {
     /// Git commit ref at the time the worktree was created.
     #[serde(default)]
     pub created_from_ref: Option<String>,
+    /// The work item this worktree was started for. Not derived from the
+    /// name or branch, so renaming either keeps it.
+    #[serde(default, deserialize_with = "lenient_work_item")]
+    pub work_item: Option<WorkItemLink>,
+}
+
+/// The record on a worktree of which work item it was started for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkItemLink {
+    Issue { number: i64 },
+    PullRequest { number: i64 },
+    FreeText { description: String },
+}
+
+/// A link this build cannot read loads as no link.
+///
+/// The tag is open-ended: a later release may add a kind, and the release
+/// before it still has to load the file. A strict enum would fail the whole
+/// config on that one field — and a config that does not parse loads as
+/// empty state.
+fn lenient_work_item<'de, D>(deserializer: D) -> Result<Option<WorkItemLink>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 impl Worktree {
@@ -150,6 +177,7 @@ impl Worktree {
             last_modified: Utc::now(),
             base_branch: None,
             created_from_ref: None,
+            work_item: None,
         }
     }
 }
@@ -469,6 +497,45 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["b", "a"]);
         assert_eq!(repo.archived_worktrees().len(), 1);
+    }
+
+    /// A file written before work item links existed loads unchanged, with
+    /// no link on its worktrees.
+    #[test]
+    fn a_worktree_without_a_link_loads_as_unlinked() {
+        let worktree: Worktree =
+            serde_json::from_str(r#"{"name":"wt","branch":"b","path":"/tmp/wt"}"#).unwrap();
+        assert_eq!(worktree.work_item, None);
+    }
+
+    #[test]
+    fn every_kind_of_link_roundtrips() {
+        for link in [
+            WorkItemLink::Issue { number: 3 },
+            WorkItemLink::PullRequest { number: 19 },
+            WorkItemLink::FreeText {
+                description: "dark mode".into(),
+            },
+        ] {
+            let mut worktree = Worktree::new("wt".into(), "b".into(), "/tmp/wt".into());
+            worktree.work_item = Some(link.clone());
+            let json = serde_json::to_string(&worktree).unwrap();
+            let back: Worktree = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.work_item, Some(link), "{json}");
+        }
+    }
+
+    /// A newer release may record a kind of link this one does not know. That
+    /// worktree must still load — unlinked — rather than failing the whole
+    /// file, which loads as *empty* state when it does not parse.
+    #[test]
+    fn a_link_of_an_unknown_kind_loads_as_unlinked() {
+        let worktree: Worktree = serde_json::from_str(
+            r#"{"name":"wt","branch":"b","path":"/tmp/wt",
+                "work_item":{"kind":"gitlab_issue","number":1}}"#,
+        )
+        .unwrap();
+        assert_eq!(worktree.work_item, None);
     }
 
     #[test]

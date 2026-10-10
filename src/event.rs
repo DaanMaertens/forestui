@@ -117,6 +117,9 @@ pub enum AppEvent {
     WorktreeAdded {
         repo_id: Uuid,
         worktree: Box<Worktree>,
+        /// Start Claude in the new worktree with this as its first message.
+        /// Launched by the fold, so a result it drops starts nothing.
+        first_prompt: Option<String>,
     },
     /// A `git worktree list` scan finished; the fold reconciles the config
     /// against it (git is the source of truth for which worktrees exist).
