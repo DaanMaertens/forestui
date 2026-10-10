@@ -40,14 +40,69 @@ struct Cached {
 /// holds synchronously. Keying by `owner/repo` made every lookup pay a
 /// `gh repo view` subprocess before it could even ask the cache, which is why
 /// the issues panel flashed "Loading…" on every selection change (#29).
+///
+/// Its own type rather than fields of [`State`] so tests can each hold one:
+/// the process-wide instance is shared by every test thread, and a test that
+/// read the generation could see another test's invalidation bump it before
+/// its own store landed.
 #[derive(Default)]
-struct State {
-    cache: HashMap<String, Cached>,
-    auth: Option<(AuthStatus, Option<String>)>,
+struct IssueCache {
+    entries: HashMap<String, Cached>,
     /// Bumped by every invalidation. A fetch that started before an
     /// invalidation must not store its result afterwards — it would re-stamp
     /// pre-invalidation data as fresh and silently undo the refresh.
     generation: u64,
+}
+
+impl IssueCache {
+    /// `Some((issues, fresh))` when a fetch has completed, `None` otherwise.
+    fn peek(&self, path: &str) -> Option<(Vec<GitHubIssue>, bool)> {
+        let cached = self.entries.get(path)?;
+        let fresh = (Utc::now() - cached.fetched_at).num_seconds() < CACHE_TTL_SECONDS;
+        Some((cached.issues.clone(), fresh))
+    }
+
+    /// Store a fetch result unless an invalidation landed while it ran.
+    /// `fresh` decides the stamp: `false` back-dates the entry to the TTL
+    /// boundary so it renders instantly but re-checks on the next visit.
+    fn store_if_current(
+        &mut self,
+        generation: u64,
+        path: &str,
+        issues: &[GitHubIssue],
+        fresh: bool,
+    ) {
+        if self.generation != generation {
+            return;
+        }
+        let fetched_at = if fresh {
+            Utc::now()
+        } else {
+            Utc::now() - chrono::Duration::seconds(CACHE_TTL_SECONDS)
+        };
+        self.entries.insert(
+            path.to_string(),
+            Cached {
+                issues: issues.to_vec(),
+                fetched_at,
+            },
+        );
+    }
+
+    /// Drop one path's entry. Deliberately not a clear-everything: nuking the
+    /// whole cache made the next selection change on every other repository a
+    /// guaranteed cold miss, which was half of #29.
+    fn invalidate(&mut self, path: &str) {
+        self.entries.remove(path);
+        // Fence out any fetch already in flight for the old contents.
+        self.generation += 1;
+    }
+}
+
+#[derive(Default)]
+struct State {
+    issues: IssueCache,
+    auth: Option<(AuthStatus, Option<String>)>,
 }
 
 fn state() -> &'static Mutex<State> {
@@ -140,10 +195,7 @@ pub async fn get_repo_info(path: &str) -> Option<(String, String)> {
 /// from the render thread — the lock is only ever held for map operations,
 /// never across an await.
 pub fn peek_issues(path: &str) -> Option<(Vec<GitHubIssue>, bool)> {
-    let guard = state().lock().ok()?;
-    let cached = guard.cache.get(path)?;
-    let fresh = (Utc::now() - cached.fetched_at).num_seconds() < CACHE_TTL_SECONDS;
-    Some((cached.issues.clone(), fresh))
+    state().lock().ok()?.issues.peek(path)
 }
 
 /// Open issues assigned to or authored by the current user, newest first.
@@ -153,7 +205,10 @@ pub async fn list_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
     if let Some((issues, true)) = peek_issues(path) {
         return issues;
     }
-    let generation = state().lock().map(|g| g.generation).unwrap_or_default();
+    let generation = state()
+        .lock()
+        .map(|g| g.issues.generation)
+        .unwrap_or_default();
 
     // Empty answers are cached too — a local-only repository or an
     // unauthenticated `gh` would otherwise re-flash "Loading…" and re-spawn
@@ -176,40 +231,30 @@ pub async fn list_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
     store_if_current(generation, path, issues, true)
 }
 
-/// Store a fetch result unless an invalidation landed while it ran. `fresh`
-/// decides the stamp: `false` back-dates the entry to the TTL boundary so it
-/// renders instantly but re-checks on the next visit.
+/// [`IssueCache::store_if_current`] on the shared cache, handing the issues
+/// back so `list_issues` can return what it stored.
 fn store_if_current(
     generation: u64,
     path: &str,
     issues: Vec<GitHubIssue>,
     fresh: bool,
 ) -> Vec<GitHubIssue> {
-    let fetched_at = if fresh {
-        Utc::now()
-    } else {
-        Utc::now() - chrono::Duration::seconds(CACHE_TTL_SECONDS)
-    };
-    if let Ok(mut guard) = state().lock()
-        && guard.generation == generation
-    {
-        guard.cache.insert(
-            path.to_string(),
-            Cached {
-                issues: issues.clone(),
-                fetched_at,
-            },
-        );
+    if let Ok(mut guard) = state().lock() {
+        guard
+            .issues
+            .store_if_current(generation, path, &issues, fresh);
     }
     issues
 }
 
-/// Seed the cache directly, for tests that must not shell out to `gh`.
+/// Seed the shared cache directly, for App tests that must not shell out to
+/// `gh`. Tests of the cache itself use their own [`IssueCache`] instead.
 #[cfg(test)]
 pub fn seed_cache_for_test(path: &str, issues: Vec<GitHubIssue>, fetched_at: DateTime<Utc>) {
     if let Ok(mut guard) = state().lock() {
         guard
-            .cache
+            .issues
+            .entries
             .insert(path.to_string(), Cached { issues, fetched_at });
     }
 }
@@ -255,14 +300,11 @@ async fn fetch_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
     issues
 }
 
-/// Drop the cached issues for one repository path. Deliberately not a
-/// clear-everything: nuking the whole cache made the next selection change on
-/// every other repository a guaranteed cold miss, which was half of #29.
+/// Drop the cached issues for one repository path; see
+/// [`IssueCache::invalidate`].
 pub fn invalidate_cache(path: &str) {
     if let Ok(mut guard) = state().lock() {
-        guard.cache.remove(path);
-        // Fence out any fetch already in flight for the old contents.
-        guard.generation += 1;
+        guard.issues.invalidate(path);
     }
 }
 
