@@ -363,7 +363,7 @@ capture UC-54 worktree-detail
 
 for spec in "a:UC-55:modal-add-repository:Repository Path" \
             "w:UC-56:modal-add-worktree:Worktree Name" \
-            "s:UC-57:modal-settings:BRANCH PREFIX" \
+            "S:UC-57:modal-settings:BRANCH PREFIX" \
             "d:UC-58:modal-confirm-delete:Permanently delete"; do
   IFS=: read -r key id slug expect <<< "$spec"
   focus_app; press "$key"
@@ -649,6 +649,36 @@ press a; await "Repository Path"; sleep 0.8
 click_text "Cancel"; sleep 1.5
 capture UC-86 click-modal-cancel
 assert UC-86 modal-dismissed-by-click "no" "$(screen_has 'Repository Path')"
+
+# --- UC-99: Start work for an issue, from `s` to a running Claude ------------
+#
+# Rust only: the Python build never had Start work. Runs last because the
+# launch adds a worktree, which would change every frame after it. beta is
+# selected (UC-83) and the gh stub answers its issue list with #326 and #298.
+if [ "$LABEL" = "rust" ]; then
+  focus_app
+  press s; await "Work Mode"; sleep 0.8
+  capture UC-99 start-work-mode
+  press Enter; await "#298"; sleep 0.8
+  capture UC-99 start-work-item
+  type_ "metrics"; sleep 0.5; press Enter
+  await "Launch"; sleep 0.8
+  capture UC-99 start-work-confirm
+  assert UC-99 prompt-names-the-issue "yes" "$(screen_has 'gh issue view 298 --comments')"
+  # Launch is the primary button after the checkbox; Enter on a text field
+  # launches too, which is what the name field (focused on open) does here.
+  press Enter
+  await "[0-9]:issue-298" 15000; sleep 2
+  capture UC-99 start-work-launched
+  wt="$ROOT/forest/beta/issue-298-proactive-metrics-coalesced-fire-rows-ov"
+  assert UC-99 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
+  assert UC-99 branch-checked-out "fix/issue-298-proactive-metrics-coalesced-fire-rows-ov" \
+    "$(git -C "$wt" branch --show-current 2>/dev/null)"
+  assert UC-99 work-item-linked "{'kind': 'issue', 'number': 298}" \
+    "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('issue-298')][0]")"
+  assert UC-99 claude-window-named-after-worktree "yes" \
+    "$(screen_has "[0-9]:issue-298")"
+fi
 
 echo "done: $LABEL"
 if [ "$WAIT_TIMEOUTS" -gt 0 ]; then

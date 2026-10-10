@@ -1,0 +1,44 @@
+claude stub --remote-control -n issue-298-proactive-metrics-coalesced-fire-rows-ov --session-id <uuid> Work on
+ GitHub issue #298: Proactive metrics: coalesced FIRE rows overcount Start by reading it with `gh issue view 298 --comments`, so you have it
+s current text and every comment. You are in the `issue-298-proactive-metrics-coalesced-fire-rows-ov` worktree of beta, on the branch `fix/i
+ssue-298-proactive-metrics-coalesced-fire-rows-ov`. Investigate the cause and propose a fix before changing any code. Wait for my go-ahead,
+then implement it.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[forestui-<:yolo:alpha:wt-a  6:term:alpha:wt-a:2  7:term:beta  8:issue-298-proactive-metrics-coalesced-fire-rows-ov*"<host>" <clock>

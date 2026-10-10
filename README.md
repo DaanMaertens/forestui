@@ -158,6 +158,7 @@ pane, `↑`/`↓` move and `Enter` activates.
 | `↑` / `↓` | Move within the focused pane |
 | `Enter` | Select a row / activate the focused control |
 | `a` | Add repository |
+| `s` | Start work |
 | `w` | Add worktree |
 | `e` | Open in editor |
 | `t` | Open in terminal |
@@ -167,7 +168,7 @@ pane, `↑`/`↓` move and `Enter` activates.
 | `h` | Toggle archive on the selected worktree |
 | `A` | Show or hide the archived section |
 | `d` | Delete |
-| `s` | Settings |
+| `S` | Settings |
 | `r` | Refresh |
 | `q` | Quit |
 
@@ -182,7 +183,7 @@ crosses them, so what is clickable is visible rather than guessed at:
 
 - **Click** a repository or worktree in the sidebar, a control in the detail
   pane, a field to focus it, any modal button, or a key in the footer bar —
-  clicking `s Settings` there is the same as pressing `s`.
+  clicking `S Settings` there is the same as pressing `S`.
 - **The `▼` / `▶` twisty** beside a repository folds its worktrees away without
   changing what is selected.
 - **The scroll wheel** scrolls whichever pane the pointer is over, whether or
@@ -260,7 +261,7 @@ Settings are stored in `~/.config/forestui/settings.json`:
 }
 ```
 
-Press `s` in the app to open the settings modal.
+Press `S` in the app to open the settings modal.
 
 Custom Claude buttons add extra entries to the CLAUDE section of the detail
 pane. Each one opens a tmux window named `<prefix>:<worktree>` running its

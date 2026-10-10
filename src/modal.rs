@@ -5,6 +5,7 @@
 //! three deep: Settings → Custom Buttons → Edit Button. A child that closes with
 //! a value hands it to its parent through [`Modal::receive_child`].
 
+use crate::event::BranchList;
 use crate::fuzzy::{self, BranchEntry, Searchable};
 use crate::models::{
     CustomClaudeButton, GitHubIssue, MAX_BUTTON_LABEL_LENGTH, MAX_BUTTON_PREFIX_LENGTH,
@@ -12,8 +13,10 @@ use crate::models::{
     validate_button_prefix, validate_claude_command,
 };
 use crate::picker::SearchPicker;
+use crate::prompt;
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
 use crate::util;
+use crate::work::{self, IssueEntry, WorkMode};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -54,6 +57,9 @@ pub enum ModalEffect {
     /// dialog stays open and re-reads its status, so the result of the action
     /// is visible where the action was taken.
     ClaudePlugin(IntegrationAction),
+    /// Start work picked an issue: load the branches and open the confirm
+    /// screen for it on top of the picker.
+    ConfirmIssue(Box<GitHubIssue>),
 }
 
 /// What the integration dialog can do, given what is currently on disk.
@@ -160,11 +166,12 @@ pub enum ModalResult {
     WorktreeFromIssue {
         repo_id: Uuid,
         issue_number: i64,
-        issue_title: String,
         name: String,
         branch: String,
         pull_first: bool,
         base_branch: Option<String>,
+        /// The prompt as the confirm screen showed it.
+        first_prompt: String,
     },
     SettingsSaved(Box<Settings>),
     CustomButtonsSaved(Vec<CustomClaudeButton>),
@@ -190,7 +197,8 @@ pub enum ModalResult {
 pub enum Modal {
     AddRepository(AddRepositoryModal),
     AddWorktree(Box<AddWorktreeModal>),
-    CreateFromIssue(Box<CreateFromIssueModal>),
+    StartWork(Box<StartWorkModal>),
+    StartWorkConfirm(Box<StartWorkConfirmModal>),
     Settings(Box<SettingsModal>),
     CustomButtons(CustomButtonsModal),
     EditButton(Box<EditButtonModal>),
@@ -213,7 +221,8 @@ impl Modal {
         match self {
             Modal::AddRepository(m) => m.handle_key(key),
             Modal::AddWorktree(m) => m.handle_key(key),
-            Modal::CreateFromIssue(m) => m.handle_key(key),
+            Modal::StartWork(m) => m.handle_key(key),
+            Modal::StartWorkConfirm(m) => m.handle_key(key),
             Modal::Settings(m) => m.handle_key(key),
             Modal::CustomButtons(m) => m.handle_key(key),
             Modal::EditButton(m) => m.handle_key(key),
@@ -248,7 +257,10 @@ impl Modal {
         match self {
             Modal::AddRepository(m) => m.focus = index.min(AddRepositoryModal::FIELDS - 1),
             Modal::AddWorktree(m) => m.focus = index.min(m.field_count() - 1),
-            Modal::CreateFromIssue(m) => m.focus = index.min(CreateFromIssueModal::FIELDS - 1),
+            Modal::StartWork(m) => m.set_focus(index),
+            Modal::StartWorkConfirm(m) => {
+                m.focus = index.min(StartWorkConfirmModal::FIELDS - 1);
+            }
             Modal::Settings(m) => m.focus = index.min(SettingsModal::FIELDS - 1),
             Modal::EditButton(m) => m.focus = index.min(EditButtonModal::FIELDS - 1),
             Modal::ThemePicker(m) => m.select(index),
@@ -278,6 +290,7 @@ impl Modal {
                 m.selected = row.min(m.buttons.len() - 1);
             }
             Modal::ThemePicker(m) => m.select(row),
+            Modal::StartWork(m) => m.set_row(row),
             _ => {}
         }
     }
@@ -285,7 +298,7 @@ impl Modal {
     /// Advance any spinner this modal owns. Returns whether something visible
     /// moved, so the caller knows the frame needs repainting.
     pub fn tick(&mut self) -> bool {
-        if let Modal::CreateFromIssue(m) = self
+        if let Modal::StartWorkConfirm(m) = self
             && m.is_fetching
         {
             m.spinner_index = (m.spinner_index + 1) % SPINNER.len();
@@ -646,17 +659,214 @@ impl AddWorktreeModal {
     }
 }
 
-// -------------------------------------------------------- Create worktree from issue
+// -------------------------------------------------------------------- Start work
 
+/// Which step of Start work is on screen. The confirm screen is a modal of
+/// its own, pushed on top, so Esc there lands back on the item step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartWorkStep {
+    Mode,
+    Item,
+}
+
+/// Start work's first two steps: choose a work mode, then a work item.
 #[derive(Debug)]
-pub struct CreateFromIssueModal {
+pub struct StartWorkModal {
+    pub repo_id: Uuid,
+    pub repo_name: String,
+    /// The repository's checkout: the issues are the ones loaded for it.
+    pub repo_path: String,
+    pub step: StartWorkStep,
+    /// The highlighted mode on the mode step, and the chosen one after it.
+    pub mode: WorkMode,
+    /// `None` while the issues are still loading.
+    pub picker: Option<SearchPicker<IssueEntry>>,
+    /// One of the `FOCUS_*` constants; see [`StartWorkModal::ring`].
+    pub focus: usize,
+}
+
+impl StartWorkModal {
+    /// The mode list on the mode step; the query and its results on the item
+    /// step, which share one focus stop so typing and Up/Down both work
+    /// without tabbing between them.
+    pub const FOCUS_LIST: usize = 0;
+    /// Only on the item step.
+    pub const FOCUS_BACK: usize = 1;
+    pub const FOCUS_CANCEL: usize = 2;
+
+    pub fn new(repo: &Repository, issues: Option<Vec<GitHubIssue>>) -> Self {
+        let mut modal = Self {
+            repo_id: repo.id,
+            repo_name: repo.name.clone(),
+            repo_path: repo.source_path.clone(),
+            step: StartWorkStep::Mode,
+            mode: WorkMode::Issue,
+            picker: None,
+            focus: Self::FOCUS_LIST,
+        };
+        if let Some(issues) = issues {
+            modal.set_issues(issues);
+        }
+        modal
+    }
+
+    /// Fill the item list once the issues have loaded. A list already on
+    /// screen is kept: replacing it under a half-typed query would move the
+    /// selection out from under the user.
+    pub fn set_issues(&mut self, issues: Vec<GitHubIssue>) {
+        if self.picker.is_none() {
+            let entries = issues.into_iter().map(IssueEntry::new).collect();
+            self.picker = Some(SearchPicker::new(
+                entries,
+                "Type a number or part of a title...",
+            ));
+        }
+    }
+
+    /// The focus stops on the current step, in Tab order.
+    pub fn ring(&self) -> &'static [usize] {
+        match self.step {
+            StartWorkStep::Mode => &[Self::FOCUS_LIST, Self::FOCUS_CANCEL],
+            StartWorkStep::Item => &[Self::FOCUS_LIST, Self::FOCUS_BACK, Self::FOCUS_CANCEL],
+        }
+    }
+
+    pub fn set_focus(&mut self, index: usize) {
+        if self.ring().contains(&index) {
+            self.focus = index;
+        }
+    }
+
+    /// Select a clicked row: a mode on the mode step, an item on the item step.
+    pub fn set_row(&mut self, row: usize) {
+        match self.step {
+            StartWorkStep::Mode => {
+                if let Some(mode) = WorkMode::ALL.get(row).copied()
+                    && mode.is_enabled()
+                {
+                    self.mode = mode;
+                }
+            }
+            StartWorkStep::Item => {
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.select_row(row);
+                }
+            }
+        }
+    }
+
+    fn go_to(&mut self, step: StartWorkStep) {
+        self.step = step;
+        self.focus = Self::FOCUS_LIST;
+    }
+
+    /// Move the mode highlight, skipping the modes that cannot be picked.
+    fn step_mode(&mut self, delta: isize) {
+        let modes = WorkMode::ALL;
+        let Some(mut position) = modes.iter().position(|m| *m == self.mode) else {
+            return;
+        };
+        loop {
+            let next = position as isize + delta;
+            if next < 0 || next as usize >= modes.len() {
+                return;
+            }
+            position = next as usize;
+            if modes[position].is_enabled() {
+                self.mode = modes[position];
+                return;
+            }
+        }
+    }
+
+    fn cycle(&mut self, key: KeyEvent) -> bool {
+        let ring = self.ring();
+        let Some(mut position) = ring.iter().position(|f| *f == self.focus) else {
+            self.focus = Self::FOCUS_LIST;
+            return true;
+        };
+        if !cycle_focus(&mut position, ring.len(), key) {
+            return false;
+        }
+        self.focus = ring[position];
+        true
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> ModalOutcome {
+        // Esc steps back rather than throwing the whole flow away; on the
+        // first step there is nothing behind it, so it closes.
+        if is_escape(key) {
+            return match self.step {
+                StartWorkStep::Mode => ModalOutcome::Close,
+                StartWorkStep::Item => {
+                    self.go_to(StartWorkStep::Mode);
+                    ModalOutcome::None
+                }
+            };
+        }
+
+        if self.focus == Self::FOCUS_LIST {
+            match self.step {
+                StartWorkStep::Mode => match key.code {
+                    KeyCode::Up => {
+                        self.step_mode(-1);
+                        return ModalOutcome::None;
+                    }
+                    KeyCode::Down => {
+                        self.step_mode(1);
+                        return ModalOutcome::None;
+                    }
+                    KeyCode::Enter if self.mode.is_enabled() => {
+                        self.go_to(StartWorkStep::Item);
+                        return ModalOutcome::None;
+                    }
+                    _ => {}
+                },
+                StartWorkStep::Item => {
+                    if let Some(picker) = self.picker.as_mut() {
+                        if picker.edit_query(key) || picker.move_selection(key) {
+                            return ModalOutcome::None;
+                        }
+                        if key.code == KeyCode::Enter {
+                            return match picker.selected() {
+                                Some(entry) => ModalOutcome::Effect(ModalEffect::ConfirmIssue(
+                                    Box::new(entry.issue.clone()),
+                                )),
+                                None => ModalOutcome::None,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
+        if self.cycle(key) {
+            return ModalOutcome::None;
+        }
+
+        match (self.focus, key.code) {
+            (Self::FOCUS_BACK, KeyCode::Enter) => {
+                self.go_to(StartWorkStep::Mode);
+                ModalOutcome::None
+            }
+            (Self::FOCUS_CANCEL, KeyCode::Enter) => ModalOutcome::Close,
+            _ => ModalOutcome::None,
+        }
+    }
+}
+
+/// Start work's confirm screen: the worktree an issue will start in, the
+/// base it branches from, and the prompt Claude will be started with.
+///
+/// Also opened directly by an issue card's Create WT, with nothing beneath it.
+#[derive(Debug)]
+pub struct StartWorkConfirmModal {
     pub repo_id: Uuid,
     pub repo_name: String,
     pub repo_path: String,
     pub issue_number: i64,
     pub issue_title: String,
-    pub branches: Vec<String>,
-    pub remotes: Vec<String>,
+    pub branches: BranchList,
     pub forest_dir: PathBuf,
     pub name: TextInput,
     pub branch: TextInput,
@@ -664,32 +874,33 @@ pub struct CreateFromIssueModal {
     pub pull_first: bool,
     pub is_fetching: bool,
     pub spinner_index: usize,
-    /// One of the `FOCUS_*` constants; see [`CreateFromIssueModal`].
+    /// Opened from Start work's item step, which is still underneath: the
+    /// dismiss button goes back to it rather than cancelling.
+    pub has_parent: bool,
+    /// One of the `FOCUS_*` constants; see [`StartWorkConfirmModal`].
     pub focus: usize,
 }
 
-impl CreateFromIssueModal {
+impl StartWorkConfirmModal {
     /// The focus ring, in the order `ui/modals.rs` draws it.
     pub const FOCUS_NAME: usize = 0;
     pub const FOCUS_BRANCH: usize = 1;
     pub const FOCUS_BASE: usize = 2;
     pub const FOCUS_FETCH: usize = 3;
     pub const FOCUS_PULL: usize = 4;
-    pub const FOCUS_CREATE: usize = 5;
+    pub const FOCUS_LAUNCH: usize = 5;
     pub const FOCUS_CANCEL: usize = 6;
     pub const FIELDS: usize = Self::FOCUS_CANCEL + 1;
 
     pub fn new(
         repo: &Repository,
         issue: &GitHubIssue,
-        branches: Vec<String>,
-        remotes: Vec<String>,
+        branches: BranchList,
         forest_dir: PathBuf,
-        branch_prefix: &str,
-        current_branch: &str,
+        has_parent: bool,
     ) -> Self {
-        let issue_branch = issue.branch_name();
-        let base = default_base_branch(&branches, &remotes, current_branch);
+        let names = work::names(WorkMode::Issue, issue.number, &issue.title);
+        let base = default_base_branch(&branches);
         Self {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
@@ -697,15 +908,14 @@ impl CreateFromIssueModal {
             issue_number: issue.number,
             issue_title: issue.title.clone(),
             branches,
-            remotes,
             forest_dir,
-            name: TextInput::new(issue_branch.clone()).with_placeholder("worktree-name"),
-            branch: TextInput::new(format!("{branch_prefix}{issue_branch}"))
-                .with_placeholder("feat/branch-name"),
+            name: TextInput::new(names.worktree).with_placeholder("worktree-name"),
+            branch: TextInput::new(names.branch).with_placeholder("fix/branch-name"),
             base_branch: TextInput::new(base).with_placeholder("origin/main"),
             pull_first: true,
             is_fetching: false,
             spinner_index: 0,
+            has_parent,
             focus: Self::FOCUS_NAME,
         }
     }
@@ -716,32 +926,49 @@ impl CreateFromIssueModal {
             .join(self.name.value())
     }
 
+    /// The first prompt, filled in from the fields as they stand now — so
+    /// what the screen shows is exactly what Claude is started with.
+    pub fn prompt(&self) -> String {
+        prompt::fill(
+            prompt::ISSUE_TEMPLATE,
+            &prompt::TemplateVars {
+                number: Some(self.issue_number),
+                title: &self.issue_title,
+                branch: self.branch.value(),
+                worktree: self.name.value(),
+                repo: &self.repo_name,
+                body: None,
+            },
+        )
+    }
+
     /// The inline suggestion shown after the typed base branch.
     pub fn base_suggestion(&self) -> Option<String> {
         let value = self.base_branch.value();
         if value.is_empty() {
             return None;
         }
-        fuzzy::fuzzy_match_branches(value, &self.branches, &self.remotes, 1)
+        fuzzy::fuzzy_match_branches(value, &self.branches.branches, &self.branches.remotes, 1)
             .into_iter()
             .next()
             .map(|(b, _)| b)
     }
 
-    pub fn can_create(&self) -> bool {
+    pub fn can_launch(&self) -> bool {
         let base = self.base_branch.value();
-        base.is_empty() || self.branches.iter().any(|b| b == base)
+        !self.name.is_empty()
+            && !self.branch.is_empty()
+            && (base.is_empty() || self.branches.branches.iter().any(|b| b == base))
     }
 
     /// Apply a refreshed branch list after a fetch.
-    pub fn update_branches(&mut self, branches: Vec<String>, remotes: Vec<String>, current: &str) {
+    pub fn update_branches(&mut self, branches: BranchList) {
         self.is_fetching = false;
         self.branches = branches;
-        self.remotes = remotes;
         let base = self.base_branch.value().to_string();
-        if base.is_empty() || !self.branches.contains(&base) {
-            let next = default_base_branch(&self.branches, &self.remotes, current);
-            self.base_branch.set_value(next);
+        if base.is_empty() || !self.branches.branches.contains(&base) {
+            self.base_branch
+                .set_value(default_base_branch(&self.branches));
         }
     }
 
@@ -793,18 +1020,18 @@ impl CreateFromIssueModal {
             }
             (Self::FOCUS_CANCEL, KeyCode::Enter) => ModalOutcome::Close,
             (_, KeyCode::Enter) => {
-                if self.name.is_empty() || self.branch.is_empty() || !self.can_create() {
+                if !self.can_launch() {
                     return ModalOutcome::None;
                 }
                 let base = self.base_branch.value().to_string();
                 ModalOutcome::Submit(ModalResult::WorktreeFromIssue {
                     repo_id: self.repo_id,
                     issue_number: self.issue_number,
-                    issue_title: self.issue_title.clone(),
                     name: self.name.value().to_string(),
                     branch: self.branch.value().to_string(),
                     pull_first: self.pull_first,
                     base_branch: if base.is_empty() { None } else { Some(base) },
+                    first_prompt: self.prompt(),
                 })
             }
             _ => ModalOutcome::None,
@@ -812,19 +1039,26 @@ impl CreateFromIssueModal {
     }
 }
 
-/// Prefer `<remote>/<current>` when it exists, then the local branch, then the
+/// What new work branches from: the remote's default branch when it records
+/// one, then `<remote>/<current>`, then the local current branch, then the
 /// first branch in the list.
-pub fn default_base_branch(branches: &[String], remotes: &[String], current: &str) -> String {
-    for remote in remotes {
+pub fn default_base_branch(list: &BranchList) -> String {
+    if let Some(remote_default) = &list.remote_default
+        && list.branches.contains(remote_default)
+    {
+        return remote_default.clone();
+    }
+    let current = &list.current_branch;
+    for remote in &list.remotes {
         let candidate = format!("{remote}/{current}");
-        if branches.contains(&candidate) {
+        if list.branches.contains(&candidate) {
             return candidate;
         }
     }
-    if branches.iter().any(|b| b == current) {
+    if list.branches.iter().any(|b| b == current) {
         return current.to_string();
     }
-    branches.first().cloned().unwrap_or_default()
+    list.branches.first().cloned().unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------- Settings
@@ -1957,17 +2191,53 @@ mod tests {
         ));
     }
 
+    fn branch_list(
+        branches: &[&str],
+        remotes: &[&str],
+        remote_default: Option<&str>,
+        current: &str,
+    ) -> BranchList {
+        BranchList {
+            branches: branches.iter().map(|b| b.to_string()).collect(),
+            remotes: remotes.iter().map(|r| r.to_string()).collect(),
+            remote_default: remote_default.map(str::to_string),
+            current_branch: current.to_string(),
+        }
+    }
+
     #[test]
     fn base_branch_default_prefers_remote() {
-        let branches = vec!["main".to_string(), "origin/main".to_string()];
-        let remotes = vec!["origin".to_string()];
+        let branches = ["main", "origin/main"];
         assert_eq!(
-            default_base_branch(&branches, &remotes, "main"),
+            default_base_branch(&branch_list(&branches, &["origin"], None, "main")),
             "origin/main"
         );
-        assert_eq!(default_base_branch(&branches, &[], "main"), "main");
-        assert_eq!(default_base_branch(&branches, &[], "nope"), "main");
-        assert_eq!(default_base_branch(&[], &[], "main"), "");
+        assert_eq!(
+            default_base_branch(&branch_list(&branches, &[], None, "main")),
+            "main"
+        );
+        assert_eq!(
+            default_base_branch(&branch_list(&branches, &[], None, "nope")),
+            "main"
+        );
+        assert_eq!(
+            default_base_branch(&branch_list(&[], &[], None, "main")),
+            ""
+        );
+    }
+
+    /// New work starts from what the remote calls its default branch, not
+    /// from whatever the repository's own checkout happens to be on.
+    #[test]
+    fn base_branch_default_is_the_remotes_default_branch() {
+        let branches = ["develop", "main", "origin/develop", "origin/main"];
+        let list = branch_list(&branches, &["origin"], Some("origin/main"), "develop");
+        assert_eq!(default_base_branch(&list), "origin/main");
+
+        // A recorded default that is not among the branches (pruned, or a
+        // stale ref) falls back to the old order rather than naming nothing.
+        let stale = branch_list(&branches, &["origin"], Some("origin/gone"), "develop");
+        assert_eq!(default_base_branch(&stale), "origin/develop");
     }
 
     /// The picker's contract: moving the highlight applies the candidate to

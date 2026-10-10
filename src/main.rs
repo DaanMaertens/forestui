@@ -15,6 +15,7 @@ mod theme;
 mod ui;
 mod util;
 mod version_check;
+mod work;
 
 use app::App;
 use clap::Parser;

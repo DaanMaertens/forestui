@@ -7,14 +7,13 @@
 
 use super::{Action, App, Field};
 use crate::event::Severity;
-use crate::event::{AppEvent, BranchTarget, EventTx};
+use crate::event::{AppEvent, BranchList, BranchTarget, EventTx};
 use crate::modal::{
-    AddWorktreeModal, ConfirmAction, ConfirmModal, CreateFromIssueModal, Modal, ModalEffect,
-    ModalResult,
+    AddWorktreeModal, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult,
+    StartWorkConfirmModal, StartWorkModal,
 };
 use crate::modal::{IntegrationAction, ModalOutcome};
 use crate::models::{CustomClaudeButton, Repository, WorkItemLink, Worktree};
-use crate::prompt;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -34,14 +33,18 @@ struct WorkStart {
 async fn load_branches(tx: EventTx, path: String, repo_id: Uuid, target: BranchTarget) {
     let branches = git::list_branches(&path).await.unwrap_or_default();
     let remotes = git::list_remotes(&path).await.unwrap_or_default();
+    let remote_default = git::remote_default_branch(&path, &remotes).await;
     let current_branch = git::get_current_branch(&path)
         .await
         .unwrap_or_else(|_| "main".to_string());
     tx.send(AppEvent::Branches {
         repo_id,
-        branches,
-        remotes,
-        current_branch,
+        list: BranchList {
+            branches,
+            remotes,
+            remote_default,
+            current_branch,
+        },
         target,
     });
 }
@@ -57,6 +60,11 @@ impl App {
             ModalOutcome::None => {}
             ModalOutcome::Close => {
                 let closed = self.modals.pop();
+                // An issue picked just before closing must not open its
+                // confirm screen over nothing once the branches arrive.
+                if matches!(closed, Some(Modal::StartWork(_))) {
+                    self.pending_issue = None;
+                }
                 // The integration dialog installs and removes the plugin, so
                 // the Settings section that opened it has to re-read the status
                 // it snapshotted — including on Esc, which reports nothing.
@@ -124,6 +132,16 @@ impl App {
     fn run_modal_effect(&mut self, effect: ModalEffect) {
         match effect {
             ModalEffect::ClaudePlugin(action) => self.run_claude_plugin_action(action),
+            ModalEffect::ConfirmIssue(issue) => {
+                // The repository the flow was opened for, not whatever the
+                // selection says now.
+                let Some(Modal::StartWork(flow)) = self.modals.last() else {
+                    return;
+                };
+                let repo_id = flow.repo_id;
+                self.pending_issue = Some(*issue);
+                self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
+            }
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
                 let tx = self.tx.clone();
@@ -150,26 +168,15 @@ impl App {
             ModalResult::WorktreeFromIssue {
                 repo_id,
                 issue_number,
-                issue_title,
                 name,
                 branch,
                 pull_first,
                 base_branch,
+                first_prompt,
             } => {
-                let Some(repo) = self.state.find_repository(repo_id) else {
-                    return;
-                };
-                let first_prompt = prompt::fill(
-                    prompt::ISSUE_TEMPLATE,
-                    &prompt::TemplateVars {
-                        number: Some(issue_number),
-                        title: &issue_title,
-                        branch: &branch,
-                        worktree: &name,
-                        repo: &repo.name,
-                        body: None,
-                    },
-                );
+                // Launching ends the whole flow: the item step left beneath
+                // the confirm screen has nothing more to offer.
+                self.modals.retain(|m| !matches!(m, Modal::StartWork(_)));
                 let start = WorkStart {
                     link: WorkItemLink::Issue {
                         number: issue_number,
@@ -404,18 +411,11 @@ impl App {
         });
     }
 
-    pub(super) fn on_branches(
-        &mut self,
-        repo_id: Uuid,
-        branches: Vec<String>,
-        remotes: Vec<String>,
-        current_branch: String,
-        target: BranchTarget,
-    ) {
+    pub(super) fn on_branches(&mut self, repo_id: Uuid, list: BranchList, target: BranchTarget) {
         match target {
             BranchTarget::RefetchOpenModal => {
-                if let Some(Modal::CreateFromIssue(modal)) = self.modals.last_mut() {
-                    modal.update_branches(branches, remotes, &current_branch);
+                if let Some(Modal::StartWorkConfirm(modal)) = self.modals.last_mut() {
+                    modal.update_branches(list);
                 }
             }
             BranchTarget::AddWorktree => {
@@ -425,29 +425,36 @@ impl App {
                 self.modals
                     .push(Modal::AddWorktree(Box::new(AddWorktreeModal::new(
                         repo,
-                        branches,
-                        remotes,
+                        list.branches,
+                        list.remotes,
                         settings_service::get_forest_path(),
                         self.settings.branch_prefix.clone(),
                     ))));
             }
-            BranchTarget::CreateFromIssue => {
+            BranchTarget::StartWorkConfirm => {
                 let Some(issue) = self.pending_issue.take() else {
                     return;
                 };
                 let Some(repo) = self.state.find_repository(repo_id) else {
                     return;
                 };
-                self.modals
-                    .push(Modal::CreateFromIssue(Box::new(CreateFromIssueModal::new(
+                // Opened over Start work's item step, or over nothing from an
+                // issue card. Anything else on top means the user moved on
+                // while the branches loaded.
+                let has_parent = match self.modals.last() {
+                    None => false,
+                    Some(Modal::StartWork(_)) => true,
+                    Some(_) => return,
+                };
+                self.modals.push(Modal::StartWorkConfirm(Box::new(
+                    StartWorkConfirmModal::new(
                         repo,
                         &issue,
-                        branches,
-                        remotes,
+                        list,
                         settings_service::get_forest_path(),
-                        &self.settings.branch_prefix,
-                        &current_branch,
-                    ))));
+                        has_parent,
+                    ),
+                )));
             }
         }
     }
@@ -461,6 +468,26 @@ impl App {
         let path = repo.source_path.clone();
         let tx = self.tx.clone();
         tokio::spawn(load_branches(tx, path, repo_id, target));
+    }
+
+    /// Open Start work for the selected repository — from its own row or from
+    /// one of its worktrees.
+    ///
+    /// The issues are the "mine" list the repository pane loads. With a warm
+    /// cache the picker is ready at once; otherwise it fills when the fetch
+    /// folds in, so the mode step never waits on `gh`.
+    pub(super) fn action_start_work(&mut self) {
+        let Some(repo) = self.state.selected_repository() else {
+            self.notify("Select a repository first", Severity::Warning);
+            return;
+        };
+        let path = repo.source_path.clone();
+        let cached = github::peek_issues(&path);
+        let modal = StartWorkModal::new(repo, cached.as_ref().map(|(issues, _)| issues.clone()));
+        self.modals.push(Modal::StartWork(Box::new(modal)));
+        if !matches!(cached, Some((_, true))) {
+            self.fetch_issues_for(path);
+        }
     }
 
     pub(super) fn action_add_worktree(&mut self) {
@@ -623,6 +650,7 @@ impl App {
 
         match action {
             Action::Sync => self.sync(path),
+            Action::StartWork => self.action_start_work(),
             Action::AddWorktree => self.action_add_worktree(),
             Action::Editor => self.open_in_editor(&path),
             Action::Terminal => self.open_in_terminal(&path),
@@ -686,7 +714,7 @@ impl App {
                     && let Some(issue) = self.issues.as_ref().and_then(|i| i.get(index)).cloned()
                 {
                     self.pending_issue = Some(issue);
-                    self.load_branches_then(repo_id, BranchTarget::CreateFromIssue);
+                    self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
                 }
             }
             Action::RemoveRepository | Action::Delete => self.action_delete(),

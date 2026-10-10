@@ -6,9 +6,9 @@
 └─ wt-a                           │  Branch:     main
   beta                            │  Commit:     <sha> (<rel>)
                                   │
-                                  │  ┌────────────────────────┐ ┌──────────────┐
-                                  │  │ ↓ Git Pull (No remote) │ │ Add Worktree │
-                                  │  └────────────────────────┘ └──────────────┘
+                                  │  ┌────────────┐ ┌────────────────────────┐ ┌──────────────┐
+                                  │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Add Worktree │
+                                  │  └────────────┘ └────────────────────────┘ └──────────────┘
                                   │
                                   │  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                   │
@@ -40,5 +40,5 @@
                                   │  │                                                                    │ Claude │ │ YOLO │ │ Opus ││
                                   │  │ claude: looking at the card layout now                             └────────┘ └──────┘ └──────┘│
                                   │  │ user: and then check it against the python build                     ┌────────┐ ┌─────┐ ┌─────┐│
- a Add Repo  q Quit  w Add Worktree  e Editor  t Terminal  o Files  n Claude  y YOLO  h Archive  d Delete  s Settings  r Refresh  A Archived
+ a Add Repo  q Quit  s Start  w Add WT  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>*                                                                              "<host>" <clock>

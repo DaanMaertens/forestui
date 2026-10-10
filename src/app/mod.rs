@@ -792,7 +792,7 @@ impl App {
         // control from the previous pane against the new selection would act
         // on the wrong thing entirely.
         self.drawn_items.clear();
-        // A create-from-issue flow belongs to the selection that started it.
+        // A Start work confirm screen belongs to the selection that started it.
         self.pending_issue = None;
 
         let Some(path) = self.state.selected_path() else {
@@ -876,7 +876,12 @@ impl App {
         let Some(repo) = self.state.selected_repository() else {
             return;
         };
-        let path = repo.source_path.clone();
+        self.fetch_issues_for(repo.source_path.clone());
+    }
+
+    /// Fetch the issues for one repository's checkout. The result folds into
+    /// whichever of the pane and an open Start work still want that path.
+    pub(super) fn fetch_issues_for(&mut self, path: String) {
         // One fetch per path at a time — each one is a chain of gh
         // subprocesses and possibly a network call for an identical result.
         if !self.issues_in_flight.insert(path.clone()) {
@@ -1154,6 +1159,11 @@ impl App {
             },
             AppEvent::Issues { path, issues } => {
                 self.issues_in_flight.remove(&path);
+                if let Some(Modal::StartWork(flow)) = self.modals.last_mut()
+                    && flow.repo_path == path
+                {
+                    flow.set_issues(issues.clone());
+                }
                 if self.state.selection.is_repository()
                     && Some(path.as_str())
                         == self
@@ -1171,13 +1181,11 @@ impl App {
             }
             AppEvent::Branches {
                 repo_id,
-                branches,
-                remotes,
-                current_branch,
+                list,
                 target,
-            } => self.on_branches(repo_id, branches, remotes, current_branch, target),
+            } => self.on_branches(repo_id, list, target),
             AppEvent::FetchFailed(error) => {
-                if let Some(Modal::CreateFromIssue(modal)) = self.modals.last_mut() {
+                if let Some(Modal::StartWorkConfirm(modal)) = self.modals.last_mut() {
                     modal.fetch_failed();
                 }
                 self.notify(format!("Fetch failed: {error}"), Severity::Error);
@@ -2942,7 +2950,7 @@ mod tests {
 
         // The panes are still drawn behind a modal, so they are still
         // hit-testable; only the guard stops the wheel reaching them.
-        app.handle_key(key(KeyCode::Char('s')));
+        app.handle_key(key(KeyCode::Char('S')));
         assert_eq!(app.modals.len(), 1);
         app.handle_mouse(wheel(4, 5));
 
@@ -3136,7 +3144,7 @@ mod tests {
     #[tokio::test]
     async fn clicking_a_field_or_cycle_does_not_submit_the_modal() {
         let (_dir, mut app) = app_with_fixture();
-        app.handle_key(key(KeyCode::Char('s')));
+        app.handle_key(key(KeyCode::Char('S')));
         assert_eq!(app.modals.len(), 1);
 
         // Focus index 1 is the branch-prefix input. Clicking it must focus, not save.
@@ -3677,5 +3685,364 @@ mod tests {
         assert_eq!(app.notifications.len(), 1);
         assert!(app.notifications[0].text.contains("no longer exists"));
         assert_eq!(app.notifications[0].severity, Severity::Error);
+    }
+
+    // ---------------------------------------------------------------- start work
+
+    fn open_issue(number: i64, title: &str) -> crate::models::GitHubIssue {
+        serde_json::from_value(serde_json::json!({
+            "number": number,
+            "title": title,
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        }))
+        .expect("issue fixture")
+    }
+
+    /// The fixture's repository with `issues` already in the GitHub cache, so
+    /// opening Start work never has to ask `gh`.
+    fn app_with_issues(
+        issues: Vec<crate::models::GitHubIssue>,
+    ) -> (tempfile::TempDir, App, String) {
+        let (dir, app) = app_with_fixture();
+        let path = app.state.repositories()[0].source_path.clone();
+        github::seed_cache_for_test(&path, issues, chrono::Utc::now());
+        (dir, app, path)
+    }
+
+    fn start_work(app: &App) -> &crate::modal::StartWorkModal {
+        match app.modals.last() {
+            Some(Modal::StartWork(flow)) => flow,
+            other => panic!("Start work expected, found {other:?}"),
+        }
+    }
+
+    fn confirm_screen(app: &App) -> &crate::modal::StartWorkConfirmModal {
+        match app.modals.last() {
+            Some(Modal::StartWorkConfirm(confirm)) => confirm,
+            other => panic!("the confirm screen expected, found {other:?}"),
+        }
+    }
+
+    fn type_text(app: &mut App, text: &str) {
+        for c in text.chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+    }
+
+    /// What the branch load for the confirm screen delivers, as git would.
+    fn branches_loaded(app: &App) -> AppEvent {
+        AppEvent::Branches {
+            repo_id: app.state.repositories()[0].id,
+            list: crate::event::BranchList {
+                branches: vec!["develop".into(), "main".into(), "origin/main".into()],
+                remotes: vec!["origin".into()],
+                remote_default: Some("origin/main".into()),
+                current_branch: "develop".into(),
+            },
+            target: crate::event::BranchTarget::StartWorkConfirm,
+        }
+    }
+
+    /// Mode, then item, then confirm: the whole keyboard path to the screen
+    /// Launch is pressed on.
+    fn walk_to_confirm(app: &mut App, query: &str) {
+        app.handle_key(key(KeyCode::Char('s')));
+        app.handle_key(key(KeyCode::Enter));
+        type_text(app, query);
+        app.handle_key(key(KeyCode::Enter));
+        let loaded = branches_loaded(app);
+        app.handle_event(loaded);
+    }
+
+    #[tokio::test]
+    async fn s_opens_start_work_on_the_mode_step() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+
+        app.handle_key(key(KeyCode::Char('s')));
+
+        let flow = start_work(&app);
+        assert_eq!(flow.step, crate::modal::StartWorkStep::Mode);
+        assert_eq!(flow.mode, crate::work::WorkMode::Issue);
+        assert!(
+            keys::BINDINGS.contains(&('s', "Start")),
+            "the footer must offer it"
+        );
+    }
+
+    /// Settings moved to `S` to make room; `s` must not open it any more.
+    #[tokio::test]
+    async fn settings_moved_to_capital_s() {
+        let (_dir, mut app, _) = app_with_issues(Vec::new());
+        app.handle_key(key(KeyCode::Char('S')));
+        assert!(matches!(app.modals.last(), Some(Modal::Settings(_))));
+    }
+
+    /// Start work runs for the repository a worktree belongs to as well, so
+    /// it does not matter which of its rows is selected.
+    #[tokio::test]
+    async fn start_work_opens_from_a_worktree_row_for_its_repository() {
+        let (_dir, mut app, path) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        app.handle_key(key(KeyCode::Down));
+        assert!(app.state.selection.is_worktree());
+
+        app.handle_key(key(KeyCode::Char('s')));
+
+        assert_eq!(start_work(&app).repo_path, path);
+    }
+
+    #[tokio::test]
+    async fn the_start_work_control_leads_the_repository_pane() {
+        let (_dir, mut app, _) = app_with_issues(Vec::new());
+        assert_eq!(
+            app.detail_items().first(),
+            Some(&DetailItem::Action(Action::StartWork))
+        );
+
+        app.run_action(Action::StartWork);
+
+        assert!(matches!(app.modals.last(), Some(Modal::StartWork(_))));
+    }
+
+    /// Only `issue` exists so far: the other modes are listed but the
+    /// highlight skips them, so Enter can never choose one.
+    #[tokio::test]
+    async fn only_the_issue_mode_can_be_chosen() {
+        let (_dir, mut app, _) = app_with_issues(Vec::new());
+        app.handle_key(key(KeyCode::Char('s')));
+
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(start_work(&app).mode, crate::work::WorkMode::Issue);
+
+        // A click on a greyed-out row does not pick it either.
+        if let Some(modal) = app.modals.last_mut() {
+            modal.set_row(1);
+        }
+        assert_eq!(start_work(&app).mode, crate::work::WorkMode::Issue);
+    }
+
+    #[tokio::test]
+    async fn mode_then_item_then_confirm() {
+        let (_dir, mut app, _) = app_with_issues(vec![
+            open_issue(42, "Fix login bug"),
+            open_issue(7, "Crash on save"),
+        ]);
+
+        app.handle_key(key(KeyCode::Char('s')));
+        app.handle_key(key(KeyCode::Enter));
+        let flow = start_work(&app);
+        assert_eq!(flow.step, crate::modal::StartWorkStep::Item);
+        let picker = flow.picker.as_ref().expect("issues were cached");
+        assert_eq!(picker.entry_count(), 2);
+
+        type_text(&mut app, "crash");
+        let picked = start_work(&app)
+            .picker
+            .as_ref()
+            .and_then(|p| p.selected())
+            .map(|e| e.issue.number);
+        assert_eq!(picked, Some(7));
+
+        app.handle_key(key(KeyCode::Enter));
+        // The confirm screen waits for the branches; the item step stays up.
+        assert_eq!(app.pending_issue.as_ref().map(|i| i.number), Some(7));
+        assert!(matches!(app.modals.last(), Some(Modal::StartWork(_))));
+
+        let loaded = branches_loaded(&app);
+        app.handle_event(loaded);
+
+        let confirm = confirm_screen(&app);
+        assert_eq!(confirm.issue_number, 7);
+        assert_eq!(confirm.name.value(), "issue-7-crash-on-save");
+        assert_eq!(confirm.branch.value(), "fix/issue-7-crash-on-save");
+        assert_eq!(
+            confirm.base_branch.value(),
+            "origin/main",
+            "the remote's default branch, not the checkout's develop"
+        );
+        assert!(confirm.pull_first, "pull first is on by default");
+        assert!(confirm.has_parent);
+        let prompt = confirm.prompt();
+        assert!(prompt.contains("#7: Crash on save"), "{prompt}");
+        assert!(prompt.contains("`issue-7-crash-on-save`"), "{prompt}");
+        assert_eq!(app.modals.len(), 2, "the item step stays beneath");
+    }
+
+    /// Esc walks back one step at a time, and only closes from the first.
+    #[tokio::test]
+    async fn escape_steps_back_through_the_flow() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        walk_to_confirm(&mut app, "login");
+        assert!(matches!(
+            app.modals.last(),
+            Some(Modal::StartWorkConfirm(_))
+        ));
+
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Item);
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Mode);
+        app.handle_key(key(KeyCode::Esc));
+        assert!(app.modals.is_empty());
+    }
+
+    /// Launch hands over the prompt the screen showed and closes the whole
+    /// flow, item step included.
+    #[tokio::test]
+    async fn launching_closes_the_whole_flow() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        walk_to_confirm(&mut app, "login");
+
+        // A repository nobody tracks: the launch is folded exactly as a real
+        // one, but stops before it reaches git or the forest directory.
+        if let Some(Modal::StartWorkConfirm(confirm)) = app.modals.last_mut() {
+            confirm.repo_id = uuid::Uuid::new_v4();
+            confirm.focus = crate::modal::StartWorkConfirmModal::FOCUS_LAUNCH;
+        }
+        app.handle_key(key(KeyCode::Enter));
+
+        assert!(app.modals.is_empty(), "{:?}", app.modals);
+    }
+
+    /// The submitted result carries the issue, the names and the prompt as
+    /// they stood on screen — edits to the name reach the prompt too.
+    #[tokio::test]
+    async fn launch_submits_what_the_confirm_screen_shows() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        walk_to_confirm(&mut app, "login");
+        type_text(&mut app, "-2");
+
+        let modal = app.modals.last_mut().expect("the confirm screen");
+        let Modal::StartWorkConfirm(confirm) = modal else {
+            panic!("the confirm screen expected, found {modal:?}");
+        };
+        confirm.focus = crate::modal::StartWorkConfirmModal::FOCUS_LAUNCH;
+        let shown = confirm.prompt();
+        // Asked of the modal directly: through the app, the launch would go
+        // on to create a real worktree.
+        let outcome = modal.handle_key(key(KeyCode::Enter));
+
+        let crate::modal::ModalOutcome::Submit(crate::modal::ModalResult::WorktreeFromIssue {
+            issue_number,
+            name,
+            branch,
+            pull_first,
+            base_branch,
+            first_prompt,
+            ..
+        }) = outcome
+        else {
+            panic!("a launch expected, got {outcome:?}");
+        };
+        assert_eq!(issue_number, 42);
+        assert_eq!(name, "issue-42-fix-login-bug-2");
+        assert_eq!(branch, "fix/issue-42-fix-login-bug");
+        assert!(pull_first);
+        assert_eq!(base_branch.as_deref(), Some("origin/main"));
+        assert_eq!(first_prompt, shown);
+        assert!(first_prompt.contains("`issue-42-fix-login-bug-2`"));
+    }
+
+    /// With a cold cache the mode step opens at once and the issue list fills
+    /// in when the fetch folds.
+    #[tokio::test]
+    async fn issues_that_arrive_later_fill_the_picker() {
+        let (_dir, mut app) = app_with_fixture();
+        let path = app.state.repositories()[0].source_path.clone();
+        github::invalidate_cache(&path);
+
+        app.handle_key(key(KeyCode::Char('s')));
+        assert!(start_work(&app).picker.is_none());
+
+        app.handle_event(AppEvent::Issues {
+            path,
+            issues: vec![open_issue(42, "Fix login bug")],
+        });
+
+        let picker = start_work(&app).picker.as_ref().expect("filled");
+        assert_eq!(picker.entry_count(), 1);
+    }
+
+    /// Picking an issue and then leaving must not open its confirm screen
+    /// over nothing once the slow branch load lands.
+    #[tokio::test]
+    async fn a_flow_closed_before_the_branches_load_opens_nothing() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        app.handle_key(key(KeyCode::Char('s')));
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.pending_issue.is_some());
+
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Esc));
+        assert!(app.modals.is_empty());
+        let loaded = branches_loaded(&app);
+        app.handle_event(loaded);
+
+        assert!(app.modals.is_empty(), "{:?}", app.modals);
+    }
+
+    /// Clicking a row picks it, the way Enter does: a mouse-only user can go
+    /// from mode to confirm without the keyboard.
+    #[tokio::test]
+    async fn clicking_rows_walks_the_flow() {
+        let (_dir, mut app, _) = app_with_issues(vec![
+            open_issue(42, "Fix login bug"),
+            open_issue(7, "Crash on save"),
+        ]);
+        app.handle_key(key(KeyCode::Char('s')));
+
+        let pick = |row| HitTarget::ModalControl {
+            index: crate::modal::StartWorkModal::FOCUS_LIST,
+            click: ModalClick::Pick(row),
+        };
+        app.push_hit(rect(10, 10, 30, 1), pick(0));
+        app.handle_mouse(click(12, 10));
+        assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Item);
+
+        app.push_hit(rect(10, 11, 30, 1), pick(1));
+        app.handle_mouse(click(12, 11));
+        assert_eq!(app.pending_issue.as_ref().map(|i| i.number), Some(7));
+    }
+
+    /// The flow draws on a real frame: every step renders its title and the
+    /// picked issue's prompt shows on the confirm screen.
+    #[tokio::test]
+    async fn every_step_renders() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        let backend = ratatui::backend::TestBackend::new(140, 50);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        let screen =
+            |app: &mut App, terminal: &mut ratatui::Terminal<ratatui::backend::TestBackend>| {
+                terminal
+                    .draw(|frame| crate::ui::draw(frame, app))
+                    .expect("draw");
+                let buffer: &ratatui::buffer::Buffer = terminal.backend().buffer();
+                buffer
+                    .content
+                    .chunks(buffer.area.width as usize)
+                    .map(|row| row.iter().map(|c| c.symbol()).collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+
+        app.handle_key(key(KeyCode::Char('s')));
+        let mode = screen(&mut app, &mut terminal);
+        assert!(mode.contains("Start Work"), "{mode}");
+        assert!(mode.contains("pr-review"), "{mode}");
+
+        app.handle_key(key(KeyCode::Enter));
+        let item = screen(&mut app, &mut terminal);
+        assert!(item.contains("Start Work: issue"), "{item}");
+        assert!(item.contains("#42 Fix login bug"), "{item}");
+
+        app.handle_key(key(KeyCode::Enter));
+        let loaded = branches_loaded(&app);
+        app.handle_event(loaded);
+        let confirm = screen(&mut app, &mut terminal);
+        assert!(confirm.contains("Start Work: Issue #42"), "{confirm}");
+        assert!(confirm.contains("gh issue view 42 --comments"), "{confirm}");
+        assert!(confirm.contains("Launch"), "{confirm}");
     }
 }

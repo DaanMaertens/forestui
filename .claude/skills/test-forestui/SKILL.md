@@ -119,7 +119,7 @@ each session is viewing.
 
 `e` editor, `t` terminal, `o` files (mc), `n` claude, `y` yolo claude,
 `a` add repo, `w` add worktree, `q` quit, `h` archive toggle, `A` show/hide the
-archived section, `d` delete, `s` settings, `r` refresh, `?` help,
+archived section, `d` delete, `s` Start work, `S` settings, `r` refresh,
 `Tab` switch focus between sidebar and detail pane,
 `Up`/`Down` navigate the focused pane, `Enter` select or activate.
 

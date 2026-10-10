@@ -454,6 +454,29 @@ pub fn parse_worktree_porcelain(stdout: &str) -> Vec<WorktreeInfo> {
     worktrees
 }
 
+/// The branch a remote calls its default, as `<remote>/<branch>`.
+///
+/// Read from `refs/remotes/<remote>/HEAD`, which a clone records and a remote
+/// added by hand only gets from `git remote set-head`. `origin` is asked
+/// first, as the remote a clone names; `None` when no remote records one.
+pub async fn remote_default_branch(path: &str, remotes: &[String]) -> Option<String> {
+    let dir = expand(path);
+    let mut ordered: Vec<&String> = remotes.iter().filter(|r| *r == "origin").collect();
+    ordered.extend(remotes.iter().filter(|r| *r != "origin"));
+    for remote in ordered {
+        let head = format!("refs/remotes/{remote}/HEAD");
+        let Ok((code, stdout, _)) =
+            run_git(&["symbolic-ref", "--quiet", "--short", &head], Some(&dir)).await
+        else {
+            continue;
+        };
+        if code == 0 && !stdout.is_empty() {
+            return Some(stdout);
+        }
+    }
+    None
+}
+
 /// Short commit hash for a ref, or `None` when the ref cannot be resolved.
 pub async fn get_ref(path: &str, reference: &str) -> Option<String> {
     let dir = expand(path);

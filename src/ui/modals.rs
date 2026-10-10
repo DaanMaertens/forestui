@@ -9,14 +9,15 @@
 use crate::app::{App, Direction, HitTarget, ModalClick};
 use crate::fuzzy::{self, Searchable};
 use crate::modal::{
-    AddRepositoryModal, AddWorktreeModal, ClaudeIntegrationModal, ConfirmModal,
-    CreateFromIssueModal, CustomButtonsModal, EDITORS, EditButtonModal, Modal, RenameSessionModal,
-    SPINNER, SettingsModal, ThemePickerModal,
+    AddRepositoryModal, AddWorktreeModal, ClaudeIntegrationModal, ConfirmModal, CustomButtonsModal,
+    EDITORS, EditButtonModal, Modal, RenameSessionModal, SPINNER, SettingsModal,
+    StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal,
 };
 use crate::picker::SearchPicker;
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
 use crate::util;
+use crate::work::WorkMode;
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Modifier, Style};
@@ -75,7 +76,8 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) -> Hits {
     match modal {
         Modal::AddRepository(m) => add_repository(frame, m, area, &mut hits),
         Modal::AddWorktree(m) => add_worktree(frame, m, area, &mut hits),
-        Modal::CreateFromIssue(m) => create_from_issue(frame, m, area, &mut hits),
+        Modal::StartWork(m) => start_work(frame, m, area, &mut hits),
+        Modal::StartWorkConfirm(m) => start_work_confirm(frame, m, area, &mut hits),
         Modal::Settings(m) => settings(frame, m, area, &mut hits),
         Modal::CustomButtons(m) => custom_buttons(frame, m, area, &mut hits),
         Modal::EditButton(m) => edit_button(frame, m, area, &mut hits),
@@ -134,8 +136,9 @@ impl Column {
     }
 
     /// A line whose whole row carries `style` — used for list selection, where
-    /// the highlight has to run to the edge of the box. Both lists are pickable,
-    /// so the whole row is the click target for `index`.
+    /// the highlight has to run to the edge of the box. Every list is pickable,
+    /// so the whole row is the click target for `index`; `click` says whether
+    /// it only selects the row or picks it.
     fn row(
         &mut self,
         frame: &mut Frame,
@@ -143,11 +146,11 @@ impl Column {
         line: Line,
         style: Style,
         index: usize,
-        row: usize,
+        click: ModalClick,
     ) {
         if let Some(rect) = self.take(1) {
             frame.render_widget(Paragraph::new(line).style(style), rect);
-            hits.push((rect, index, ModalClick::Row(row)));
+            hits.push((rect, index, click));
         }
     }
 
@@ -498,6 +501,7 @@ fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &
             &modal.picker,
             DROPDOWN_ROWS.min(space),
             ListFocus::of(AddWorktreeModal::FOCUS_RESULTS, modal.focus),
+            ModalClick::Row,
             |branch, query, style| branch_line(branch.search_text(), query, style),
         );
     }
@@ -552,8 +556,10 @@ impl ListFocus {
     }
 }
 
-/// A picker's visible rows, scrolled to keep the selection in view. `line`
-/// draws one entry given the query, so each list decides how a row looks.
+/// A picker's visible rows, scrolled to keep the selection in view. `click`
+/// says what clicking a row does, and `line` draws one entry given the query,
+/// so each list decides how a row behaves and looks.
+#[allow(clippy::too_many_arguments)]
 fn picker_results<T: Searchable>(
     frame: &mut Frame,
     column: &mut Column,
@@ -561,6 +567,7 @@ fn picker_results<T: Searchable>(
     picker: &SearchPicker<T>,
     visible: usize,
     focus: ListFocus,
+    click: fn(usize) -> ModalClick,
     line: impl Fn(&T, &str, Style) -> Line<'static>,
 ) {
     let query = picker.query().value();
@@ -579,7 +586,7 @@ fn picker_results<T: Searchable>(
             line(entry, query, style),
             style,
             focus.index,
-            first + offset,
+            click(first + offset),
         );
     }
 }
@@ -624,12 +631,183 @@ fn branch_line(branch: &str, query: &str, style: Style) -> Line<'static> {
     Line::from(spans)
 }
 
-// -------------------------------------------------------- Create from issue
+// --------------------------------------------------------------- Start work
 
-fn create_from_issue(frame: &mut Frame, modal: &CreateFromIssueModal, area: Rect, hits: &mut Hits) {
-    // Issue, three labelled fields with a hint each, fetch, checkbox, gap, buttons.
-    let rect = widgets::centered_rect(WIDTH, CHROME + 25, area);
-    let title = format!("Create Worktree from Issue #{}", modal.issue_number);
+/// Height of Start work's item step, kept the same whatever the list holds
+/// so the box does not jump as the query narrows it.
+const START_WORK_HEIGHT: u16 = CHROME + 11 + DROPDOWN_ROWS as u16;
+
+fn start_work(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
+    match modal.step {
+        StartWorkStep::Mode => start_work_mode(frame, modal, area, hits),
+        StartWorkStep::Item => start_work_item(frame, modal, area, hits),
+    }
+}
+
+fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
+    // Repo, label, a row per mode, gap, hint, buttons.
+    let rows = WorkMode::ALL.len() as u16;
+    let rect = widgets::centered_rect(WIDTH, CHROME + 7 + rows, area);
+    let mut column = dialog(frame, rect, "Start Work", theme::title());
+
+    column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
+    column.line(frame, widgets::section("Work Mode"));
+    let focused = modal.focus == StartWorkModal::FOCUS_LIST;
+    for (row, mode) in WorkMode::ALL.into_iter().enumerate() {
+        let style = if !mode.is_enabled() {
+            theme::muted()
+        } else if mode == modal.mode {
+            if focused {
+                theme::cursor()
+            } else {
+                theme::cursor_unfocused()
+            }
+        } else {
+            theme::primary()
+        };
+        let mut text = format!(" {:<11}{}", mode.label(), mode.description());
+        if !mode.is_enabled() {
+            text.push_str("  (not yet)");
+        }
+        column.row(
+            frame,
+            hits,
+            Line::from(Span::styled(text, style)),
+            style,
+            StartWorkModal::FOCUS_LIST,
+            ModalClick::Pick(row),
+        );
+    }
+    column.gap();
+    column.text(frame, "Enter chooses · Esc closes", theme::muted());
+    column.controls(
+        frame,
+        hits,
+        vec![control(
+            "Cancel",
+            modal.focus == StartWorkModal::FOCUS_CANCEL,
+            theme::Variant::Normal,
+            StartWorkModal::FOCUS_CANCEL,
+        )],
+        true,
+    );
+}
+
+fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
+    let rect = widgets::centered_rect(WIDTH, START_WORK_HEIGHT, area);
+    let title = format!("Start Work: {}", modal.mode.label());
+    let mut column = dialog(frame, rect, &title, theme::title());
+
+    column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
+    column.line(frame, widgets::section("Issue"));
+    match &modal.picker {
+        None => {
+            column.gap();
+            column.text(frame, " Loading issues...", theme::muted());
+            column.gap();
+        }
+        Some(picker) => {
+            column.input(
+                frame,
+                hits,
+                picker.query(),
+                modal.focus,
+                StartWorkModal::FOCUS_LIST,
+            );
+            if picker.entry_count() == 0 {
+                column.text(
+                    frame,
+                    "No open issues assigned to or opened by you",
+                    theme::muted(),
+                );
+            } else {
+                column.text(frame, count_line(picker, "issues"), theme::muted());
+            }
+            // Leave room for the gap, the hint and the buttons below the list.
+            let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
+            picker_results(
+                frame,
+                &mut column,
+                hits,
+                picker,
+                DROPDOWN_ROWS.min(space),
+                ListFocus::of(StartWorkModal::FOCUS_LIST, modal.focus),
+                ModalClick::Pick,
+                |entry, query, style| branch_line(entry.search_text(), query, style),
+            );
+        }
+    }
+    // The hint and the buttons sit at the bottom however long the list is.
+    let bottom = 1 + BUTTON_HEIGHT;
+    while column.remaining() > bottom {
+        column.gap();
+    }
+    column.text(frame, "Enter picks · Esc goes back", theme::muted());
+    column.controls(
+        frame,
+        hits,
+        vec![
+            control(
+                "Back",
+                modal.focus == StartWorkModal::FOCUS_BACK,
+                theme::Variant::Normal,
+                StartWorkModal::FOCUS_BACK,
+            ),
+            control(
+                "Cancel",
+                modal.focus == StartWorkModal::FOCUS_CANCEL,
+                theme::Variant::Normal,
+                StartWorkModal::FOCUS_CANCEL,
+            ),
+        ],
+        true,
+    );
+}
+
+/// The fewest rows the prompt preview keeps on a short terminal, where the
+/// rest of the screen is already over budget.
+const MIN_PROMPT_ROWS: u16 = 3;
+/// Everything on the confirm screen but the prompt's own lines: issue, three
+/// labelled fields with a hint each, fetch and pull on one row, the prompt's
+/// label, gap, buttons.
+const CONFIRM_BODY: u16 = CHROME + 23;
+
+fn start_work_confirm(
+    frame: &mut Frame,
+    modal: &StartWorkConfirmModal,
+    area: Rect,
+    hits: &mut Hits,
+) {
+    // Inside the border and padding, less the one-space indent of each line.
+    let width = WIDTH.saturating_sub(7) as usize;
+    // As much of the prompt as the terminal has room for, so a tall one shows
+    // it whole; a longer prompt ends in `…`. The 95% is `centered_rect`'s cap.
+    let room = (area.height.saturating_mul(95) / 100)
+        .saturating_sub(CONFIRM_BODY)
+        .max(MIN_PROMPT_ROWS) as usize;
+    let mut prompt: Vec<String> = modal
+        .prompt()
+        .lines()
+        .flat_map(|line| {
+            let wrapped = super::wrap_words(line, width);
+            // A blank line separates paragraphs; wrapping drops it.
+            if wrapped.is_empty() {
+                vec![String::new()]
+            } else {
+                wrapped
+            }
+        })
+        .collect();
+    if prompt.len() > room {
+        prompt.truncate(room);
+        if let Some(last) = prompt.last_mut() {
+            *last = last.chars().take(width.saturating_sub(2)).collect();
+            last.push_str(" …");
+        }
+    }
+
+    let rect = widgets::centered_rect(WIDTH, CONFIRM_BODY + prompt.len() as u16, area);
+    let title = format!("Start Work: Issue #{}", modal.issue_number);
     let mut column = dialog(frame, rect, &title, theme::title());
 
     column.text(frame, modal.issue_title.clone(), theme::muted());
@@ -640,7 +818,7 @@ fn create_from_issue(frame: &mut Frame, modal: &CreateFromIssueModal, area: Rect
         hits,
         &modal.name,
         modal.focus,
-        CreateFromIssueModal::FOCUS_NAME,
+        StartWorkConfirmModal::FOCUS_NAME,
     );
     column.text(
         frame,
@@ -654,7 +832,7 @@ fn create_from_issue(frame: &mut Frame, modal: &CreateFromIssueModal, area: Rect
         hits,
         &modal.branch,
         modal.focus,
-        CreateFromIssueModal::FOCUS_BRANCH,
+        StartWorkConfirmModal::FOCUS_BRANCH,
     );
 
     column.line(frame, widgets::section("Base Branch"));
@@ -663,7 +841,7 @@ fn create_from_issue(frame: &mut Frame, modal: &CreateFromIssueModal, area: Rect
         hits,
         &modal.base_branch,
         modal.focus,
-        CreateFromIssueModal::FOCUS_BASE,
+        StartWorkConfirmModal::FOCUS_BASE,
     );
     // The completion the Textual suggester used to ghost inside the input.
     // Right accepts it, so say so; the row is always reserved to stop the
@@ -684,47 +862,51 @@ fn create_from_issue(frame: &mut Frame, modal: &CreateFromIssueModal, area: Rect
     column.controls(
         frame,
         hits,
-        vec![control(
-            &fetch,
-            modal.focus == CreateFromIssueModal::FOCUS_FETCH,
-            theme::Variant::Normal,
-            CreateFromIssueModal::FOCUS_FETCH,
-        )],
+        vec![
+            control(
+                &fetch,
+                modal.focus == StartWorkConfirmModal::FOCUS_FETCH,
+                theme::Variant::Normal,
+                StartWorkConfirmModal::FOCUS_FETCH,
+            ),
+            checkbox(
+                "Pull repo before creating",
+                modal.pull_first,
+                modal.focus == StartWorkConfirmModal::FOCUS_PULL,
+                StartWorkConfirmModal::FOCUS_PULL,
+            ),
+        ],
         false,
     );
-    column.controls(
-        frame,
-        hits,
-        vec![checkbox(
-            "Pull repo before creating",
-            modal.pull_first,
-            modal.focus == CreateFromIssueModal::FOCUS_PULL,
-            CreateFromIssueModal::FOCUS_PULL,
-        )],
-        false,
-    );
+
+    column.line(frame, widgets::section("Prompt"));
+    for line in prompt {
+        column.text(frame, format!(" {line}"), theme::secondary());
+    }
     column.gap();
 
-    let create = if modal.can_create() {
+    let launch = if modal.can_launch() {
         control(
-            "Create",
-            modal.focus == CreateFromIssueModal::FOCUS_CREATE,
+            "Launch",
+            modal.focus == StartWorkConfirmModal::FOCUS_LAUNCH,
             theme::Variant::Primary,
-            CreateFromIssueModal::FOCUS_CREATE,
+            StartWorkConfirmModal::FOCUS_LAUNCH,
         )
     } else {
-        disabled("Create", CreateFromIssueModal::FOCUS_CREATE)
+        disabled("Launch", StartWorkConfirmModal::FOCUS_LAUNCH)
     };
+    // Over Start work's item step, dismissing goes back to it.
+    let dismiss = if modal.has_parent { "Back" } else { "Cancel" };
     column.controls(
         frame,
         hits,
         vec![
-            create,
+            launch,
             control(
-                "Cancel",
-                modal.focus == CreateFromIssueModal::FOCUS_CANCEL,
+                dismiss,
+                modal.focus == StartWorkConfirmModal::FOCUS_CANCEL,
                 theme::Variant::Normal,
-                CreateFromIssueModal::FOCUS_CANCEL,
+                StartWorkConfirmModal::FOCUS_CANCEL,
             ),
         ],
         true,
@@ -882,7 +1064,7 @@ fn custom_buttons(frame: &mut Frame, modal: &CustomButtonsModal, area: Rect, hit
                 )),
                 style,
                 index,
-                index,
+                ModalClick::Row(index),
             );
             // The whole three-row block picks the entry, so its description
             // rows are click targets for the same index.
@@ -892,7 +1074,7 @@ fn custom_buttons(frame: &mut Frame, modal: &CustomButtonsModal, area: Rect, hit
                 Line::from(format!("   prefix: {}", entry.prefix)),
                 theme::muted(),
                 index,
-                index,
+                ModalClick::Row(index),
             );
             column.row(
                 frame,
@@ -900,7 +1082,7 @@ fn custom_buttons(frame: &mut Frame, modal: &CustomButtonsModal, area: Rect, hit
                 Line::from(format!("   $ {}", entry.command)),
                 theme::muted(),
                 index,
-                index,
+                ModalClick::Row(index),
             );
         }
     }
@@ -1337,6 +1519,28 @@ mod tests {
         .expect("issue fixture")
     }
 
+    fn start_work_modal(step: StartWorkStep) -> Modal {
+        let mut modal = StartWorkModal::new(&repo(), Some(vec![issue()]));
+        modal.step = step;
+        Modal::StartWork(Box::new(modal))
+    }
+
+    fn confirm_modal() -> Modal {
+        let branches = crate::event::BranchList {
+            branches: vec!["main".into(), "origin/main".into()],
+            remotes: vec!["origin".into()],
+            remote_default: Some("origin/main".into()),
+            current_branch: "main".into(),
+        };
+        Modal::StartWorkConfirm(Box::new(StartWorkConfirmModal::new(
+            &repo(),
+            &issue(),
+            branches,
+            PathBuf::from("/forest"),
+            true,
+        )))
+    }
+
     fn button(label: &str) -> CustomClaudeButton {
         CustomClaudeButton {
             label: label.into(),
@@ -1352,18 +1556,9 @@ mod tests {
                 "Add Repository",
             ),
             (worktree_modal(true), "Add Worktree"),
-            (
-                Modal::CreateFromIssue(Box::new(CreateFromIssueModal::new(
-                    &repo(),
-                    &issue(),
-                    vec!["main".into()],
-                    vec![],
-                    PathBuf::from("/forest"),
-                    "feat/",
-                    "main",
-                ))),
-                "Create Worktree from Issue #42",
-            ),
+            (start_work_modal(StartWorkStep::Mode), "Start Work"),
+            (start_work_modal(StartWorkStep::Item), "Start Work: issue"),
+            (confirm_modal(), "Start Work: Issue #42"),
             (
                 Modal::Settings(Box::new(SettingsModal::new(&Settings::default()))),
                 "Settings",
@@ -1393,6 +1588,21 @@ mod tests {
                 "Delete Worktree",
             ),
         ]
+    }
+
+    /// The prompt is what Claude will be told, so a terminal with room shows
+    /// all of it — down to the template's last instruction — and a short one
+    /// says it cut the rest rather than ending mid-sentence silently.
+    #[test]
+    fn the_confirm_screen_shows_as_much_prompt_as_fits() {
+        let tall = render(&confirm_modal(), 120, 60);
+        assert!(tall.contains("then implement it."), "{tall}");
+        assert!(!tall.contains('…'), "{tall}");
+
+        let short = render(&confirm_modal(), 120, 36);
+        assert!(short.contains("gh issue view 42"), "{short}");
+        assert!(short.contains('…'), "{short}");
+        assert!(short.contains("Launch"), "the buttons stay on screen: {short}");
     }
 
     #[test]

@@ -25,9 +25,23 @@ pub enum Severity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BranchTarget {
     AddWorktree,
-    CreateFromIssue,
+    /// Start work's confirm screen, for the issue in `App::pending_issue`.
+    StartWorkConfirm,
     /// Refresh of the branch list inside an already-open modal, after a fetch.
     RefetchOpenModal,
+}
+
+/// A repository's branches, as one load saw them.
+#[derive(Debug, Clone, Default)]
+pub struct BranchList {
+    /// Local and remote branches; remote ones keep their `<remote>/`.
+    pub branches: Vec<String>,
+    pub remotes: Vec<String>,
+    /// The branch the remote calls its default (`origin/main`), when it
+    /// records one: what a new piece of work starts from.
+    pub remote_default: Option<String>,
+    /// The branch the repository's own checkout is on.
+    pub current_branch: String,
 }
 
 /// Header data for the detail pane, loaded in the background.
@@ -97,12 +111,10 @@ pub enum AppEvent {
     /// Branch and remote lists finished loading.
     Branches {
         repo_id: Uuid,
-        branches: Vec<String>,
-        remotes: Vec<String>,
-        current_branch: String,
+        list: BranchList,
         target: BranchTarget,
     },
-    /// A background fetch inside the create-from-issue modal failed.
+    /// A background fetch inside Start work's confirm screen failed.
     FetchFailed(String),
     /// Show a transient message.
     Notify(String, Severity),

@@ -391,29 +391,6 @@ pub struct GitHubIssue {
 }
 
 impl GitHubIssue {
-    /// Branch-safe name derived from the issue, e.g. `42-fix-login-bug`.
-    pub fn branch_name(&self) -> String {
-        let lowered = self.title.to_lowercase();
-        let mut slug = String::with_capacity(lowered.len());
-        let mut pending_dash = false;
-        for ch in lowered.chars() {
-            if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
-                if pending_dash && !slug.is_empty() {
-                    slug.push('-');
-                }
-                pending_dash = false;
-                slug.push(ch);
-            } else {
-                pending_dash = true;
-            }
-        }
-        if pending_dash && !slug.is_empty() {
-            slug.push('-');
-        }
-        let truncated: String = slug.chars().take(40).collect();
-        format!("{}-{}", self.number, truncated.trim_matches('-'))
-    }
-
     pub fn relative_time(&self) -> String {
         crate::util::naturaltime(self.updated_at)
     }
@@ -467,17 +444,6 @@ mod tests {
             command: "claude --dangerously-skip-permissions".into(),
         };
         assert!(b.is_yolo_style());
-    }
-
-    #[test]
-    fn issue_branch_name() {
-        let issue: GitHubIssue = serde_json::from_str(
-            r#"{"number":42,"title":"Fix login bug!","state":"OPEN","url":"u",
-                "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z",
-                "author":{"login":"me"},"assignees":[],"labels":[]}"#,
-        )
-        .unwrap();
-        assert_eq!(issue.branch_name(), "42-fix-login-bug");
     }
 
     #[test]

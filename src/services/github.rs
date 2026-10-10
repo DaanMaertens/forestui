@@ -386,6 +386,6 @@ mod tests {
         let parsed: Vec<GitHubIssue> = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed[0].number, 7);
         assert_eq!(parsed[0].labels[0].name, "bug");
-        assert_eq!(parsed[0].branch_name(), "7-bug");
+        assert_eq!(parsed[0].title, "Bug");
     }
 }
