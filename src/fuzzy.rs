@@ -388,5 +388,4 @@ mod tests {
         assert_eq!(highlight_range("ain", "main"), Some((1, 4)));
         assert_eq!(highlight_range("zzz", "main"), None);
     }
-
 }
