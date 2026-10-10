@@ -44,8 +44,10 @@ ratatui. It runs inside tmux and gives developers one place to manage many
 worktrees, their editors, their terminals, and their Claude Code sessions.
 
 It was a Python/Textual application through v0.9.x. The rewrite is in
-`doc/rust-rewrite/` — spec, architecture, migration plan, and the `tu`-driven
-acceptance playbook.
+`doc/rust-rewrite/` — architecture, migration plan, and the `tu`-driven
+acceptance playbook. The behavioural spec of the Python build was removed once
+the port shipped; it lives in git history at `ae9cb1a`. The code, not that
+spec, is the reference for how forestui behaves now.
 
 ## Tech Stack
 
