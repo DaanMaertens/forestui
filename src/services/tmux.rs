@@ -583,14 +583,14 @@ pub fn claude_command_line(
         }
     }
     // Last, and after a flag that takes a value, so no optional-valued flag
-    // ahead of it can take it as its own. Line breaks become spaces rather
-    // than vanishing, so a template's paragraphs do not run their words
-    // together.
+    // ahead of it can take it as its own. Line breaks and tabs become spaces
+    // here rather than being stripped by `single_line` below, so a template's
+    // paragraphs do not run their words together.
     if let Some(prompt) = launch.first_prompt {
         let flat = prompt
-            .lines()
+            .split(char::is_control)
             .map(str::trim_end)
-            .filter(|line| !line.is_empty())
+            .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
             .join(" ");
         cmd.push_str(&format!(" {}", sh_quote(&flat)));
@@ -1213,13 +1213,13 @@ mod tests {
     fn a_first_prompt_is_quoted_flattened_and_last() {
         let launch = ClaudeLaunch {
             remote_control: true,
-            first_prompt: Some("Fix #3: it's `$(rm -rf ~)`!\n\nThen  wait.\r\n"),
+            first_prompt: Some("Fix #3: it's `$(rm -rf ~)`!\n\nThen\twait  here.\r\n"),
             ..ClaudeLaunch::default()
         };
         assert_eq!(
             claude_command_line(&launch, "issue-3-fix", Some("id-1")),
             "claude --remote-control -n 'issue-3-fix' --session-id 'id-1' \
-             'Fix #3: it'\\''s `$(rm -rf ~)`! Then  wait.'"
+             'Fix #3: it'\\''s `$(rm -rf ~)`! Then wait  here.'"
         );
     }
 

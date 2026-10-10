@@ -1067,10 +1067,8 @@ impl App {
             );
             worktree.base_branch = base;
             worktree.created_from_ref = base_ref;
-            let (work_item, first_prompt) = match start {
-                Some(start) => (Some(start.link), Some(start.first_prompt)),
-                None => (None, None),
-            };
+            let (work_item, first_prompt) =
+                start.map(|start| (start.link, start.first_prompt)).unzip();
             worktree.work_item = work_item;
 
             tx.send(AppEvent::WorktreeAdded {
