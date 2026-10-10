@@ -110,6 +110,10 @@ fn strip_remote_prefix<'a>(branch: &'a str, remotes: &[String]) -> &'a str {
     branch
 }
 
+/// What splits a text into words: path separators for branches, spaces for
+/// titles.
+const WORD_SEPARATORS: [char; 5] = ['/', '-', '_', '.', ' '];
+
 /// Score a text against a query. Lower is better; `None` means no match.
 /// `short` is the entry's short form; without one, the full text stands in.
 ///
@@ -146,7 +150,7 @@ fn match_score(query: &str, text: &str, short: Option<&str>) -> Option<f64> {
                 || target[..idx]
                     .chars()
                     .next_back()
-                    .is_some_and(|c| matches!(c, '/' | '-' | '_' | '.'));
+                    .is_some_and(|c| WORD_SEPARATORS.contains(&c));
             return Some(if boundary { 2.0 } else { 3.0 });
         }
     }
@@ -156,7 +160,7 @@ fn match_score(query: &str, text: &str, short: Option<&str>) -> Option<f64> {
         let mut best: Option<f64> = None;
         let threshold = q_chars.len().div_ceil(3).max(1);
 
-        for seg in t.split(['/', '-', '_', '.']) {
+        for seg in t.split(WORD_SEPARATORS) {
             if seg.is_empty() {
                 continue;
             }
@@ -343,6 +347,28 @@ mod tests {
         assert_eq!(out, vec![(1, 1.0), (0, 3.0)]);
     }
 
+    /// Work items are titles, not paths: a typo has to be forgiven per word,
+    /// as it is per path segment in a branch.
+    #[test]
+    fn a_typo_matches_one_word_of_a_title() {
+        let items = [Entry("fix login bug"), Entry("main")];
+
+        let out = fuzzy_match("logn", &items, 50);
+
+        // One edit away from the whole word `login`.
+        assert_eq!(out, vec![(0, 4.1)]);
+    }
+
+    #[test]
+    fn a_word_inside_a_title_starts_at_a_word_boundary() {
+        let items = [Entry("relogin"), Entry("fix login bug")];
+
+        let out = fuzzy_match("login", &items, 50);
+
+        // After a space ranks as a word boundary, ahead of mid-word.
+        assert_eq!(out, vec![(1, 2.0), (0, 3.0)]);
+    }
+
     #[test]
     fn a_remote_branch_also_matches_by_its_local_name() {
         let remotes = vec!["origin".to_string()];
@@ -362,4 +388,5 @@ mod tests {
         assert_eq!(highlight_range("ain", "main"), Some((1, 4)));
         assert_eq!(highlight_range("zzz", "main"), None);
     }
+
 }
