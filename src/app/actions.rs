@@ -25,6 +25,8 @@ use uuid::Uuid;
 struct WorkStart {
     link: WorkItemLink,
     first_prompt: String,
+    /// Start that Claude with the built-in YOLO flag.
+    yolo: bool,
 }
 
 /// Gather the branch and remote lists and deliver them to `target`.
@@ -143,6 +145,28 @@ impl App {
                 let repo_id = flow.repo_id;
                 self.start_work_on_issue(repo_id, *issue, mode);
             }
+            ModalEffect::EditPrompt(text) => {
+                let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last() else {
+                    return;
+                };
+                let (repo_id, issue_number) = (confirm.repo_id, confirm.issue_number);
+                let editor = self.prompt_editor();
+                let tx = self.tx.clone();
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        crate::prompt::edit_via_file(&text, |file| {
+                            tmux::edit_in_popup(&editor, file)
+                        })
+                    })
+                    .await
+                    .unwrap_or_else(|_| Err("the editor task panicked".to_string()));
+                    tx.send(AppEvent::PromptEdited {
+                        repo_id,
+                        issue_number,
+                        result,
+                    });
+                });
+            }
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
                 let tx = self.tx.clone();
@@ -174,6 +198,7 @@ impl App {
                 pull_first,
                 base_branch,
                 first_prompt,
+                yolo,
             } => {
                 // Launching ends the whole flow: the item step left beneath
                 // the confirm screen has nothing more to offer.
@@ -183,6 +208,7 @@ impl App {
                         number: issue_number,
                     },
                     first_prompt,
+                    yolo,
                 };
                 self.create_worktree(
                     repo_id,
@@ -928,6 +954,22 @@ impl App {
         });
     }
 
+    /// The editor a prompt is edited in: the one the shell names, as git
+    /// picks it, then forestui's own if it is a terminal editor, then `vi`.
+    /// The popup ends when the editor exits, so a GUI editor that returns at
+    /// once would close it before the user typed anything.
+    fn prompt_editor(&self) -> String {
+        ["VISUAL", "EDITOR"]
+            .into_iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .find(|editor| !editor.trim().is_empty())
+            .or_else(|| {
+                let own = &self.settings.default_editor;
+                tmux::is_tui_editor(own).then(|| own.clone())
+            })
+            .unwrap_or_else(|| "vi".to_string())
+    }
+
     fn open_in_editor(&mut self, path: &str) {
         let editor = self.settings.default_editor.clone();
 
@@ -1201,6 +1243,7 @@ impl App {
             );
             worktree.base_branch = base;
             worktree.created_from_ref = base_ref;
+            let yolo = start.as_ref().is_some_and(|start| start.yolo);
             let (work_item, first_prompt) =
                 start.map(|start| (start.link, start.first_prompt)).unzip();
             worktree.work_item = work_item;
@@ -1209,6 +1252,7 @@ impl App {
                 repo_id,
                 worktree: Box::new(worktree),
                 first_prompt,
+                yolo,
             });
         });
     }

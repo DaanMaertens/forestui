@@ -452,6 +452,38 @@ pub fn create_editor_window(worktree_name: &str, worktree_path: &str, editor: &s
     new_window(&window_name, worktree_path, Some(&format!("{editor} ."))).is_some()
 }
 
+/// Open `file` in `editor` in a popup over forestui's own pane, returning once
+/// the editor exits.
+///
+/// A popup rather than a window: `display-popup -E` blocks its caller until
+/// the popup closes, which is the "editor closed, read the file" signal a
+/// window does not give, and it keeps the confirm screen in view around the
+/// edit. Call it off the UI thread.
+pub fn edit_in_popup(editor: &str, file: &Path) -> Result<(), String> {
+    let pane = std::env::var("TMUX_PANE")
+        .ok()
+        .filter(|pane| !pane.is_empty())
+        .ok_or("forestui is not running inside tmux")?;
+    // The editor is left unquoted, as for the editor window: it may carry
+    // its own arguments (`code --wait`).
+    let command = format!("{editor} {}", sh_quote(&file.to_string_lossy()));
+    tmux(&[
+        "display-popup",
+        "-E",
+        "-w",
+        "90%",
+        "-h",
+        "90%",
+        "-T",
+        " Edit prompt ",
+        "-t",
+        &pane,
+        &command,
+    ])
+    .map(|_| ())
+    .ok_or_else(|| format!("the popup failed or '{editor}' exited with an error"))
+}
+
 /// Create a shell window named `term:<name>` (always a new window).
 pub fn create_shell_window(name: &str, path: &str) -> bool {
     if current_session().is_none() {
@@ -1220,6 +1252,28 @@ mod tests {
             claude_command_line(&launch, "issue-3-fix", Some("id-1")),
             "claude --remote-control -n 'issue-3-fix' --session-id 'id-1' \
              'Fix #3: it'\\''s `$(rm -rf ~)`! Then wait  here.'"
+        );
+    }
+
+    /// Start work's yolo toggle: the YOLO flag leads, the prompt still ends
+    /// the line, and the up arrow resumes in YOLO without the prompt.
+    #[test]
+    fn a_yolo_launch_keeps_its_first_prompt_last() {
+        let launch = ClaudeLaunch {
+            yolo: true,
+            remote_control: true,
+            first_prompt: Some("Work on issue 3"),
+            ..ClaudeLaunch::default()
+        };
+        let (line, remembered) = launch_lines(&launch, "issue-3-fix", "id-1");
+        assert_eq!(
+            line,
+            "claude --dangerously-skip-permissions --remote-control -n 'issue-3-fix' \
+             --session-id 'id-1' 'Work on issue 3'"
+        );
+        assert_eq!(
+            remembered,
+            "claude --dangerously-skip-permissions --remote-control -r 'id-1'"
         );
     }
 

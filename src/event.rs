@@ -132,6 +132,16 @@ pub enum AppEvent {
         /// Start Claude in the new worktree with this as its first message.
         /// Launched by the fold, so a result it drops starts nothing.
         first_prompt: Option<String>,
+        /// That launch uses the built-in YOLO flag.
+        yolo: bool,
+    },
+    /// The editor opened on Start work's prompt closed. `Ok` is the text it
+    /// left; the fold applies it only to the confirm screen it was opened
+    /// from, if that is still on top.
+    PromptEdited {
+        repo_id: Uuid,
+        issue_number: i64,
+        result: Result<String, String>,
     },
     /// A `git worktree list` scan finished; the fold reconciles the config
     /// against it (git is the source of truth for which worktrees exist).

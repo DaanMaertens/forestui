@@ -61,6 +61,9 @@ pub enum ModalEffect {
     /// Start work picked an issue in a work mode: load the branches and open
     /// the confirm screen for it on top of the picker.
     ConfirmIssue(Box<GitHubIssue>, WorkMode),
+    /// Open the confirm screen's prompt in an editor; the text comes back as
+    /// [`crate::event::AppEvent::PromptEdited`].
+    EditPrompt(String),
 }
 
 /// What the integration dialog can do, given what is currently on disk.
@@ -173,6 +176,8 @@ pub enum ModalResult {
         base_branch: Option<String>,
         /// The prompt as the confirm screen showed it.
         first_prompt: String,
+        /// Start Claude with the built-in YOLO flag.
+        yolo: bool,
     },
     SettingsSaved(Box<Settings>),
     CustomButtonsSaved(Vec<CustomClaudeButton>),
@@ -914,6 +919,14 @@ pub struct StartWorkConfirmModal {
     pub branch: TextInput,
     pub base_branch: TextInput,
     pub pull_first: bool,
+    /// Launch with the built-in YOLO flag. Off on every open: trusting one
+    /// task must not become the default for the next.
+    pub yolo: bool,
+    /// The prompt as an editor left it, in place of the filled-in template.
+    /// Held here and nowhere else, so the edit applies to this launch only.
+    pub edited_prompt: Option<String>,
+    /// An editor is open on the prompt; a second one would race the first.
+    pub is_editing: bool,
     pub is_fetching: bool,
     pub spinner_index: usize,
     /// Opened from Start work's item step, which is still underneath: the
@@ -930,8 +943,10 @@ impl StartWorkConfirmModal {
     pub const FOCUS_BASE: usize = 2;
     pub const FOCUS_FETCH: usize = 3;
     pub const FOCUS_PULL: usize = 4;
-    pub const FOCUS_LAUNCH: usize = 5;
-    pub const FOCUS_CANCEL: usize = 6;
+    pub const FOCUS_EDIT: usize = 5;
+    pub const FOCUS_YOLO: usize = 6;
+    pub const FOCUS_LAUNCH: usize = 7;
+    pub const FOCUS_CANCEL: usize = 8;
     pub const FIELDS: usize = Self::FOCUS_CANCEL + 1;
 
     pub fn new(
@@ -957,6 +972,9 @@ impl StartWorkConfirmModal {
             branch: TextInput::new(names.branch).with_placeholder("branch-name"),
             base_branch: TextInput::new(base).with_placeholder("origin/main"),
             pull_first: true,
+            yolo: false,
+            edited_prompt: None,
+            is_editing: false,
             is_fetching: false,
             spinner_index: 0,
             has_parent,
@@ -970,9 +988,16 @@ impl StartWorkConfirmModal {
             .join(self.name.value())
     }
 
-    /// The first prompt, filled in from the fields as they stand now — so
-    /// what the screen shows is exactly what Claude is started with.
+    /// The first prompt: an edit if there is one, else the template filled in
+    /// from the fields as they stand now — so what the screen shows is
+    /// exactly what Claude is started with.
+    ///
+    /// An edit is taken as final; renaming the worktree afterwards does not
+    /// rewrite text the user wrote by hand.
     pub fn prompt(&self) -> String {
+        if let Some(edited) = &self.edited_prompt {
+            return edited.clone();
+        }
         prompt::fill(
             self.mode.template(),
             &prompt::TemplateVars {
@@ -998,9 +1023,12 @@ impl StartWorkConfirmModal {
             .map(|(b, _)| b)
     }
 
+    /// Mid-edit counts as not ready: launching then would start Claude on
+    /// the prompt the editor is about to replace.
     pub fn can_launch(&self) -> bool {
         let base = self.base_branch.value();
-        !self.name.is_empty()
+        !self.is_editing
+            && !self.name.is_empty()
             && !self.branch.is_empty()
             && (base.is_empty() || self.branches.branches.iter().any(|b| b == base))
     }
@@ -1018,6 +1046,24 @@ impl StartWorkConfirmModal {
 
     pub fn fetch_failed(&mut self) {
         self.is_fetching = false;
+    }
+
+    /// Take what the editor left in the prompt file. Returns false for a file
+    /// emptied out, which reads as "never mind" — the way git treats an empty
+    /// commit message — rather than as a launch with no prompt at all.
+    pub fn finish_edit(&mut self, text: &str) -> bool {
+        self.is_editing = false;
+        // Editors end a file with a newline the prompt never had.
+        let text = text.trim_end();
+        if text.trim().is_empty() {
+            return false;
+        }
+        // Saved untouched: the template keeps following the name fields
+        // instead of freezing at the names it was opened with.
+        if text != self.prompt().trim_end() {
+            self.edited_prompt = Some(text.to_string());
+        }
+        true
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> ModalOutcome {
@@ -1062,6 +1108,17 @@ impl StartWorkConfirmModal {
                 self.pull_first = !self.pull_first;
                 ModalOutcome::None
             }
+            (Self::FOCUS_EDIT, KeyCode::Enter) => {
+                if self.is_editing {
+                    return ModalOutcome::None;
+                }
+                self.is_editing = true;
+                ModalOutcome::Effect(ModalEffect::EditPrompt(self.prompt()))
+            }
+            (Self::FOCUS_YOLO, KeyCode::Enter) | (Self::FOCUS_YOLO, KeyCode::Char(' ')) => {
+                self.yolo = !self.yolo;
+                ModalOutcome::None
+            }
             (Self::FOCUS_CANCEL, KeyCode::Enter) => ModalOutcome::Close,
             (_, KeyCode::Enter) => {
                 if !self.can_launch() {
@@ -1076,6 +1133,7 @@ impl StartWorkConfirmModal {
                     pull_first: self.pull_first,
                     base_branch: if base.is_empty() { None } else { Some(base) },
                     first_prompt: self.prompt(),
+                    yolo: self.yolo,
                 })
             }
             _ => ModalOutcome::None,

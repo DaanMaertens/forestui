@@ -905,10 +905,26 @@ fn start_work_confirm(
         false,
     );
 
-    column.line(frame, widgets::section("Prompt"));
+    // Marked, because an edited prompt no longer follows the name fields.
+    let label = if modal.edited_prompt.is_some() {
+        "Prompt (edited)"
+    } else {
+        "Prompt"
+    };
+    column.line(frame, widgets::section(label));
     for line in prompt {
         column.text(frame, format!(" {line}"), theme::secondary());
     }
+    let edit = if modal.is_editing {
+        disabled("Editing…", StartWorkConfirmModal::FOCUS_EDIT)
+    } else {
+        control(
+            "Edit prompt",
+            modal.focus == StartWorkConfirmModal::FOCUS_EDIT,
+            theme::Variant::Normal,
+            StartWorkConfirmModal::FOCUS_EDIT,
+        )
+    };
     column.gap();
 
     let launch = if modal.can_launch() {
@@ -926,7 +942,16 @@ fn start_work_confirm(
     column.controls(
         frame,
         hits,
+        // Edit and YOLO share the button row: a row of their own would cost
+        // the prompt above three of its lines.
         vec![
+            edit,
+            checkbox(
+                "YOLO",
+                modal.yolo,
+                modal.focus == StartWorkConfirmModal::FOCUS_YOLO,
+                StartWorkConfirmModal::FOCUS_YOLO,
+            ),
             launch,
             control(
                 dismiss,
