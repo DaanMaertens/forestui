@@ -107,10 +107,12 @@ fn confirm_modal() -> Modal {
         remote_default: Some("origin/main".into()),
         current_branch: "main".into(),
     };
+    let issue = issue();
     Modal::StartWorkConfirm(Box::new(StartWorkConfirmModal::new(
         &repo(),
         WorkMode::Issue,
-        &issue(),
+        crate::work::WorkItem::from_issue(&issue),
+        crate::work::names(WorkMode::Issue, issue.number, &issue.title),
         branches,
         PathBuf::from("/forest"),
         true,

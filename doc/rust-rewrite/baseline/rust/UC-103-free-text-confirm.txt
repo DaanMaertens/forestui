@@ -1,0 +1,44 @@
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work: Free-text feature                                              │
+                              │                                                                              │
+                              │  Try a quick spike on caching                                                │
+                              │  Worktree Name                                                               │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │feat-try-a-quick-spike-on-caching                                       │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  Path: <ROOT>/forest/beta/feat-try-a-quick-spike-on-caching   │
+                              │  Branch Name                                                                 │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │feat/feat-try-a-quick-spike-on-caching                                  │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  Base Branch                                                                 │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │main                                                                    │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │                                                                              │
+                              │  ┌────────┐ ┌───────────────────────────────┐                                │
+                              │  │ Fetch  │ │ [x] Pull repo before creating │                                │
+                              │  └────────┘ └───────────────────────────────┘                                │
+                              │  Prompt                                                                      │
+                              │   Build this feature. It has no GitHub issue; this description is all there  │
+                              │   is:                                                                        │
+                              │                                                                              │
+                              │   Try a quick spike on caching                                               │
+                              │                                                                              │
+                              │   You are in the `feat-try-a-quick-spike-on-caching` worktree of beta, on    │
+                              │   the branch `feat/feat-try-a-quick-spike-on-caching`.                       │
+                              │                                                                              │
+                              │   Explore the code it touches and write a plan: what you will change,        │
+                              │   where, and how you will test it. Ask me about anything the description     │
+                              │   leaves open. Do not change any code until I have approved the plan.        │
+                              │                                                                              │
+                              │              ┌─────────────┐ ┌──────────┐ ┌────────┐ ┌────────┐              │
+                              │              │ Edit prompt │ │ [ ] YOLO │ │ Launch │ │  Back  │              │
+                              │              └─────────────┘ └──────────┘ └────────┘ └────────┘              │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

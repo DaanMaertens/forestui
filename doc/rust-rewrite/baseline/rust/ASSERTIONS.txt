@@ -14,7 +14,7 @@ PASS UC-79     branch-in-config                               expected=feat/wt-a
 PASS UC-79     branch-checked-out                             expected=feat/wt-a-v2                 actual=feat/wt-a-v2
 PASS UC-80     gamma-tracked                                  expected=gamma                        actual=gamma
 PASS UC-80     imported-worktree                              expected=['feat/imported']            actual=['feat/imported']
-PASS UC-81     both-see-same-window-count                     expected=5                            actual=5
+PASS UC-81     both-see-same-window-count                     expected=6                            actual=6
 PASS UC-81     terminal-a-stayed-put                          expected=0                            actual=0
 PASS UC-82     single-forestui-window                         expected=1                            actual=1
 PASS UC-83     detail-follows-click                           expected=yes                          actual=yes
@@ -26,6 +26,7 @@ PASS UC-99     branch-checked-out                             expected=fix/issue
 PASS UC-99     work-item-linked                               expected={'kind': 'issue', 'number': 298} actual={'kind': 'issue', 'number': 298}
 PASS UC-99     claude-window-named-after-worktree             expected=yes                          actual=yes
 PASS UC-100    bug-issues-not-listed                          expected=no                           actual=no
+PASS UC-100    free-text-entry-listed                         expected=yes                          actual=yes
 PASS UC-100    titled-as-a-feature                            expected=yes                          actual=yes
 PASS UC-100    prompt-asks-for-a-plan                         expected=yes                          actual=yes
 PASS UC-100    worktree-created                               expected=yes                          actual=yes
@@ -41,3 +42,12 @@ PASS UC-102    mode-step-skipped                              expected=no       
 PASS UC-102    cancel-closes-it                               expected=no                           actual=no
 PASS UC-102    started-card-jumps                             expected=yes                          actual=yes
 PASS UC-102    nothing-created                                expected=4                            actual=4
+PASS UC-103    titled-as-free-text                            expected=yes                          actual=yes
+PASS UC-103    prompt-carries-description                     expected=yes                          actual=yes
+PASS UC-103    prompt-reads-no-issue                          expected=no                           actual=no
+PASS UC-103    worktree-created                               expected=yes                          actual=yes
+PASS UC-103    branch-checked-out                             expected=feat/feat-try-a-quick-spike-on-caching actual=feat/feat-try-a-quick-spike-on-caching
+PASS UC-103    work-item-linked                               expected={'kind': 'free_text', 'description': 'Try a quick spike on caching'} actual={'kind': 'free_text', 'description': 'Try a quick spike on caching'}
+PASS UC-103    clash-offers-three-choices                     expected=yes                          actual=yes
+PASS UC-103    clash-names-the-copy                           expected=yes                          actual=yes
+PASS UC-103    nothing-created                                expected=5                            actual=5

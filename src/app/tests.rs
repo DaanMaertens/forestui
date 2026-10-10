@@ -2175,6 +2175,28 @@ fn app_with_issues(issues: Vec<crate::models::GitHubIssue>) -> (tempfile::TempDi
     (dir, app, path)
 }
 
+/// The issue Start work is waiting to confirm, if it is waiting on one.
+fn pending_number(app: &App) -> Option<i64> {
+    match app.pending_start.as_ref().map(|p| &p.item) {
+        Some(crate::work::WorkItem::Issue { number, .. }) => Some(*number),
+        _ => None,
+    }
+}
+
+fn confirm_number(confirm: &crate::modal::StartWorkConfirmModal) -> Option<i64> {
+    match &confirm.item {
+        crate::work::WorkItem::Issue { number, .. } => Some(*number),
+        crate::work::WorkItem::FreeText { .. } => None,
+    }
+}
+
+fn issue_of(entry: &crate::work::ItemEntry) -> Option<&crate::work::IssueEntry> {
+    match entry {
+        crate::work::ItemEntry::Issue(issue) => Some(issue),
+        crate::work::ItemEntry::FreeText => None,
+    }
+}
+
 fn start_work(app: &App) -> &crate::modal::StartWorkModal {
     match app.modals.last() {
         Some(Modal::StartWork(flow)) => flow,
@@ -2300,7 +2322,11 @@ fn labelled_issue(number: i64, title: &str, labels: &[&str]) -> crate::models::G
 
 fn listed(app: &App) -> Vec<i64> {
     let picker = start_work(app).picker.as_ref().expect("issues loaded");
-    picker.entries().map(|e| e.issue.number).collect()
+    picker
+        .entries()
+        .filter_map(issue_of)
+        .map(|e| e.issue.number)
+        .collect()
 }
 
 /// The two modes split the issues by the feature label: a `bug` that is
@@ -2341,12 +2367,13 @@ async fn a_feature_confirms_with_feat_names_and_the_feature_prompt() {
     app.handle_key(key(KeyCode::Char('s')));
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
+    // Past the free-text entry, which leads the list.
+    app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
+    assert_eq!(pending_number(&app), Some(7));
     assert_eq!(
-        app.pending_issue
-            .as_ref()
-            .map(|(i, mode)| (i.number, *mode)),
-        Some((7, crate::work::WorkMode::Feature))
+        app.pending_start.as_ref().map(|p| p.mode),
+        Some(crate::work::WorkMode::Feature)
     );
     let loaded = branches_loaded(&app);
     app.handle_event(loaded);
@@ -2396,7 +2423,7 @@ async fn the_issue_card_opens_the_confirm_screen_in_its_mode() {
 
     let confirm = confirm_screen(&app);
     assert_eq!(confirm.mode, crate::work::WorkMode::Feature);
-    assert_eq!(confirm.issue_number, 7);
+    assert_eq!(confirm_number(confirm), Some(7));
     assert_eq!(confirm.name.value(), "feat-7-dark-mode");
     assert!(!confirm.has_parent, "nothing beneath to go back to");
     assert_eq!(app.modals.len(), 1);
@@ -2431,19 +2458,20 @@ async fn mode_then_item_then_confirm() {
         .picker
         .as_ref()
         .and_then(|p| p.selected())
+        .and_then(issue_of)
         .map(|e| e.issue.number);
     assert_eq!(picked, Some(7));
 
     app.handle_key(key(KeyCode::Enter));
     // The confirm screen waits for the branches; the item step stays up.
-    assert_eq!(app.pending_issue.as_ref().map(|(i, _)| i.number), Some(7));
+    assert_eq!(pending_number(&app), Some(7));
     assert!(matches!(app.modals.last(), Some(Modal::StartWork(_))));
 
     let loaded = branches_loaded(&app);
     app.handle_event(loaded);
 
     let confirm = confirm_screen(&app);
-    assert_eq!(confirm.issue_number, 7);
+    assert_eq!(confirm_number(confirm), Some(7));
     assert_eq!(confirm.name.value(), "issue-7-crash-on-save");
     assert_eq!(confirm.branch.value(), "fix/issue-7-crash-on-save");
     assert_eq!(
@@ -2513,8 +2541,8 @@ async fn launch_submits_what_the_confirm_screen_shows() {
     // on to create a real worktree.
     let outcome = modal.handle_key(key(KeyCode::Enter));
 
-    let crate::modal::ModalOutcome::Submit(crate::modal::ModalResult::WorktreeFromIssue {
-        issue_number,
+    let crate::modal::ModalOutcome::Submit(crate::modal::ModalResult::WorktreeForWorkItem {
+        link,
         name,
         branch,
         pull_first,
@@ -2525,7 +2553,7 @@ async fn launch_submits_what_the_confirm_screen_shows() {
     else {
         panic!("a launch expected, got {outcome:?}");
     };
-    assert_eq!(issue_number, 42);
+    assert_eq!(link, crate::models::WorkItemLink::Issue { number: 42 });
     assert_eq!(name, "issue-42-fix-login-bug-2");
     assert_eq!(branch, "fix/issue-42-fix-login-bug");
     assert!(pull_first);
@@ -2568,14 +2596,14 @@ async fn an_edited_prompt_is_what_launches() {
     // What the editor task delivers once the editor closes.
     app.handle_event(AppEvent::PromptEdited {
         repo_id,
-        issue_number: 42,
+        link: crate::models::WorkItemLink::Issue { number: 42 },
         result: Ok("Only fix the login bug.\n\nNothing else.\n".into()),
     });
     let confirm = confirm_screen_mut(&mut app);
     assert!(!confirm.is_editing);
     assert_eq!(confirm.prompt(), "Only fix the login bug.\n\nNothing else.");
 
-    let crate::modal::ModalResult::WorktreeFromIssue { first_prompt, .. } = submitted(&mut app)
+    let crate::modal::ModalResult::WorktreeForWorkItem { first_prompt, .. } = submitted(&mut app)
     else {
         panic!("a launch from the issue expected");
     };
@@ -2604,7 +2632,7 @@ async fn an_edit_that_fails_or_strays_changes_nothing() {
         confirm_screen_mut(&mut app).is_editing = true;
         app.handle_event(AppEvent::PromptEdited {
             repo_id,
-            issue_number: 42,
+            link: crate::models::WorkItemLink::Issue { number: 42 },
             result,
         });
         assert!(!confirm_screen_mut(&mut app).is_editing);
@@ -2616,14 +2644,14 @@ async fn an_edit_that_fails_or_strays_changes_nothing() {
     confirm_screen_mut(&mut app).is_editing = true;
     app.handle_event(AppEvent::PromptEdited {
         repo_id,
-        issue_number: 42,
+        link: crate::models::WorkItemLink::Issue { number: 42 },
         result: Ok(format!("{original}\n")),
     });
     assert!(confirm_screen_mut(&mut app).edited_prompt.is_none());
 
     app.handle_event(AppEvent::PromptEdited {
         repo_id,
-        issue_number: 7,
+        link: crate::models::WorkItemLink::Issue { number: 7 },
         result: Ok("Another issue's prompt".into()),
     });
     assert_eq!(confirm_screen_mut(&mut app).prompt(), original);
@@ -2634,7 +2662,7 @@ async fn an_edit_that_fails_or_strays_changes_nothing() {
 async fn the_yolo_toggle_reaches_the_launch() {
     let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
     walk_to_confirm(&mut app, "login");
-    let crate::modal::ModalResult::WorktreeFromIssue { yolo, .. } = submitted(&mut app) else {
+    let crate::modal::ModalResult::WorktreeForWorkItem { yolo, .. } = submitted(&mut app) else {
         panic!("a launch from the issue expected");
     };
     assert!(!yolo, "yolo is off by default");
@@ -2642,7 +2670,7 @@ async fn the_yolo_toggle_reaches_the_launch() {
     confirm_screen_mut(&mut app).focus = crate::modal::StartWorkConfirmModal::FOCUS_YOLO;
     app.handle_key(key(KeyCode::Char(' ')));
     assert!(confirm_screen_mut(&mut app).yolo);
-    let crate::modal::ModalResult::WorktreeFromIssue { yolo, .. } = submitted(&mut app) else {
+    let crate::modal::ModalResult::WorktreeForWorkItem { yolo, .. } = submitted(&mut app) else {
         panic!("a launch from the issue expected");
     };
     assert!(yolo);
@@ -2676,7 +2704,7 @@ async fn a_flow_closed_before_the_branches_load_opens_nothing() {
     app.handle_key(key(KeyCode::Char('s')));
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Enter));
-    assert!(app.pending_issue.is_some());
+    assert!(app.pending_start.is_some());
 
     app.handle_key(key(KeyCode::Esc));
     app.handle_key(key(KeyCode::Esc));
@@ -2707,7 +2735,7 @@ async fn clicking_rows_walks_the_flow() {
 
     app.push_hit(rect(10, 11, 30, 1), pick(1));
     app.handle_mouse(click(12, 11));
-    assert_eq!(app.pending_issue.as_ref().map(|(i, _)| i.number), Some(7));
+    assert_eq!(pending_number(&app), Some(7));
 }
 
 /// The flow draws on a real frame: every step renders its title and the
@@ -2812,6 +2840,7 @@ async fn an_issue_with_a_worktree_is_marked_in_the_list() {
     let picker = start_work(&app).picker.as_ref().expect("issues loaded");
     let marks: Vec<_> = picker
         .entries()
+        .filter_map(issue_of)
         .map(|e| (e.issue.number, e.worktree.as_deref()))
         .collect();
     assert_eq!(marks, vec![(42, None), (7, Some("beta"))]);
@@ -2840,7 +2869,7 @@ async fn picking_a_started_issue_jumps_to_its_worktree() {
 
     assert!(app.modals.is_empty(), "no confirm screen: {:?}", app.modals);
     assert!(
-        app.pending_issue.is_none(),
+        app.pending_start.is_none(),
         "no branch load for a confirm screen"
     );
     assert_eq!(app.state.selection.worktree_id, Some(beta));
@@ -2953,7 +2982,7 @@ async fn the_issue_card_jumps_to_a_started_issue() {
     app.run_action(Action::StartWorkOnIssue(1));
 
     assert!(app.modals.is_empty(), "no confirm screen: {:?}", app.modals);
-    assert!(app.pending_issue.is_none(), "no branch load");
+    assert!(app.pending_start.is_none(), "no branch load");
     assert_eq!(app.state.selection.worktree_id, Some(beta));
     assert_eq!(app.meta.path, path);
     assert_eq!(app.state.repositories()[0].worktrees.len(), worktrees);
@@ -3002,4 +3031,314 @@ async fn the_jump_reveals_an_archived_worktree() {
         app.rows.get(app.sidebar_index).and_then(|row| row.ids()),
         Some((app.state.repositories()[0].id, Some(old)))
     );
+}
+
+// ------------------------------------------------------- free-text features
+
+/// `s`, then the `feature` mode, then the free-text entry — first in the
+/// list — and the description step.
+fn describe(app: &mut App, description: &str) {
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(start_work(app).step, crate::modal::StartWorkStep::Describe);
+    type_text(app, description);
+    app.handle_key(key(KeyCode::Enter));
+}
+
+fn free_text(description: &str) -> crate::work::WorkItem {
+    crate::work::WorkItem::FreeText {
+        description: description.into(),
+    }
+}
+
+/// The free-text entry leads the `feature` list, ahead of every issue.
+#[tokio::test]
+async fn the_feature_picker_leads_with_free_text() {
+    let (_dir, mut app, _) =
+        app_with_issues(vec![labelled_issue(7, "Dark mode", &["enhancement"])]);
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Enter));
+
+    let picker = start_work(&app).picker.as_ref().expect("issues loaded");
+    assert!(matches!(
+        picker.selected(),
+        Some(crate::work::ItemEntry::FreeText)
+    ));
+    assert_eq!(picker.entry_count(), 2);
+    let screen = rendered(&mut app);
+    let free = screen.find("Free-text feature").expect("listed");
+    let issue = screen.find("#7 Dark mode").expect("listed");
+    assert!(free < issue, "{screen}");
+    assert!(
+        screen.contains("1 feature"),
+        "the count is of issues: {screen}"
+    );
+}
+
+/// A free-text feature is named from its description and started with the
+/// `free-feature` template, which carries the description as `{body}`.
+#[tokio::test]
+async fn a_free_text_feature_confirms_with_its_own_names_and_prompt() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    describe(&mut app, "Dark mode for the sidebar");
+
+    let pending = app.pending_start.as_ref().expect("waiting on branches");
+    assert_eq!(pending.item, free_text("Dark mode for the sidebar"));
+    let loaded = branches_loaded(&app);
+    app.handle_event(loaded);
+
+    let confirm = confirm_screen(&app);
+    assert_eq!(confirm.mode, crate::work::WorkMode::Feature);
+    assert_eq!(confirm.name.value(), "feat-dark-mode-for-the-sidebar");
+    assert_eq!(
+        confirm.branch.value(),
+        "feat/feat-dark-mode-for-the-sidebar"
+    );
+    let prompt = confirm.prompt();
+    assert!(prompt.contains("\nDark mode for the sidebar\n"), "{prompt}");
+    assert!(!prompt.contains("gh issue"), "{prompt}");
+    let screen = rendered(&mut app);
+    assert!(screen.contains("Start Work: Free-text feature"), "{screen}");
+
+    // Launch links the worktree to the description, not to any issue.
+    let modal = app.modals.last_mut().expect("the confirm screen");
+    modal.set_focus(crate::modal::StartWorkConfirmModal::FOCUS_LAUNCH);
+    let outcome = modal.handle_key(key(KeyCode::Enter));
+    let crate::modal::ModalOutcome::Submit(crate::modal::ModalResult::WorktreeForWorkItem {
+        link,
+        name,
+        ..
+    }) = outcome
+    else {
+        panic!("a launch expected, got {outcome:?}");
+    };
+    assert_eq!(
+        link,
+        crate::models::WorkItemLink::FreeText {
+            description: "Dark mode for the sidebar".into()
+        }
+    );
+    assert_eq!(name, "feat-dark-mode-for-the-sidebar");
+}
+
+/// A description with nothing to name a worktree after cannot be confirmed.
+#[tokio::test]
+async fn an_unnameable_description_goes_nowhere() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    describe(&mut app, "???");
+
+    assert!(app.pending_start.is_none());
+    assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Describe);
+}
+
+/// Esc from the description goes back to the list it was picked from.
+#[tokio::test]
+async fn escape_from_the_description_returns_to_the_list() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    describe(&mut app, "");
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Item);
+}
+
+/// Name `beta` as a free-text feature's slug would.
+fn take_slug(app: &mut App, slug: &str) -> Uuid {
+    let id = app.state.repositories()[0]
+        .worktrees
+        .iter()
+        .find(|w| w.name == "beta")
+        .map(|w| w.id)
+        .expect("fixture worktree");
+    app.state.update_worktree(id, |w| w.name = slug.into());
+    id
+}
+
+/// A slug that is taken is a question, never a silent match: nothing is
+/// loaded until the user picks one of exactly three answers.
+#[tokio::test]
+async fn a_taken_slug_asks_what_to_do() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    take_slug(&mut app, "feat-dark-mode");
+
+    describe(&mut app, "Dark mode");
+
+    let flow = start_work(&app);
+    assert_eq!(flow.step, crate::modal::StartWorkStep::Clash);
+    assert!(app.pending_start.is_none());
+    let screen = rendered(&mut app);
+    for choice in [
+        "Open existing",
+        "Create copy",
+        "Edit name",
+        "create feat-dark-mode-2 instead",
+    ] {
+        assert!(screen.contains(choice), "{choice}: {screen}");
+    }
+    assert_eq!(
+        start_work(&app).ring(),
+        &[
+            crate::modal::StartWorkModal::FOCUS_OPEN,
+            crate::modal::StartWorkModal::FOCUS_COPY,
+            crate::modal::StartWorkModal::FOCUS_EDIT,
+        ]
+    );
+}
+
+#[tokio::test]
+async fn edit_name_goes_back_to_the_description_as_typed() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    take_slug(&mut app, "feat-dark-mode");
+    describe(&mut app, "Dark mode");
+
+    if let Some(modal) = app.modals.last_mut() {
+        modal.set_focus(crate::modal::StartWorkModal::FOCUS_EDIT);
+    }
+    app.handle_key(key(KeyCode::Enter));
+
+    let flow = start_work(&app);
+    assert_eq!(flow.step, crate::modal::StartWorkStep::Describe);
+    assert_eq!(flow.description.value(), "Dark mode");
+    assert!(app.pending_start.is_none());
+}
+
+#[tokio::test]
+async fn create_copy_confirms_under_the_next_free_suffix() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    take_slug(&mut app, "feat-dark-mode");
+    describe(&mut app, "Dark mode");
+
+    if let Some(modal) = app.modals.last_mut() {
+        modal.set_focus(crate::modal::StartWorkModal::FOCUS_COPY);
+    }
+    app.handle_key(key(KeyCode::Enter));
+    let loaded = branches_loaded(&app);
+    app.handle_event(loaded);
+
+    let confirm = confirm_screen(&app);
+    assert_eq!(confirm.name.value(), "feat-dark-mode-2");
+    assert_eq!(confirm.branch.value(), "feat/feat-dark-mode-2");
+    assert_eq!(confirm.item, free_text("Dark mode"));
+}
+
+#[tokio::test]
+async fn open_existing_jumps_to_the_worktree_and_creates_nothing() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    let taken = take_slug(&mut app, "feat-dark-mode");
+    let worktrees = app.state.repositories()[0].worktrees.len();
+    describe(&mut app, "Dark mode");
+
+    // The first choice is focused, so Enter opens.
+    app.handle_key(key(KeyCode::Enter));
+
+    assert!(app.modals.is_empty(), "{:?}", app.modals);
+    assert!(app.pending_start.is_none());
+    assert_eq!(app.state.selection.worktree_id, Some(taken));
+    assert_eq!(app.state.repositories()[0].worktrees.len(), worktrees);
+}
+
+/// The link records a description, but a description is not an identity:
+/// a worktree started for the same words is not jumped to.
+#[tokio::test]
+async fn free_text_is_never_matched_by_its_link() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    let id = take_slug(&mut app, "renamed-since");
+    app.state.update_worktree(id, |w| {
+        w.work_item = Some(crate::models::WorkItemLink::FreeText {
+            description: "Dark mode".into(),
+        });
+    });
+
+    describe(&mut app, "Dark mode");
+
+    assert_eq!(
+        app.pending_start.as_ref().map(|p| &p.item),
+        Some(&free_text("Dark mode"))
+    );
+    assert_ne!(app.state.selection.worktree_id, Some(id));
+}
+
+/// What the GitHub probe reports for a repository with no GitHub remote.
+fn no_github(app: &mut App, path: &str) {
+    app.handle_event(AppEvent::GitHubChecked {
+        path: path.to_string(),
+        is_github: false,
+    });
+}
+
+/// Without a GitHub remote only a free-text feature can be started: the
+/// other modes are greyed out and the highlight cannot reach them.
+#[tokio::test]
+async fn a_repository_without_github_offers_only_free_text() {
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    app.handle_key(key(KeyCode::Char('s')));
+    no_github(&mut app, &path);
+
+    let flow = start_work(&app);
+    assert_eq!(flow.mode, crate::work::WorkMode::Feature);
+    assert!(!flow.mode_enabled(crate::work::WorkMode::Issue));
+    assert!(!flow.mode_enabled(crate::work::WorkMode::PrReview));
+    app.handle_key(key(KeyCode::Up));
+    if let Some(modal) = app.modals.last_mut() {
+        modal.set_row(0);
+    }
+    assert_eq!(start_work(&app).mode, crate::work::WorkMode::Feature);
+    let screen = rendered(&mut app);
+    assert!(screen.contains("(needs GitHub)"), "{screen}");
+
+    // There is nothing to pick from, so `feature` goes straight to the
+    // description, and Esc straight back.
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Describe);
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Mode);
+}
+
+/// The probe can answer after the user already moved to `issue`'s list;
+/// the flow falls back to the one mode that still works.
+#[tokio::test]
+async fn a_late_no_github_answer_leaves_the_issue_list() {
+    let (_dir, mut app, path) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(start_work(&app).mode, crate::work::WorkMode::Issue);
+
+    no_github(&mut app, &path);
+
+    let flow = start_work(&app);
+    assert_eq!(flow.mode, crate::work::WorkMode::Feature);
+    let picker = flow.picker.as_ref().expect("free text needs no issues");
+    assert_eq!(picker.entry_count(), 1);
+    assert!(matches!(
+        picker.selected(),
+        Some(crate::work::ItemEntry::FreeText)
+    ));
+}
+
+/// A yes is what the flow already assumed, so it must not rebuild the list
+/// under a half-typed query.
+#[tokio::test]
+async fn a_github_answer_keeps_the_typed_query() {
+    let (_dir, mut app, path) = app_with_issues(two_issues());
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    type_text(&mut app, "crash");
+
+    app.handle_event(AppEvent::GitHubChecked {
+        path,
+        is_github: true,
+    });
+
+    let picker = start_work(&app).picker.as_ref().expect("issues loaded");
+    assert_eq!(picker.query().value(), "crash");
+}
+
+/// An answer for another repository's checkout changes nothing here.
+#[tokio::test]
+async fn a_github_answer_for_another_path_is_ignored() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    app.handle_key(key(KeyCode::Char('s')));
+    no_github(&mut app, "/somewhere/else");
+    assert!(start_work(&app).mode_enabled(crate::work::WorkMode::Issue));
 }

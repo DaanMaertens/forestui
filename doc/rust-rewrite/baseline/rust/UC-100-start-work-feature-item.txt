@@ -16,8 +16,8 @@
                               │  │Type a number or part of a title...                                     │  │
                               │  └────────────────────────────────────────────────────────────────────────┘  │
                               │  1 features                                                                  │
+                              │   ✎ Free-text feature…                                                       │
                               │   #77 Dark mode for the dashboard                                            │
-                              │                                                                              │
                               │                                                                              │
                               │                                                                              │
                               │                                                                              │
