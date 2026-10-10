@@ -62,7 +62,7 @@ fn a_missing_live_dir_reads_as_no_heartbeats() {
 #[cfg(unix)]
 #[test]
 fn the_heartbeat_script_writes_sweeps_and_heals() {
-    use std::os::unix::fs::PermissionsExt;
+    use crate::test_support::write_executable;
     if std::process::Command::new("jq")
         .arg("--version")
         .output()
@@ -76,32 +76,24 @@ fn the_heartbeat_script_writes_sweeps_and_heals() {
     let bin = home.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let script = bin.join("heartbeat.sh");
-    std::fs::write(
+    write_executable(
         &script,
         include_str!("../../../assets/claude-plugin/heartbeat.sh"),
-    )
-    .unwrap();
+    );
     // A fake ps: every ancestry query answers pid 4242, whose command is
     // claude — so the walk terminates on the first hop.
-    std::fs::write(
-        bin.join("ps"),
+    write_executable(
+        &bin.join("ps"),
         "#!/bin/sh\ncase \"$*\" in *ppid*) echo 4242;; *comm*) echo claude;; esac\n",
-    )
-    .unwrap();
+    );
     // A fake tmux that records its argv instead of reaching any server.
-    std::fs::write(
-        bin.join("tmux"),
-        format!(
+    write_executable(
+        &bin.join("tmux"),
+        &format!(
             "#!/bin/sh\necho \"$@\" >> {}\n",
             home.path().join("tmux.log").display()
         ),
-    )
-    .unwrap();
-    for file in [&script, &bin.join("ps"), &bin.join("tmux")] {
-        let mut perms = std::fs::metadata(file).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(file, perms).unwrap();
-    }
+    );
 
     let run = |event: &str, input: &str, pane: Option<&str>| {
         let mut cmd = std::process::Command::new(&script);

@@ -596,10 +596,7 @@ fn the_remembered_line_is_the_newest_history_entry() {
         let bin = root.join("bin");
         std::fs::create_dir(&bin).expect("bin dir");
         let stub = bin.join("tmux");
-        std::fs::write(&stub, "#!/bin/sh\nexit 0\n").expect("tmux stub");
-        let mut mode = std::fs::metadata(&stub).expect("stub").permissions();
-        std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
-        std::fs::set_permissions(&stub, mode).expect("chmod");
+        crate::test_support::write_executable(&stub, "#!/bin/sh\nexit 0\n");
 
         let (history, rc, old, other) = if shell == "zsh" {
             (
