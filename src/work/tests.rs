@@ -43,13 +43,37 @@ fn non_ascii_and_punctuation_collapse_to_single_dashes() {
     assert_eq!(title_slug("Café: crash -- on   save"), "caf-crash-on-save");
 }
 
+/// A PR someone else opened is reviewed and reported on; one I opened
+/// gets the self-review. GitHub logins ignore case, so the comparison does.
 #[test]
-fn issue_and_feature_are_enabled_pr_review_not_yet() {
-    let enabled: Vec<_> = WorkMode::ALL
-        .into_iter()
-        .filter(|m| m.is_enabled())
-        .collect();
-    assert_eq!(enabled, vec![WorkMode::Issue, WorkMode::Feature]);
+fn the_review_kind_follows_authorship() {
+    assert_eq!(review_kind("alice", Some("daan")), ReviewKind::Others);
+    assert_eq!(review_kind("daan", Some("daan")), ReviewKind::Own);
+    assert_eq!(
+        review_kind("DaanMaertens", Some("daanmaertens")),
+        ReviewKind::Own
+    );
+}
+
+/// Without knowing who `gh` is logged in as, every PR is someone else's:
+/// that review changes no code, so a wrong guess costs nothing.
+#[test]
+fn an_unknown_viewer_reviews_without_changing_code() {
+    assert_eq!(review_kind("daan", None), ReviewKind::Others);
+    assert_eq!(review_kind("", Some("")), ReviewKind::Others);
+}
+
+#[test]
+fn a_pull_request_is_named_pr_number_slug() {
+    assert_eq!(
+        names(
+            WorkMode::PrReview,
+            31,
+            "Give the cache tests their own cache"
+        )
+        .worktree,
+        "pr-31-give-the-cache-tests-their-own-cache"
+    );
 }
 
 fn labelled(number: i64, labels: &[&str]) -> GitHubIssue {
@@ -132,10 +156,40 @@ fn an_issue_starts_in_the_mode_that_lists_it() {
     );
 }
 
+fn pull_request(review: ReviewKind) -> WorkItem {
+    WorkItem::PullRequest {
+        number: 31,
+        title: "x".into(),
+        author: "alice".into(),
+        head_branch: "fix/x".into(),
+        from_fork: false,
+        review,
+    }
+}
+
 #[test]
-fn each_mode_fills_its_own_template() {
-    assert_eq!(WorkMode::Issue.template(), prompt::ISSUE_TEMPLATE);
-    assert_eq!(WorkMode::Feature.template(), prompt::FEATURE_TEMPLATE);
+fn each_work_item_fills_its_own_template() {
+    let issue = WorkItem::Issue {
+        number: 7,
+        title: "x".into(),
+    };
+    assert_eq!(issue.template(WorkMode::Issue), prompt::ISSUE_TEMPLATE);
+    assert_eq!(issue.template(WorkMode::Feature), prompt::FEATURE_TEMPLATE);
+    let free = WorkItem::FreeText {
+        description: "x".into(),
+    };
+    assert_eq!(
+        free.template(WorkMode::Feature),
+        prompt::FREE_FEATURE_TEMPLATE
+    );
+    assert_eq!(
+        pull_request(ReviewKind::Others).template(WorkMode::PrReview),
+        prompt::PR_REVIEW_OTHERS_TEMPLATE
+    );
+    assert_eq!(
+        pull_request(ReviewKind::Own).template(WorkMode::PrReview),
+        prompt::PR_REVIEW_OWN_TEMPLATE
+    );
 }
 
 #[test]
@@ -238,6 +292,55 @@ fn a_work_item_links_to_what_it_was_started_for() {
         .link(),
         crate::models::WorkItemLink::Issue { number: 7 }
     );
+    assert_eq!(
+        pull_request(ReviewKind::Own).link(),
+        crate::models::WorkItemLink::PullRequest { number: 31 }
+    );
+}
+
+fn open_pr(number: i64, title: &str, draft: bool) -> crate::models::GitHubPullRequest {
+    serde_json::from_value(serde_json::json!({
+        "number": number,
+        "title": title,
+        "author": {"login": "alice"},
+        "isDraft": draft,
+        "headRefName": "fix/x",
+        "createdAt": "2026-01-01T00:00:00Z",
+    }))
+    .unwrap()
+}
+
+/// The `pr-review` list holds the PRs, searched by number and title, each
+/// with the worktree it was started in; there is no free-text entry.
+#[test]
+fn the_pr_review_list_holds_the_pull_requests() {
+    let prs = vec![
+        open_pr(30, "Fix the flaky test", true),
+        open_pr(31, "Cache", false),
+    ];
+    let entries = pull_request_entries(&prs, |n| (n == 31).then(|| "pr-31-cache".to_string()));
+    let rows: Vec<_> = entries
+        .iter()
+        .map(|e| match e {
+            ItemEntry::PullRequest(entry) => (
+                entry.search_text().to_string(),
+                entry.pr.is_draft,
+                entry.worktree.clone(),
+            ),
+            other => panic!("only PRs expected, found {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("#30 Fix the flaky test".to_string(), true, None),
+            (
+                "#31 Cache".to_string(),
+                false,
+                Some("pr-31-cache".to_string())
+            ),
+        ]
+    );
 }
 
 /// The free-text entry is first, and the issues follow in their own order.
@@ -250,7 +353,7 @@ fn the_feature_list_leads_with_free_text() {
         .iter()
         .filter_map(|e| match e {
             ItemEntry::Issue(entry) => Some(entry.issue.number),
-            ItemEntry::FreeText => None,
+            _ => None,
         })
         .collect();
     assert_eq!(numbers, vec![2, 3]);

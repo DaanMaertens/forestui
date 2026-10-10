@@ -1,0 +1,44 @@
+
+
+
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work: PR #45                                                         │
+                              │                                                                              │
+                              │  Retry uploads with backoff  (by @octo-dev)                                  │
+                              │  Review Kind                                                                 │
+                              │   Review someone else's PR                                                   │
+                              │   Review and report; no code changes                                         │
+                              │  Worktree Name                                                               │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │pr-45-retry-uploads-with-backoff                                        │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  Path: <ROOT>/forest/beta/pr-45-retry-uploads-with-backoff    │
+                              │  Branch                                                                      │
+                              │   fix/retry-backoff  (gh pr checkout)                                        │
+                              │  Prompt                                                                      │
+                              │   Review pull request #45: Retry uploads with backoff                        │
+                              │                                                                              │
+                              │   Start by reading it with `gh pr view 45 --comments`, so you have its       │
+                              │   current description and every comment, then the change itself with `gh pr  │
+                              │   diff 45`.                                                                  │
+                              │                                                                              │
+                              │   You are in the `pr-45-retry-uploads-with-backoff` worktree of beta, on     │
+                              │   the PR's branch `fix/retry-backoff`.                                       │
+                              │                                                                              │
+                              │   Someone else opened this PR. Review it and report: check that it does      │
+                              │   what it says, and look for bugs, missing tests and anything that does not  │
+                              │   fit the code around it. List your findings by severity, with file and      │
+                              │   line. Do not change any code.                                              │
+                              │                                                                              │
+                              │              ┌─────────────┐ ┌──────────┐ ┌────────┐ ┌────────┐              │
+                              │              │ Edit prompt │ │ [ ] YOLO │ │ Launch │ │  Back  │              │
+                              │              └─────────────┘ └──────────┘ └────────┘ └────────┘              │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

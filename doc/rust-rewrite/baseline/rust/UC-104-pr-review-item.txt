@@ -1,0 +1,44 @@
+
+
+
+
+
+
+
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work: pr-review                                                      │
+                              │                                                                              │
+                              │  in beta                                                                     │
+                              │  Pull Request                                                                │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │Type a number or part of a title...                                     │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  2 PRs                                                                       │
+                              │   #46 Cache the session index  draft                                         │
+                              │   #45 Retry uploads with backoff                                             │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │  Enter picks · Esc goes back                                                 │
+                              │                            ┌────────┐ ┌────────┐                             │
+                              │                            │  Back  │ │ Cancel │                             │
+                              │                            └────────┘ └────────┘                             │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

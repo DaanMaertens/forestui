@@ -596,12 +596,12 @@ fn count_line<T: Searchable>(picker: &SearchPicker<T>, noun: &str) -> String {
     count_text(picker, picker.match_count(), picker.entry_count(), noun)
 }
 
-/// [`count_line`] for Start work's item list, counting the issues only: the
-/// free-text entry is always there and is not one of them.
-fn issue_count_line(picker: &SearchPicker<ItemEntry>, noun: &str) -> String {
-    let is_issue = |e: &&ItemEntry| matches!(e, ItemEntry::Issue(_));
-    let shown = picker.matches().filter(is_issue).count();
-    let total = picker.entries().filter(is_issue).count();
+/// [`count_line`] for Start work's item list, counting the work items only:
+/// the free-text entry is always there and is not one of them.
+fn item_count_line(picker: &SearchPicker<ItemEntry>, noun: &str) -> String {
+    let is_item = |e: &&ItemEntry| e.is_item();
+    let shown = picker.matches().filter(is_item).count();
+    let total = picker.entries().filter(is_item).count();
     count_text(picker, shown, total, noun)
 }
 
@@ -692,9 +692,7 @@ fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
             mode.description()
         };
         let mut text = format!(" {:<11}{description}", mode.label());
-        if !mode.is_enabled() {
-            text.push_str("  (not yet)");
-        } else if !enabled {
+        if !enabled {
             text.push_str("  (needs GitHub)");
         }
         column.row(
@@ -727,11 +725,31 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     let mut column = dialog(frame, rect, &title, theme::title());
 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
-    column.line(frame, widgets::section("Issue"));
+    let (section, loading, empty, noun) = match modal.mode {
+        WorkMode::Issue => (
+            "Issue",
+            " Loading issues...",
+            "No open non-feature issues assigned to or opened by you",
+            "issues",
+        ),
+        WorkMode::Feature => (
+            "Issue",
+            " Loading issues...",
+            "No open feature issues assigned to or opened by you",
+            "features",
+        ),
+        WorkMode::PrReview => (
+            "Pull Request",
+            " Loading pull requests...",
+            "No open PRs awaiting your review or opened by you",
+            "PRs",
+        ),
+    };
+    column.line(frame, widgets::section(section));
     match &modal.picker {
         None => {
             column.gap();
-            column.text(frame, " Loading issues...", theme::muted());
+            column.text(frame, loading, theme::muted());
             column.gap();
         }
         Some(picker) => {
@@ -742,26 +760,13 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
                 modal.focus,
                 StartWorkModal::FOCUS_LIST,
             );
-            let (empty, noun) = match modal.mode {
-                WorkMode::Feature => (
-                    "No open feature issues assigned to or opened by you",
-                    "features",
-                ),
-                WorkMode::Issue | WorkMode::PrReview => (
-                    "No open non-feature issues assigned to or opened by you",
-                    "issues",
-                ),
-            };
-            // The free-text entry is not an issue: an empty list still
-            // says so above it, and the count is of issues alone.
-            let issues = picker
-                .entries()
-                .filter(|e| matches!(e, ItemEntry::Issue(_)))
-                .count();
-            if issues == 0 {
+            // The free-text entry is not a work item: an empty list still
+            // says so above it, and the count is of the items alone.
+            let items = picker.entries().filter(|e| e.is_item()).count();
+            if items == 0 {
                 column.text(frame, empty, theme::muted());
             } else {
-                column.text(frame, issue_count_line(picker, noun), theme::muted());
+                column.text(frame, item_count_line(picker, noun), theme::muted());
             }
             // Leave room for the gap, the hint and the buttons below the list.
             let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
@@ -775,20 +780,23 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
                 ModalClick::Pick,
                 |entry, query, style| {
                     let mut line = branch_line(entry.search_text(), query, style);
+                    // Markers take accent or muted on a plain row; the
+                    // highlighted row keeps its own colours, where either on
+                    // the accent-dark cursor would fade.
+                    let marker = |plain: Style| if style.bg.is_some() { style } else { plain };
+                    if let ItemEntry::PullRequest(entry) = entry
+                        && entry.pr.is_draft
+                    {
+                        line.spans
+                            .push(Span::styled("  draft", marker(theme::muted())));
+                    }
                     // Picking a marked item jumps to its worktree rather than
                     // creating one, so the row says where it will land.
-                    // Accent on a plain row; the highlighted row keeps its own
-                    // colours, where accent on the accent-dark cursor would fade.
-                    if let ItemEntry::Issue(issue) = entry
-                        && let Some(worktree) = &issue.worktree
-                    {
-                        let marker = if style.bg.is_some() {
-                            style
-                        } else {
-                            theme::accent()
-                        };
-                        line.spans
-                            .push(Span::styled(format!("  → {worktree}"), marker));
+                    if let Some(worktree) = entry.worktree() {
+                        line.spans.push(Span::styled(
+                            format!("  → {worktree}"),
+                            marker(theme::accent()),
+                        ));
                     }
                     line
                 },
@@ -932,6 +940,10 @@ const MIN_PROMPT_ROWS: u16 = 3;
 /// labelled fields with a hint each, fetch and pull on one row, the prompt's
 /// label, gap, buttons.
 const CONFIRM_BODY: u16 = CHROME + 23;
+/// The same for a PR review: the PR, the review kind with its line of
+/// explanation, the name field and its path, the branch `gh pr checkout`
+/// will check out, the prompt's label, gap, buttons.
+const REVIEW_CONFIRM_BODY: u16 = CHROME + 16;
 
 fn start_work_confirm(
     frame: &mut Frame,
@@ -943,8 +955,13 @@ fn start_work_confirm(
     let width = WIDTH.saturating_sub(7) as usize;
     // As much of the prompt as the terminal has room for, so a tall one shows
     // it whole; a longer prompt ends in `…`. The 95% is `centered_rect`'s cap.
+    let body = if modal.is_review() {
+        REVIEW_CONFIRM_BODY
+    } else {
+        CONFIRM_BODY
+    };
     let room = (area.height.saturating_mul(95) / 100)
-        .saturating_sub(CONFIRM_BODY)
+        .saturating_sub(body)
         .max(MIN_PROMPT_ROWS) as usize;
     let mut prompt: Vec<String> = modal
         .prompt()
@@ -967,20 +984,36 @@ fn start_work_confirm(
         }
     }
 
-    let rect = widgets::centered_rect(WIDTH, CONFIRM_BODY + prompt.len() as u16, area);
+    let rect = widgets::centered_rect(WIDTH, body + prompt.len() as u16, area);
     let (title, subtitle) = match &modal.item {
         WorkItem::Issue { number, title } => {
             let kind = match modal.mode {
                 WorkMode::Feature => "Feature",
                 WorkMode::Issue | WorkMode::PrReview => "Issue",
             };
-            (format!("Start Work: {kind} #{number}"), title.as_str())
+            (format!("Start Work: {kind} #{number}"), title.to_string())
         }
-        WorkItem::FreeText { description } => (FREE_TEXT_TITLE.to_string(), description.as_str()),
+        WorkItem::PullRequest {
+            number,
+            title,
+            author,
+            ..
+        } => (
+            format!("Start Work: PR #{number}"),
+            format!("{title}  (by @{author})"),
+        ),
+        WorkItem::FreeText { description } => (FREE_TEXT_TITLE.to_string(), description.clone()),
     };
     let mut column = dialog(frame, rect, &title, theme::title());
 
-    column.text(frame, subtitle.to_string(), theme::muted());
+    column.text(frame, subtitle, theme::muted());
+
+    // Settled by who opened the PR, so it is stated, not offered.
+    if let WorkItem::PullRequest { review, .. } = &modal.item {
+        column.line(frame, widgets::section("Review Kind"));
+        column.text(frame, format!(" {}", review.label()), theme::primary());
+        column.text(frame, format!(" {}", review.description()), theme::muted());
+    }
 
     column.line(frame, widgets::section("Worktree Name"));
     column.input(
@@ -996,58 +1029,17 @@ fn start_work_confirm(
         theme::muted(),
     );
 
-    column.line(frame, widgets::section("Branch Name"));
-    column.input(
-        frame,
-        hits,
-        &modal.branch,
-        modal.focus,
-        StartWorkConfirmModal::FOCUS_BRANCH,
-    );
-
-    column.line(frame, widgets::section("Base Branch"));
-    column.input(
-        frame,
-        hits,
-        &modal.base_branch,
-        modal.focus,
-        StartWorkConfirmModal::FOCUS_BASE,
-    );
-    // The completion the Textual suggester used to ghost inside the input.
-    // Right accepts it, so say so; the row is always reserved to stop the
-    // controls below jumping as the user types.
-    let hint = match modal.base_suggestion() {
-        Some(suggestion) if suggestion != modal.base_branch.value() => {
-            format!(" {suggestion}  (→ accepts)")
-        }
-        _ => String::new(),
-    };
-    column.text(frame, hint, theme::muted());
-
-    let fetch = if modal.is_fetching {
-        SPINNER[modal.spinner_index % SPINNER.len()].to_string()
+    if modal.is_review() {
+        // `gh pr checkout` names the branch, so there is nothing to edit.
+        column.line(frame, widgets::section("Branch"));
+        column.text(
+            frame,
+            format!(" {}  (gh pr checkout)", modal.branch.value()),
+            theme::secondary(),
+        );
     } else {
-        "Fetch".to_string()
-    };
-    column.controls(
-        frame,
-        hits,
-        vec![
-            control(
-                &fetch,
-                modal.focus == StartWorkConfirmModal::FOCUS_FETCH,
-                theme::Variant::Normal,
-                StartWorkConfirmModal::FOCUS_FETCH,
-            ),
-            checkbox(
-                "Pull repo before creating",
-                modal.pull_first,
-                modal.focus == StartWorkConfirmModal::FOCUS_PULL,
-                StartWorkConfirmModal::FOCUS_PULL,
-            ),
-        ],
-        false,
-    );
+        branch_fields(frame, &mut column, modal, hits);
+    }
 
     // Marked, because an edited prompt no longer follows the name fields.
     let label = if modal.edited_prompt.is_some() {
@@ -1105,6 +1097,69 @@ fn start_work_confirm(
             ),
         ],
         true,
+    );
+}
+
+/// The branch fields of an issue or feature: the branch to create, the base
+/// it branches from with its completion hint, and Fetch beside the pull
+/// checkbox. A PR review has none of them.
+fn branch_fields(
+    frame: &mut Frame,
+    column: &mut Column,
+    modal: &StartWorkConfirmModal,
+    hits: &mut Hits,
+) {
+    column.line(frame, widgets::section("Branch Name"));
+    column.input(
+        frame,
+        hits,
+        &modal.branch,
+        modal.focus,
+        StartWorkConfirmModal::FOCUS_BRANCH,
+    );
+
+    column.line(frame, widgets::section("Base Branch"));
+    column.input(
+        frame,
+        hits,
+        &modal.base_branch,
+        modal.focus,
+        StartWorkConfirmModal::FOCUS_BASE,
+    );
+    // The completion the Textual suggester used to ghost inside the input.
+    // Right accepts it, so say so; the row is always reserved to stop the
+    // controls below jumping as the user types.
+    let hint = match modal.base_suggestion() {
+        Some(suggestion) if suggestion != modal.base_branch.value() => {
+            format!(" {suggestion}  (→ accepts)")
+        }
+        _ => String::new(),
+    };
+    column.text(frame, hint, theme::muted());
+
+    let fetch = if modal.is_fetching {
+        SPINNER[modal.spinner_index % SPINNER.len()].to_string()
+    } else {
+        "Fetch".to_string()
+    };
+    column.controls(
+        frame,
+        hits,
+        vec![
+            control(
+                &fetch,
+                modal.focus == StartWorkConfirmModal::FOCUS_FETCH,
+                theme::Variant::Normal,
+                StartWorkConfirmModal::FOCUS_FETCH,
+            ),
+            checkbox(
+                "Pull repo before creating",
+                modal.pull_first,
+                modal.focus == StartWorkConfirmModal::FOCUS_PULL,
+                StartWorkConfirmModal::FOCUS_PULL,
+            ),
+        ],
+        false,
     );
 }
 

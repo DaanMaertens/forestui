@@ -52,6 +52,17 @@ PASS UC-103    clash-offers-three-choices                     expected=yes      
 PASS UC-103    clash-names-the-copy                           expected=yes                          actual=yes
 PASS UC-103    flow-closed                                    expected=no                           actual=no
 PASS UC-103    nothing-created                                expected=5                            actual=5
+PASS UC-104    draft-marked                                   expected=yes                          actual=yes
+PASS UC-104    titled-as-a-pr                                 expected=yes                          actual=yes
+PASS UC-104    someone-elses-review                           expected=yes                          actual=yes
+PASS UC-104    prompt-reads-the-pr                            expected=yes                          actual=yes
+PASS UC-104    no-base-branch                                 expected=no                           actual=no
+PASS UC-104    worktree-created                               expected=yes                          actual=yes
+PASS UC-104    pr-branch-checked-out                          expected=fix/retry-backoff            actual=fix/retry-backoff
+PASS UC-104    work-item-linked                               expected={'kind': 'pull_request', 'number': 45} actual={'kind': 'pull_request', 'number': 45}
+PASS UC-104    own-review                                     expected=yes                          actual=yes
+PASS UC-104    flow-closed                                    expected=no                           actual=no
+PASS UC-104    nothing-created                                expected=6                            actual=6
 PASS UC-72     cancel-closes-confirm                          expected=no                           actual=no
 PASS UC-72     cancel-keeps-dir                               expected=yes                          actual=yes
 PASS UC-72     cancel-keeps-entry                             expected=True                         actual=True

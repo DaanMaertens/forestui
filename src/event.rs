@@ -107,6 +107,14 @@ pub enum AppEvent {
         path: String,
         issues: Vec<GitHubIssue>,
     },
+    /// Start work's `pr-review` list finished loading: the open PRs that are
+    /// mine, and the login `gh` is authenticated as, which decides each
+    /// one's review kind.
+    PullRequests {
+        path: String,
+        prs: Vec<crate::models::GitHubPullRequest>,
+        viewer: Option<String>,
+    },
     /// Start work asked `gh` whether a checkout resolves to a GitHub
     /// repository; without one, only a free-text feature can be started.
     GitHubChecked { path: String, is_github: bool },

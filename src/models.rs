@@ -143,7 +143,7 @@ pub struct Worktree {
 }
 
 /// The record on a worktree of which work item it was started for.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkItemLink {
     Issue { number: i64 },
@@ -388,6 +388,35 @@ pub struct GitHubIssue {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub labels: Vec<GitHubLabel>,
+}
+
+/// The login of whoever opened an issue or pull request.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GitHubUser {
+    #[serde(default)]
+    pub login: String,
+}
+
+/// An open pull request as returned by `gh pr list --json ...`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubPullRequest {
+    #[serde(default)]
+    pub number: i64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub author: GitHubUser,
+    #[serde(default)]
+    pub is_draft: bool,
+    /// The branch the PR is opened from — on the fork, for a PR from one.
+    #[serde(default)]
+    pub head_ref_name: String,
+    /// Opened from a fork, whose branch names say nothing about this
+    /// repository's.
+    #[serde(default)]
+    pub is_cross_repository: bool,
+    pub created_at: DateTime<Utc>,
 }
 
 impl GitHubIssue {

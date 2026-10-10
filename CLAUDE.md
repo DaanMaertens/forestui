@@ -597,7 +597,7 @@ proactively, not only when asked.
 scenarios with exact keystrokes and expected output. The P0 cases are the
 regression suite — run the relevant ones after any behavioural change.
 
-UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–103,
+UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–104,
 and the guards UC-90/96 are automated —
 frames plus on-disk assertions (`ASSERTIONS.txt`). Capture a build and compare
 two builds with:
