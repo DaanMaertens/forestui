@@ -1,0 +1,44 @@
+
+
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work: PR #46                                                         │
+                              │                                                                              │
+                              │  Cache the session index  (by @sweep-user)                                   │
+                              │  Review Kind                                                                 │
+                              │   Review my own PR                                                           │
+                              │   List findings, wait for your go-ahead, then fix                            │
+                              │  Worktree Name                                                               │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │pr-46-cache-the-session-index                                           │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  Path: <ROOT>/forest/beta/pr-46-cache-the-session-index       │
+                              │  Branch                                                                      │
+                              │   feat/session-index-cache  (gh pr checkout)                                 │
+                              │  Prompt                                                                      │
+                              │   Review my own pull request #46: Cache the session index                    │
+                              │                                                                              │
+                              │   Start by reading it with `gh pr view 46 --comments`, so you have its       │
+                              │   current description and every comment, then the change itself with `gh pr  │
+                              │   diff 46`.                                                                  │
+                              │                                                                              │
+                              │   You are in the `pr-46-cache-the-session-index` worktree of beta, on the    │
+                              │   PR's branch `feat/session-index-cache`.                                    │
+                              │                                                                              │
+                              │   Review it the way a reviewer would: check that it does what it says, and   │
+                              │   look for bugs, missing tests and anything that does not fit the code       │
+                              │   around it. First list your findings by severity, with file and line, then  │
+                              │   wait for my go-ahead before changing any code. Once I have said which to   │
+                              │   fix, fix them on this branch.                                              │
+                              │                                                                              │
+                              │              ┌─────────────┐ ┌──────────┐ ┌────────┐ ┌────────┐              │
+                              │              │ Edit prompt │ │ [ ] YOLO │ │ Launch │ │  Back  │              │
+                              │              └─────────────┘ └──────────┘ └────────┘ └────────┘              │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

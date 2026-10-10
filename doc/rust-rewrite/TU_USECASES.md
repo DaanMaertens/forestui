@@ -1712,6 +1712,29 @@ does, and that a repository without a GitHub remote offers only this mode with
 named otherwise, the prompt points at an issue, the link is missing, or the
 second run opens a confirm screen or jumps instead of asking.
 
+### UC-104 — Start work for a pr-review
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** after UC-103, click beta's sidebar row, `s` → `Down` `Down` `Enter`
+(mode `pr-review`) → type `retry` → `Enter` → `Enter` (Launch). Then `s` →
+`Down` `Down` `Enter` → type `cache` → `Enter`, and `Escape` three times.
+**Expected:** the item step lists beta's PRs — `#45 Retry uploads with
+backoff`, awaiting the user's review, and `#46 Cache the session index`, a
+draft they opened, marked `draft`. The confirm screen for #45 is titled
+`Start Work: PR #45`, states `Review someone else's PR` with no way to switch
+it, names the worktree `pr-45-retry-uploads-with-backoff`, shows the branch
+`fix/retry-backoff` as `gh pr checkout` will check it out, and has no base
+branch, Fetch or pull checkbox. Its prompt sends Claude to
+`gh pr view 45 --comments` and says not to change code. Launch creates the
+worktree on `fix/retry-backoff` and records
+`{"kind": "pull_request", "number": 45}` as its `work_item`. The second run's
+confirm screen for #46 states `Review my own PR`; each `Escape` steps back one
+screen and nothing is created. Jumping to a started PR, and to a worktree that
+already has the PR's branch checked out, is unit-tested.
+**Fails if:** the list shows issues, a PR is missing or the draft is not
+marked, the review kind is wrong or switchable, the confirm screen asks for a
+base branch, the worktree is on any branch but the PR's, or the link is
+missing.
+
 ---
 
 ## Known visual divergences (accepted, not defects)

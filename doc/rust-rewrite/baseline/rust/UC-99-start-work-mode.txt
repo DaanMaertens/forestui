@@ -19,7 +19,7 @@
                               │  Work Mode                                                                   │
                               │   issue      Fix a bug or chore from an open issue                           │
                               │   feature    Build a feature from a labelled issue                           │
-                              │   pr-review  Review a pull request  (not yet)                                │
+                              │   pr-review  Review a pull request                                           │
                               │                                                                              │
                               │  Enter chooses · Esc closes                                                  │
                               │                                  ┌────────┐                                  │

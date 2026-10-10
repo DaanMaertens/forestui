@@ -2,7 +2,7 @@
 //! worktree and branch, and the entry a work item is searched by.
 
 use crate::fuzzy::Searchable;
-use crate::models::{GitHubIssue, WorkItemLink, Worktree};
+use crate::models::{GitHubIssue, GitHubPullRequest, WorkItemLink, Worktree};
 use crate::prompt;
 
 /// The longest slug a title contributes to a name, so a long title cannot
@@ -39,20 +39,53 @@ impl WorkMode {
             WorkMode::PrReview => "Review a pull request",
         }
     }
+}
 
-    /// Whether the mode can be picked yet. Listing the others greyed out
-    /// shows where the flow is going without offering what does not exist.
-    pub fn is_enabled(self) -> bool {
-        matches!(self, WorkMode::Issue | WorkMode::Feature)
+/// How a PR is reviewed, which follows from who opened it — there is no
+/// switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewKind {
+    /// Someone else's PR: review and report, change nothing.
+    Others,
+    /// My own PR: list findings, wait for a go-ahead, then fix.
+    Own,
+}
+
+impl ReviewKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            ReviewKind::Others => "Review someone else's PR",
+            ReviewKind::Own => "Review my own PR",
+        }
     }
 
-    /// The built-in template the mode's first prompt is filled from.
-    /// `pr-review` cannot be picked yet and has no template of its own.
-    pub fn template(self) -> &'static str {
+    pub fn description(self) -> &'static str {
         match self {
-            WorkMode::Issue | WorkMode::PrReview => prompt::ISSUE_TEMPLATE,
-            WorkMode::Feature => prompt::FEATURE_TEMPLATE,
+            ReviewKind::Others => "Review and report; no code changes",
+            ReviewKind::Own => "List findings, wait for your go-ahead, then fix",
         }
+    }
+
+    fn template(self) -> &'static str {
+        match self {
+            ReviewKind::Others => prompt::PR_REVIEW_OTHERS_TEMPLATE,
+            ReviewKind::Own => prompt::PR_REVIEW_OWN_TEMPLATE,
+        }
+    }
+}
+
+/// The review kind of a PR opened by `author`, as seen by `viewer`, the
+/// login `gh` is authenticated as. GitHub logins ignore case.
+///
+/// An unknown viewer makes every PR someone else's: that review changes no
+/// code, so guessing wrong that way costs nothing, while the other way
+/// would have Claude editing a stranger's branch.
+pub fn review_kind(author: &str, viewer: Option<&str>) -> ReviewKind {
+    match viewer {
+        Some(viewer) if !viewer.is_empty() && viewer.eq_ignore_ascii_case(author) => {
+            ReviewKind::Own
+        }
+        _ => ReviewKind::Others,
     }
 }
 
@@ -178,12 +211,27 @@ pub fn clash<'a>(names: &WorktreeNames, worktrees: &'a [Worktree]) -> Option<&'a
         .find(|w| w.name == names.worktree || w.branch == names.branch)
 }
 
-/// What a worktree is started for: an issue, or a feature described in the
-/// user's own words that exists nowhere but here.
+/// What a worktree is started for: an issue, a pull request to review, or a
+/// feature described in the user's own words that exists nowhere but here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkItem {
-    Issue { number: i64, title: String },
-    FreeText { description: String },
+    Issue {
+        number: i64,
+        title: String,
+    },
+    PullRequest {
+        number: i64,
+        title: String,
+        author: String,
+        /// The branch the PR is opened from, which `gh pr checkout` checks out.
+        head_branch: String,
+        /// Opened from a fork: `head_branch` is the fork's name for it.
+        from_fork: bool,
+        review: ReviewKind,
+    },
+    FreeText {
+        description: String,
+    },
 }
 
 impl WorkItem {
@@ -194,13 +242,37 @@ impl WorkItem {
         }
     }
 
+    /// A PR, its review kind settled against `viewer` now, once.
+    pub fn from_pull_request(pr: &GitHubPullRequest, viewer: Option<&str>) -> Self {
+        WorkItem::PullRequest {
+            number: pr.number,
+            title: pr.title.clone(),
+            author: pr.author.login.clone(),
+            head_branch: pr.head_ref_name.clone(),
+            from_fork: pr.is_cross_repository,
+            review: review_kind(&pr.author.login, viewer),
+        }
+    }
+
     /// The record the worktree keeps of it.
     pub fn link(&self) -> WorkItemLink {
         match self {
             WorkItem::Issue { number, .. } => WorkItemLink::Issue { number: *number },
+            WorkItem::PullRequest { number, .. } => WorkItemLink::PullRequest { number: *number },
             WorkItem::FreeText { description } => WorkItemLink::FreeText {
                 description: description.clone(),
             },
+        }
+    }
+
+    /// The built-in template its first prompt is filled from. An issue's
+    /// depends on the mode it is started in; a PR's on its review kind.
+    pub fn template(&self, mode: WorkMode) -> &'static str {
+        match self {
+            WorkItem::Issue { .. } if mode == WorkMode::Feature => prompt::FEATURE_TEMPLATE,
+            WorkItem::Issue { .. } => prompt::ISSUE_TEMPLATE,
+            WorkItem::PullRequest { review, .. } => review.template(),
+            WorkItem::FreeText { .. } => prompt::FREE_FEATURE_TEMPLATE,
         }
     }
 }
@@ -214,6 +286,24 @@ pub enum ItemEntry {
     /// Describe a feature that has no issue.
     FreeText,
     Issue(IssueEntry),
+    PullRequest(PullRequestEntry),
+}
+
+impl ItemEntry {
+    /// Whether the row is a work item from GitHub, rather than the
+    /// free-text entry that is always there.
+    pub fn is_item(&self) -> bool {
+        !matches!(self, ItemEntry::FreeText)
+    }
+
+    /// The worktree already started for the row's item, if any.
+    pub fn worktree(&self) -> Option<&str> {
+        match self {
+            ItemEntry::FreeText => None,
+            ItemEntry::Issue(entry) => entry.worktree.as_deref(),
+            ItemEntry::PullRequest(entry) => entry.worktree.as_deref(),
+        }
+    }
 }
 
 impl Searchable for ItemEntry {
@@ -221,7 +311,41 @@ impl Searchable for ItemEntry {
         match self {
             ItemEntry::FreeText => FREE_TEXT_LABEL,
             ItemEntry::Issue(entry) => entry.search_text(),
+            ItemEntry::PullRequest(entry) => entry.search_text(),
         }
+    }
+}
+
+/// The rows `pr-review` lists: every PR, each with the worktree `linked`
+/// says it was started in.
+pub fn pull_request_entries(
+    prs: &[GitHubPullRequest],
+    linked: impl Fn(i64) -> Option<String>,
+) -> Vec<ItemEntry> {
+    prs.iter()
+        .map(|pr| ItemEntry::PullRequest(PullRequestEntry::new(pr.clone(), linked(pr.number))))
+        .collect()
+}
+
+/// A PR as the item picker searches it: by number and title, like an issue.
+#[derive(Debug, Clone)]
+pub struct PullRequestEntry {
+    pub pr: GitHubPullRequest,
+    /// The name of the worktree already started for this PR, if any.
+    pub worktree: Option<String>,
+    text: String,
+}
+
+impl PullRequestEntry {
+    pub fn new(pr: GitHubPullRequest, worktree: Option<String>) -> Self {
+        let text = format!("#{} {}", pr.number, pr.title);
+        Self { pr, worktree, text }
+    }
+}
+
+impl Searchable for PullRequestEntry {
+    fn search_text(&self) -> &str {
+        &self.text
     }
 }
 

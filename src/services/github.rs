@@ -1,6 +1,6 @@
 //! GitHub integration via the `gh` CLI.
 
-use crate::models::GitHubIssue;
+use crate::models::{GitHubIssue, GitHubPullRequest};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::Path;
@@ -298,6 +298,72 @@ async fn fetch_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
     issues.sort_by_key(|i| std::cmp::Reverse(i.created_at));
     issues.truncate(limit);
     issues
+}
+
+/// The open pull requests that are "mine" — a review requested from me, or
+/// opened by me — newest first, with the login `gh` is authenticated as.
+///
+/// Not cached: only Start work's `pr-review` list reads it, once per open,
+/// and a review request that arrived a minute ago should be in that list.
+pub async fn list_pull_requests(path: &str) -> (Vec<GitHubPullRequest>, Option<String>) {
+    let (auth, viewer) = get_auth_status().await;
+    if auth != AuthStatus::Authenticated {
+        return (Vec::new(), None);
+    }
+    const JSON_FIELDS: &str = "number,title,author,isDraft,headRefName,isCrossRepository,createdAt";
+    let mut outputs = Vec::new();
+    for filter in [["--search", "review-requested:@me"], ["--author", "@me"]] {
+        let (code, stdout, _) = run_gh(
+            &[
+                "pr",
+                "list",
+                filter[0],
+                filter[1],
+                "--state",
+                "open",
+                "--json",
+                JSON_FIELDS,
+            ],
+            Some(Path::new(path)),
+        )
+        .await;
+        if code == 0 {
+            outputs.push(stdout);
+        }
+    }
+    let outputs: Vec<&str> = outputs.iter().map(String::as_str).collect();
+    (merge_pull_requests(&outputs), viewer)
+}
+
+/// The PRs of several `gh pr list` answers, each listed once, newest first.
+/// An answer that does not parse contributes nothing.
+fn merge_pull_requests(outputs: &[&str]) -> Vec<GitHubPullRequest> {
+    let mut prs: Vec<GitHubPullRequest> = Vec::new();
+    for output in outputs {
+        let parsed: Vec<GitHubPullRequest> = serde_json::from_str(output).unwrap_or_default();
+        for pr in parsed {
+            if !prs.iter().any(|seen| seen.number == pr.number) {
+                prs.push(pr);
+            }
+        }
+    }
+    prs.sort_by_key(|pr| std::cmp::Reverse(pr.created_at));
+    prs
+}
+
+/// Check out PR `number` in the worktree at `worktree`, on the PR's own
+/// branch. `gh` knows where the head lives, including on a fork, which a
+/// plain `git fetch` of the head branch would not.
+pub async fn checkout_pull_request(worktree: &str, number: i64) -> Result<(), String> {
+    let number = number.to_string();
+    let (code, _, stderr) = run_gh(&["pr", "checkout", &number], Some(Path::new(worktree))).await;
+    if code == 0 {
+        Ok(())
+    } else if stderr.is_empty() {
+        Err(format!("gh pr checkout {number} failed"))
+    } else {
+        Err(stderr)
+    }
 }
 
 /// Drop the cached issues for one repository path; see

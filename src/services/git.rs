@@ -200,6 +200,23 @@ pub async fn create_worktree(
     Ok(())
 }
 
+/// Add a worktree on a detached `HEAD`, for something else to check a
+/// branch out in — `gh pr checkout`, which knows where a PR's head lives.
+pub async fn create_detached_worktree(repo_path: &str, worktree_path: &Path) -> GitResult<()> {
+    let repo = expand(repo_path);
+    if let Some(parent) = worktree_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| GitError(format!("Failed to create worktree parent: {e}")))?;
+    }
+    let wt = worktree_path.to_string_lossy().to_string();
+    let (code, _out, stderr) =
+        run_git(&["worktree", "add", "--detach", wt.as_str()], Some(&repo)).await?;
+    if code != 0 {
+        return Err(GitError(format!("Failed to create worktree: {stderr}")));
+    }
+    Ok(())
+}
+
 /// What a plain (non-forced) removal attempt decided.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoveOutcome {

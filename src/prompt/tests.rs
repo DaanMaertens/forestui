@@ -75,6 +75,39 @@ fn the_feature_template_plans_and_waits_for_approval() {
     assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
 }
 
+fn pr_vars() -> TemplateVars<'static> {
+    TemplateVars {
+        number: Some(31),
+        title: "Give the cache tests their own cache",
+        branch: "fix/github-cache-test-race",
+        worktree: "pr-31-give-the-cache-tests-their-own-cache",
+        repo: "forestui",
+        body: None,
+    }
+}
+
+/// Someone else's PR is read fresh, reviewed and reported on — no edits.
+#[test]
+fn the_others_review_template_reports_without_changing_code() {
+    let prompt = fill(PR_REVIEW_OTHERS_TEMPLATE, &pr_vars());
+    assert!(prompt.contains("#31: Give the cache tests"), "{prompt}");
+    assert!(prompt.contains("gh pr view 31 --comments"), "{prompt}");
+    assert!(prompt.contains("`fix/github-cache-test-race`"), "{prompt}");
+    assert!(prompt.contains("Do not change any code"), "{prompt}");
+    assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
+}
+
+/// My own PR is self-reviewed: findings first, fixes only after a go-ahead.
+#[test]
+fn the_own_review_template_waits_before_fixing() {
+    let prompt = fill(PR_REVIEW_OWN_TEMPLATE, &pr_vars());
+    assert!(prompt.contains("my own pull request #31"), "{prompt}");
+    assert!(prompt.contains("gh pr view 31 --comments"), "{prompt}");
+    assert!(prompt.contains("list your findings"), "{prompt}");
+    assert!(prompt.contains("wait for my go-ahead"), "{prompt}");
+    assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
+}
+
 /// The free-text template carries the typed description itself, and sends
 /// Claude to no issue: there is none.
 #[test]

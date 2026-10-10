@@ -167,6 +167,14 @@ impl AppState {
             .find(|w| w.work_item.as_ref() == Some(link))
     }
 
+    /// The worktree of `repo_id` that has `branch` checked out, if any.
+    pub fn worktree_on_branch(&self, repo_id: Uuid, branch: &str) -> Option<&Worktree> {
+        self.find_repository(repo_id)?
+            .worktrees
+            .iter()
+            .find(|w| w.branch == branch)
+    }
+
     pub fn add_worktree(&mut self, repo_id: Uuid, worktree: Worktree) {
         if let Some(repo) = self.repositories.iter_mut().find(|r| r.id == repo_id) {
             // A reconcile scan can adopt this path in the window between git

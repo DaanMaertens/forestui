@@ -29,6 +29,34 @@ struct WorkStart {
     yolo: bool,
 }
 
+/// Create a worktree for reviewing PR `number`, on the PR's own branch, and
+/// return that branch.
+///
+/// The worktree starts detached and `gh pr checkout` runs inside it: `gh`
+/// knows where the head lives, a fork included, and names the local branch.
+/// `expected` is only the fallback should git not say which branch that was.
+/// A checkout that fails takes the half-made worktree away with it, so a
+/// retry does not trip over the directory.
+async fn create_review_worktree(
+    source_path: &str,
+    worktree_path: &Path,
+    number: i64,
+    expected: &str,
+) -> Result<String, String> {
+    git::create_detached_worktree(source_path, worktree_path)
+        .await
+        .map_err(|error| error.to_string())?;
+    let path = worktree_path.to_string_lossy().to_string();
+    if let Err(error) = github::checkout_pull_request(&path, number).await {
+        let _ = git::force_remove_worktree(source_path, &path).await;
+        return Err(error);
+    }
+    Ok(match git::get_current_branch(&path).await {
+        Ok(branch) if branch != "HEAD" => branch,
+        _ => expected.to_string(),
+    })
+}
+
 /// Gather the branch and remote lists and deliver them to `target`.
 ///
 /// The one implementation behind both the initial modal open and the
@@ -144,6 +172,13 @@ impl App {
                 };
                 let repo_id = flow.repo_id;
                 self.start_work_on_issue(repo_id, *issue, mode);
+            }
+            ModalEffect::ConfirmPullRequest(item) => {
+                let Some(Modal::StartWork(flow)) = self.modals.last() else {
+                    return;
+                };
+                let repo_id = flow.repo_id;
+                self.start_work_on_pull_request(repo_id, *item);
             }
             ModalEffect::ConfirmFreeText { description, copy } => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
@@ -465,30 +500,35 @@ impl App {
                 let Some(start) = self.pending_start.take() else {
                     return;
                 };
-                let Some(repo) = self.state.find_repository(repo_id) else {
-                    return;
-                };
-                // Opened over Start work's item step, or over nothing from an
-                // issue card. Anything else on top means the user moved on
-                // while the branches loaded.
-                let has_parent = match self.modals.last() {
-                    None => false,
-                    Some(Modal::StartWork(_)) => true,
-                    Some(_) => return,
-                };
-                self.modals.push(Modal::StartWorkConfirm(Box::new(
-                    StartWorkConfirmModal::new(
-                        repo,
-                        start.mode,
-                        start.item,
-                        start.names,
-                        list,
-                        settings_service::get_forest_path(),
-                        has_parent,
-                    ),
-                )));
+                self.open_confirm(repo_id, start, list);
             }
         }
+    }
+
+    /// Put Start work's confirm screen up for `start`.
+    fn open_confirm(&mut self, repo_id: Uuid, start: PendingStart, list: BranchList) {
+        let Some(repo) = self.state.find_repository(repo_id) else {
+            return;
+        };
+        // Opened over Start work's item step, or over nothing from an issue
+        // card. Anything else on top means the user moved on while the
+        // branches loaded.
+        let has_parent = match self.modals.last() {
+            None => false,
+            Some(Modal::StartWork(_)) => true,
+            Some(_) => return,
+        };
+        self.modals.push(Modal::StartWorkConfirm(Box::new(
+            StartWorkConfirmModal::new(
+                repo,
+                start.mode,
+                start.item,
+                start.names,
+                list,
+                settings_service::get_forest_path(),
+                has_parent,
+            ),
+        )));
     }
 
     pub(super) fn switch_to_window(&mut self, window_id: &str, window_name: &str) {
@@ -525,6 +565,52 @@ impl App {
             item: WorkItem::from_issue(&issue),
         });
         self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
+    }
+
+    /// Start work on a picked PR: the confirm screen at once — a review has
+    /// no base branch, so there is nothing to load first — or a jump to the
+    /// worktree that already holds it. That is the one it was started in
+    /// (one work item, one worktree), or one with its branch checked out:
+    /// git checks a branch out in one worktree only, so `gh pr checkout`
+    /// would fail there anyway. A fork's branch names are its own, so a
+    /// fork's PR is never matched by one.
+    fn start_work_on_pull_request(&mut self, repo_id: Uuid, item: WorkItem) {
+        let WorkItem::PullRequest {
+            number,
+            title,
+            head_branch,
+            from_fork,
+            ..
+        } = &item
+        else {
+            return;
+        };
+        let (number, link) = (*number, item.link());
+        if let Some(worktree) = self.state.linked_worktree(repo_id, &link) {
+            let worktree_id = worktree.id;
+            let notice = format!("PR #{number} is already in worktree '{}'", worktree.name);
+            self.jump_to_worktree(repo_id, worktree_id, Some(notice));
+            return;
+        }
+        if !from_fork && let Some(worktree) = self.state.worktree_on_branch(repo_id, head_branch) {
+            let worktree_id = worktree.id;
+            let notice = format!(
+                "PR #{number}'s branch '{head_branch}' is already checked out in '{}'",
+                worktree.name
+            );
+            self.jump_to_worktree(repo_id, worktree_id, Some(notice));
+            return;
+        }
+        let names = work::WorktreeNames {
+            branch: head_branch.clone(),
+            ..work::names(WorkMode::PrReview, number, title)
+        };
+        let start = PendingStart {
+            mode: WorkMode::PrReview,
+            item,
+            names,
+        };
+        self.open_confirm(repo_id, start, BranchList::default());
     }
 
     /// Start work on a free-text feature: the confirm screen once the
@@ -678,9 +764,20 @@ impl App {
         tokio::spawn(async move {
             let is_github = github::get_repo_info(&probe_path).await.is_some();
             tx.send(AppEvent::GitHubChecked {
-                path: probe_path,
+                path: probe_path.clone(),
                 is_github,
             });
+            // Only a GitHub repository has PRs to ask for. Fetched on every
+            // open, like the probe: a review requested a minute ago belongs
+            // in the list.
+            if is_github {
+                let (prs, viewer) = github::list_pull_requests(&probe_path).await;
+                tx.send(AppEvent::PullRequests {
+                    path: probe_path,
+                    prs,
+                    viewer,
+                });
+            }
         });
         if !matches!(cached, Some((_, true))) {
             self.fetch_issues_for(path);
@@ -1296,6 +1393,41 @@ impl App {
         // mid-create would adopt the new tree as found outside forestui.
         let create = self.worktree_sync.begin_create(repo_id);
         let tx = self.tx.clone();
+        let review = match start.as_ref().map(|start| &start.link) {
+            Some(WorkItemLink::PullRequest { number }) => Some(*number),
+            _ => None,
+        };
+
+        if let Some(number) = review {
+            tokio::spawn(async move {
+                let branch =
+                    match create_review_worktree(&source_path, &worktree_path, number, &branch)
+                        .await
+                    {
+                        Ok(branch) => branch,
+                        Err(error) => {
+                            tx.error(format!("Failed to create worktree: {error}"));
+                            tx.send(AppEvent::WorktreeAddFailed { create });
+                            return;
+                        }
+                    };
+                let mut worktree =
+                    Worktree::new(name, branch, worktree_path.to_string_lossy().to_string());
+                let (yolo, first_prompt) = start
+                    .map(|start| {
+                        worktree.work_item = Some(start.link);
+                        (start.yolo, Some(start.first_prompt))
+                    })
+                    .unwrap_or_default();
+                tx.send(AppEvent::WorktreeAdded {
+                    create,
+                    worktree: Box::new(worktree),
+                    first_prompt,
+                    yolo,
+                });
+            });
+            return;
+        }
 
         tokio::spawn(async move {
             if pull_first {

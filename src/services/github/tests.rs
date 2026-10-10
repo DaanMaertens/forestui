@@ -117,3 +117,51 @@ fn issue_list_parses_gh_json() {
     assert_eq!(parsed[0].labels[0].name, "bug");
     assert_eq!(parsed[0].title, "Bug");
 }
+
+/// Captured from `gh pr list --json number,title,author,isDraft,headRefName,url,createdAt,updatedAt`,
+/// with a second author and a draft added. The review-requested and the
+/// authored query can both return one PR; it is listed once, newest first.
+#[test]
+fn pull_request_lists_parse_and_merge() {
+    let review_requested = r#"[
+      {"author":{"id":"MDQ6VXNlcjE=","is_bot":false,"login":"alice","name":"Alice"},
+       "createdAt":"2026-10-09T08:00:00Z","headRefName":"fix/flaky-test","isDraft":true,
+       "number":30,"title":"Fix the flaky test","updatedAt":"2026-10-09T09:00:00Z",
+       "url":"https://github.com/DaanMaertens/forestui/pull/30"},
+      {"author":{"id":"MDQ6VXNlcjQ0NjY5NTMz","is_bot":false,"login":"DaanMaertens","name":"Daan Maertens"},
+       "createdAt":"2026-10-10T20:30:21Z","headRefName":"worktree-piped-floating-seahorse","isDraft":false,
+       "number":32,"title":"Start work: free-text features","updatedAt":"2026-10-10T20:48:11Z",
+       "url":"https://github.com/DaanMaertens/forestui/pull/32"}
+    ]"#;
+    let authored = r#"[
+      {"author":{"id":"MDQ6VXNlcjQ0NjY5NTMz","is_bot":false,"login":"DaanMaertens","name":"Daan Maertens"},
+       "createdAt":"2026-10-10T20:30:21Z","headRefName":"worktree-piped-floating-seahorse","isDraft":false,
+       "number":32,"title":"Start work: free-text features","updatedAt":"2026-10-10T20:48:11Z",
+       "url":"https://github.com/DaanMaertens/forestui/pull/32"},
+      {"author":{"id":"MDQ6VXNlcjQ0NjY5NTMz","is_bot":false,"login":"DaanMaertens","name":"Daan Maertens"},
+       "createdAt":"2026-10-10T19:59:07Z","headRefName":"fix/github-cache-test-race","isDraft":false,
+       "number":31,"title":"Give the GitHub issue cache tests their own cache","updatedAt":"2026-10-10T20:01:20Z",
+       "url":"https://github.com/DaanMaertens/forestui/pull/31"}
+    ]"#;
+
+    let prs = merge_pull_requests(&[review_requested, authored]);
+
+    let numbers: Vec<i64> = prs.iter().map(|pr| pr.number).collect();
+    assert_eq!(numbers, vec![32, 31, 30]);
+    let draft = &prs[2];
+    assert!(draft.is_draft);
+    assert_eq!(draft.author.login, "alice");
+    assert_eq!(draft.head_ref_name, "fix/flaky-test");
+    assert_eq!(draft.title, "Fix the flaky test");
+    assert!(!prs[0].is_draft);
+}
+
+/// A query that failed or printed nothing contributes nothing, rather than
+/// emptying the list the other one returned.
+#[test]
+fn an_unreadable_pull_request_list_is_skipped() {
+    let ok = r#"[{"author":{"login":"alice"},"createdAt":"2026-10-09T08:00:00Z",
+      "headRefName":"b","isDraft":false,"number":3,"title":"T"}]"#;
+    let prs = merge_pull_requests(&["", "not json", ok]);
+    assert_eq!(prs.len(), 1);
+}

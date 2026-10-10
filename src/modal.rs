@@ -8,9 +8,9 @@
 use crate::event::BranchList;
 use crate::fuzzy::{self, BranchEntry, Searchable};
 use crate::models::{
-    CustomClaudeButton, GitHubIssue, MAX_BUTTON_LABEL_LENGTH, MAX_BUTTON_PREFIX_LENGTH,
-    MAX_CLAUDE_COMMAND_LENGTH, Repository, Settings, WorkItemLink, derive_prefix,
-    validate_button_label, validate_button_prefix, validate_claude_command,
+    CustomClaudeButton, GitHubIssue, GitHubPullRequest, MAX_BUTTON_LABEL_LENGTH,
+    MAX_BUTTON_PREFIX_LENGTH, MAX_CLAUDE_COMMAND_LENGTH, Repository, Settings, WorkItemLink,
+    derive_prefix, validate_button_label, validate_button_prefix, validate_claude_command,
 };
 use crate::picker::SearchPicker;
 use crate::prompt;
@@ -61,6 +61,9 @@ pub enum ModalEffect {
     /// Start work picked an issue in a work mode: load the branches and open
     /// the confirm screen for it on top of the picker.
     ConfirmIssue(Box<GitHubIssue>, WorkMode),
+    /// Start work picked a PR to review, its review kind already settled:
+    /// open the confirm screen for it on top of the picker.
+    ConfirmPullRequest(Box<WorkItem>),
     /// Start work was given a free-text feature: open the confirm screen for
     /// it — asking first if its names are taken, unless this is the answer
     /// to that question (`copy`), which takes the next free suffix instead.
@@ -271,9 +274,7 @@ impl Modal {
             Modal::AddRepository(m) => m.focus = index.min(AddRepositoryModal::FIELDS - 1),
             Modal::AddWorktree(m) => m.focus = index.min(m.field_count() - 1),
             Modal::StartWork(m) => m.set_focus(index),
-            Modal::StartWorkConfirm(m) => {
-                m.focus = index.min(StartWorkConfirmModal::FIELDS - 1);
-            }
+            Modal::StartWorkConfirm(m) => m.set_focus(index),
             Modal::Settings(m) => m.focus = index.min(SettingsModal::FIELDS - 1),
             Modal::EditButton(m) => m.focus = index.min(EditButtonModal::FIELDS - 1),
             Modal::ThemePicker(m) => m.select(index),
@@ -714,16 +715,21 @@ pub struct StartWorkModal {
     pub github: Option<bool>,
     /// Every loaded issue; the picker holds the ones `mode` lists.
     issues: Option<Vec<GitHubIssue>>,
-    /// The rows `mode` lists. `None` while the issues are still loading.
+    /// The PRs `pr-review` lists, once `gh` has answered.
+    pull_requests: Option<Vec<GitHubPullRequest>>,
+    /// The login `gh` is authenticated as, which a PR's author is compared
+    /// with to settle its review kind.
+    viewer: Option<String>,
+    /// The rows `mode` lists. `None` while its items are still loading.
     pub picker: Option<SearchPicker<ItemEntry>>,
     /// A free-text feature's description, kept across Back so an edit after
     /// a clash starts from what was typed.
     pub description: TextInput,
     /// Set on the clash step.
     pub clash: Option<Clash>,
-    /// Issue number → the worktree already started for it, as the flow
-    /// opened. Only marks the list: picking an item checks the live state.
-    linked: HashMap<i64, String>,
+    /// Work item → the worktree already started for it, as the flow opened.
+    /// Only marks the list: picking an item checks the live state.
+    linked: HashMap<WorkItemLink, String>,
     /// One of the `FOCUS_*` constants; see [`StartWorkModal::ring`].
     pub focus: usize,
 }
@@ -750,16 +756,15 @@ impl StartWorkModal {
             mode: WorkMode::Issue,
             github: None,
             issues: None,
+            pull_requests: None,
+            viewer: None,
             picker: None,
             description: TextInput::new("").with_placeholder("Describe the feature..."),
             clash: None,
             linked: repo
                 .worktrees
                 .iter()
-                .filter_map(|w| match &w.work_item {
-                    Some(WorkItemLink::Issue { number }) => Some((*number, w.name.clone())),
-                    _ => None,
-                })
+                .filter_map(|w| Some((w.work_item.clone()?, w.name.clone())))
                 .collect(),
             focus: Self::FOCUS_LIST,
         };
@@ -773,11 +778,11 @@ impl StartWorkModal {
         self.github != Some(false)
     }
 
-    /// Whether `mode` can be picked here: it exists, and either the
-    /// repository is on GitHub or the mode needs nothing from it — only
-    /// `feature` does, through its free-text entry.
+    /// Whether `mode` can be picked here: the repository is on GitHub, or
+    /// the mode needs nothing from it — only `feature` does, through its
+    /// free-text entry.
     pub fn mode_enabled(&self, mode: WorkMode) -> bool {
-        mode.is_enabled() && (self.has_github() || mode == WorkMode::Feature)
+        self.has_github() || mode == WorkMode::Feature
     }
 
     /// Take the probe's answer. A repository found not to be on GitHub moves
@@ -830,7 +835,19 @@ impl StartWorkModal {
         }
     }
 
-    /// Choose a mode, listing its issues. Re-choosing the current one keeps
+    /// Fill `pr-review`'s list once the PRs have loaded; kept, like the
+    /// issues, once there.
+    pub fn set_pull_requests(&mut self, prs: Vec<GitHubPullRequest>, viewer: Option<String>) {
+        if self.pull_requests.is_none() {
+            self.pull_requests = Some(prs);
+            self.viewer = viewer;
+            if self.mode == WorkMode::PrReview {
+                self.fill_picker();
+            }
+        }
+    }
+
+    /// Choose a mode, listing its items. Re-choosing the current one keeps
     /// the list, query and all.
     fn set_mode(&mut self, mode: WorkMode) {
         if mode != self.mode {
@@ -841,16 +858,27 @@ impl StartWorkModal {
     }
 
     fn fill_picker(&mut self) {
-        // Without GitHub there are no issues to wait for: the list is the
-        // free-text entry alone.
-        let issues = match (self.has_github(), self.issues.as_deref()) {
-            (false, _) => &[][..],
-            (true, Some(issues)) => issues,
-            (true, None) => return,
+        let entries = if self.mode == WorkMode::PrReview {
+            let Some(prs) = self.pull_requests.as_deref() else {
+                return;
+            };
+            work::pull_request_entries(prs, |number| {
+                self.linked
+                    .get(&WorkItemLink::PullRequest { number })
+                    .cloned()
+            })
+        } else {
+            // Without GitHub there are no issues to wait for: the list is
+            // the free-text entry alone.
+            let issues = match (self.has_github(), self.issues.as_deref()) {
+                (false, _) => &[][..],
+                (true, Some(issues)) => issues,
+                (true, None) => return,
+            };
+            work::item_entries(self.mode, issues, work::DEFAULT_FEATURE_LABELS, |number| {
+                self.linked.get(&WorkItemLink::Issue { number }).cloned()
+            })
         };
-        let entries = work::item_entries(self.mode, issues, work::DEFAULT_FEATURE_LABELS, |n| {
-            self.linked.get(&n).cloned()
-        });
         self.picker = Some(SearchPicker::new(
             entries,
             "Type a number or part of a title...",
@@ -981,6 +1009,15 @@ impl StartWorkModal {
                                         self.mode,
                                     ))
                                 }
+                                Some(ItemEntry::PullRequest(entry)) => {
+                                    let item = WorkItem::from_pull_request(
+                                        &entry.pr,
+                                        self.viewer.as_deref(),
+                                    );
+                                    ModalOutcome::Effect(ModalEffect::ConfirmPullRequest(Box::new(
+                                        item,
+                                    )))
+                                }
                                 Some(ItemEntry::FreeText) => {
                                     self.go_to(StartWorkStep::Describe);
                                     ModalOutcome::None
@@ -1058,9 +1095,9 @@ pub struct StartWorkConfirmModal {
     pub repo_id: Uuid,
     pub repo_name: String,
     pub repo_path: String,
-    /// `issue` or `feature`: decides the names and the prompt template.
+    /// Decides the names, and for an issue, the prompt template.
     pub mode: WorkMode,
-    /// The issue or free-text feature the worktree is for.
+    /// The issue, PR or free-text feature the worktree is for.
     pub item: WorkItem,
     pub branches: BranchList,
     pub forest_dir: PathBuf,
@@ -1096,7 +1133,45 @@ impl StartWorkConfirmModal {
     pub const FOCUS_YOLO: usize = 6;
     pub const FOCUS_LAUNCH: usize = 7;
     pub const FOCUS_CANCEL: usize = 8;
-    pub const FIELDS: usize = Self::FOCUS_CANCEL + 1;
+
+    /// The focus stops, in Tab order. A PR review has no branch to name and
+    /// no base to branch from — `gh pr checkout` decides both — so its
+    /// screen draws none of those controls and the ring skips them.
+    pub fn ring(&self) -> &'static [usize] {
+        if self.is_review() {
+            &[
+                Self::FOCUS_NAME,
+                Self::FOCUS_EDIT,
+                Self::FOCUS_YOLO,
+                Self::FOCUS_LAUNCH,
+                Self::FOCUS_CANCEL,
+            ]
+        } else {
+            &[
+                Self::FOCUS_NAME,
+                Self::FOCUS_BRANCH,
+                Self::FOCUS_BASE,
+                Self::FOCUS_FETCH,
+                Self::FOCUS_PULL,
+                Self::FOCUS_EDIT,
+                Self::FOCUS_YOLO,
+                Self::FOCUS_LAUNCH,
+                Self::FOCUS_CANCEL,
+            ]
+        }
+    }
+
+    /// Whether this is a PR review, which checks out the PR's own branch.
+    pub fn is_review(&self) -> bool {
+        matches!(self.item, WorkItem::PullRequest { .. })
+    }
+
+    /// Focus a clicked control, if this screen has it.
+    pub fn set_focus(&mut self, index: usize) {
+        if self.ring().contains(&index) {
+            self.focus = index;
+        }
+    }
 
     /// `names` are passed in rather than derived from `item`: a free-text
     /// feature's may carry a suffix the clash question chose.
@@ -1150,19 +1225,16 @@ impl StartWorkConfirmModal {
         }
         // A free-text feature has no number and no title of its own; its
         // description stands in for the title and is the only `{body}`.
-        let (template, number, title, body) = match &self.item {
-            WorkItem::Issue { number, title } => {
-                (self.mode.template(), Some(*number), title.as_str(), None)
+        let (number, title, body) = match &self.item {
+            WorkItem::Issue { number, title } | WorkItem::PullRequest { number, title, .. } => {
+                (Some(*number), title.as_str(), None)
             }
-            WorkItem::FreeText { description } => (
-                prompt::FREE_FEATURE_TEMPLATE,
-                None,
-                description.as_str(),
-                Some(description.as_str()),
-            ),
+            WorkItem::FreeText { description } => {
+                (None, description.as_str(), Some(description.as_str()))
+            }
         };
         prompt::fill(
-            template,
+            self.item.template(self.mode),
             &prompt::TemplateVars {
                 number,
                 title,
@@ -1189,10 +1261,14 @@ impl StartWorkConfirmModal {
     /// Mid-edit counts as not ready: launching then would start Claude on
     /// the prompt the editor is about to replace.
     pub fn can_launch(&self) -> bool {
+        if self.is_editing || self.name.is_empty() {
+            return false;
+        }
+        if self.is_review() {
+            return true;
+        }
         let base = self.base_branch.value();
-        !self.is_editing
-            && !self.name.is_empty()
-            && !self.branch.is_empty()
+        !self.branch.is_empty()
             && (base.is_empty() || self.branches.branches.iter().any(|b| b == base))
     }
 
@@ -1254,7 +1330,11 @@ impl StartWorkConfirmModal {
             return ModalOutcome::None;
         }
 
-        if cycle_focus(&mut self.focus, Self::FIELDS, key) {
+        let ring = self.ring();
+        if let Some(mut position) = ring.iter().position(|f| *f == self.focus)
+            && cycle_focus(&mut position, ring.len(), key)
+        {
+            self.focus = ring[position];
             return ModalOutcome::None;
         }
 
@@ -1287,14 +1367,17 @@ impl StartWorkConfirmModal {
                 if !self.can_launch() {
                     return ModalOutcome::None;
                 }
+                // A review branches from nothing: `gh pr checkout` fetches
+                // the PR's head itself.
                 let base = self.base_branch.value().to_string();
+                let review = self.is_review();
                 ModalOutcome::Submit(ModalResult::WorktreeForWorkItem {
                     repo_id: self.repo_id,
                     link: self.item.link(),
                     name: self.name.value().to_string(),
                     branch: self.branch.value().to_string(),
-                    pull_first: self.pull_first,
-                    base_branch: if base.is_empty() { None } else { Some(base) },
+                    pull_first: self.pull_first && !review,
+                    base_branch: (!base.is_empty() && !review).then_some(base),
                     first_prompt: self.prompt(),
                     yolo: self.yolo,
                 })

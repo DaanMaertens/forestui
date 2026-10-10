@@ -13,6 +13,14 @@ pub const FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/feature.md");
 /// and the same plan-first rule as a feature from an issue.
 pub const FREE_FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/free-feature.md");
 
+/// The built-in `pr-review-others` template: review someone else's PR and
+/// report, changing nothing.
+pub const PR_REVIEW_OTHERS_TEMPLATE: &str = include_str!("../assets/prompts/pr-review-others.md");
+
+/// The built-in `pr-review-own` template: self-review my own PR, list the
+/// findings, and fix only after a go-ahead.
+pub const PR_REVIEW_OWN_TEMPLATE: &str = include_str!("../assets/prompts/pr-review-own.md");
+
 /// What a template's placeholders are filled with.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateVars<'a> {

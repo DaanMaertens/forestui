@@ -1,0 +1,44 @@
+claude stub --remote-control -n pr-45-retry-uploads-with-backoff --session-id <uuid> Review pull request #45:
+Retry uploads with backoff Start by reading it with `gh pr view 45 --comments`, so you have its current description and every comment, then
+the change itself with `gh pr diff 45`. You are in the `pr-45-retry-uploads-with-backoff` worktree of beta, on the PR's branch `fix/retry-ba
+ckoff`. Someone else opened this PR. Review it and report: check that it does what it says, and look for bugs, missing tests and anything th
+at does not fit the code around it. List your findings by severity, with file and line. Do not change any code.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[forestui-<7-dark-mode-for-the-dashboard  10:feat-try-a-quick-spike-on-caching  11:pr-45-retry-uploads-with-backoff*"<host>" <clock>

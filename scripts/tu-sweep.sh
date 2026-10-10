@@ -155,6 +155,34 @@ JSON
       *) echo "[]" ;;
     esac
     exit 0 ;;
+  # beta alone has PRs, for Start work's pr-review mode (UC-104): one
+  # awaiting the sweep user's review, one they opened themselves.
+  "pr list")
+    case "$PWD:$*" in
+      */beta:*review-requested*)
+        cat <<'JSON'
+[{"number":45,"title":"Retry uploads with backoff","author":{"login":"octo-dev"},
+  "isDraft":false,"headRefName":"fix/retry-backoff","createdAt":"2026-08-03T10:00:00Z"}]
+JSON
+        ;;
+      */beta:*--author*)
+        cat <<'JSON'
+[{"number":46,"title":"Cache the session index","author":{"login":"sweep-user"},
+  "isDraft":true,"headRefName":"feat/session-index-cache","createdAt":"2026-08-04T10:00:00Z"}]
+JSON
+        ;;
+      *) echo "[]" ;;
+    esac
+    exit 0 ;;
+  # What `gh pr checkout` leaves behind: the PR's head branch, checked out
+  # in the directory it ran in.
+  "pr checkout")
+    case "$3" in
+      45) git checkout -q -b fix/retry-backoff ;;
+      46) git checkout -q -b feat/session-index-cache ;;
+      *) exit 1 ;;
+    esac
+    exit $? ;;
 esac
 exit 1
 GH
@@ -853,6 +881,54 @@ if [ "$LABEL" = "rust" ]; then
   press Escape; sleep 1
   assert UC-103 flow-closed "no" "$(screen_has 'Start Work')"
   assert UC-103 nothing-created "$worktrees_before" \
+    "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+fi
+
+# --- UC-104: Start work for a pr-review ---------------------------------------
+#
+# Rust only, after UC-103. beta's gh stub lists #45, opened by someone else,
+# and #46, a draft the sweep user opened. #45 is reviewed and reported on, in
+# a worktree `gh pr checkout` put on the PR's own branch; #46 would get the
+# self-review, and is only looked at.
+if [ "$LABEL" = "rust" ]; then
+  focus_app
+  tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
+  await "Repository: beta"
+  press s; await "Work Mode"; sleep 0.8
+  press Down Down Enter; await "#45"; sleep 0.8
+  capture UC-104 pr-review-item
+  assert UC-104 draft-marked "yes" "$(screen_has '#46 Cache the session index +draft')"
+  type_ "retry"; sleep 0.5; press Enter
+  await "Launch"; sleep 0.8
+  capture UC-104 pr-review-confirm
+  assert UC-104 titled-as-a-pr "yes" "$(screen_has 'Start Work: PR #45')"
+  assert UC-104 someone-elses-review "yes" "$(screen_has "Review someone else's PR")"
+  assert UC-104 prompt-reads-the-pr "yes" "$(screen_has 'gh pr view 45 --comments')"
+  assert UC-104 no-base-branch "no" "$(screen_has 'Base Branch')"
+  press Enter
+  await "[0-9]:pr-45" 15000; sleep 2
+  capture UC-104 pr-review-launched
+  wt="$ROOT/forest/beta/pr-45-retry-uploads-with-backoff"
+  assert UC-104 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
+  assert UC-104 pr-branch-checked-out "fix/retry-backoff" \
+    "$(git -C "$wt" branch --show-current 2>/dev/null)"
+  assert UC-104 work-item-linked "{'kind': 'pull_request', 'number': 45}" \
+    "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('pr-45')][0]")"
+
+  focus_app
+  worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+  press s; await "Work Mode"; sleep 0.8
+  press Down Down Enter; await "#46"; sleep 0.8
+  type_ "cache"; sleep 0.5; press Enter
+  await "Launch"; sleep 0.8
+  capture UC-104 own-pr-confirm
+  assert UC-104 own-review "yes" "$(screen_has 'Review my own PR')"
+  # Esc walks back: confirm → list → modes → closed, one press at a time.
+  press Escape; await "Enter picks"; sleep 0.5
+  press Escape; await "Work Mode"; sleep 0.5
+  press Escape; sleep 1
+  assert UC-104 flow-closed "no" "$(screen_has 'Start Work')"
+  assert UC-104 nothing-created "$worktrees_before" \
     "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
 fi
 

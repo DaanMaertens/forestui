@@ -1171,6 +1171,16 @@ impl App {
                     self.issues = Some(issues);
                 }
             }
+            AppEvent::PullRequests { path, prs, viewer } => {
+                // The flow may be beneath its confirm screen by now.
+                for modal in &mut self.modals {
+                    if let Modal::StartWork(flow) = modal
+                        && flow.repo_path == path
+                    {
+                        flow.set_pull_requests(prs.clone(), viewer.clone());
+                    }
+                }
+            }
             AppEvent::GitHubChecked { path, is_github } => {
                 // The flow may be beneath its confirm screen by now.
                 for modal in &mut self.modals {
