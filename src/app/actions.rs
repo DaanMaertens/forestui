@@ -15,6 +15,7 @@ use crate::modal::{
 use crate::modal::{IntegrationAction, ModalOutcome};
 use crate::models::{CustomClaudeButton, Repository, WorkItemLink, Worktree};
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
+use crate::work::WorkMode;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -132,14 +133,14 @@ impl App {
     fn run_modal_effect(&mut self, effect: ModalEffect) {
         match effect {
             ModalEffect::ClaudePlugin(action) => self.run_claude_plugin_action(action),
-            ModalEffect::ConfirmIssue(issue) => {
+            ModalEffect::ConfirmIssue(issue, mode) => {
                 // The repository the flow was opened for, not whatever the
                 // selection says now.
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
                     return;
                 };
                 let repo_id = flow.repo_id;
-                self.pending_issue = Some(*issue);
+                self.pending_issue = Some((*issue, mode));
                 self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
             }
             ModalEffect::Fetch(repo_path) => {
@@ -432,7 +433,7 @@ impl App {
                     ))));
             }
             BranchTarget::StartWorkConfirm => {
-                let Some(issue) = self.pending_issue.take() else {
+                let Some((issue, mode)) = self.pending_issue.take() else {
                     return;
                 };
                 let Some(repo) = self.state.find_repository(repo_id) else {
@@ -449,6 +450,7 @@ impl App {
                 self.modals.push(Modal::StartWorkConfirm(Box::new(
                     StartWorkConfirmModal::new(
                         repo,
+                        mode,
                         &issue,
                         list,
                         settings_service::get_forest_path(),
@@ -713,7 +715,7 @@ impl App {
                 if let Some(repo_id) = self.state.selection.repository_id
                     && let Some(issue) = self.issues.as_ref().and_then(|i| i.get(index)).cloned()
                 {
-                    self.pending_issue = Some(issue);
+                    self.pending_issue = Some((issue, WorkMode::Issue));
                     self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
                 }
             }

@@ -714,14 +714,20 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
                 modal.focus,
                 StartWorkModal::FOCUS_LIST,
             );
+            let (empty, noun) = match modal.mode {
+                WorkMode::Feature => (
+                    "No open feature issues assigned to or opened by you",
+                    "features",
+                ),
+                WorkMode::Issue | WorkMode::PrReview => (
+                    "No open non-feature issues assigned to or opened by you",
+                    "issues",
+                ),
+            };
             if picker.entry_count() == 0 {
-                column.text(
-                    frame,
-                    "No open issues assigned to or opened by you",
-                    theme::muted(),
-                );
+                column.text(frame, empty, theme::muted());
             } else {
-                column.text(frame, count_line(picker, "issues"), theme::muted());
+                column.text(frame, count_line(picker, noun), theme::muted());
             }
             // Leave room for the gap, the hint and the buttons below the list.
             let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
@@ -807,7 +813,11 @@ fn start_work_confirm(
     }
 
     let rect = widgets::centered_rect(WIDTH, CONFIRM_BODY + prompt.len() as u16, area);
-    let title = format!("Start Work: Issue #{}", modal.issue_number);
+    let kind = match modal.mode {
+        WorkMode::Feature => "Feature",
+        WorkMode::Issue | WorkMode::PrReview => "Issue",
+    };
+    let title = format!("Start Work: {kind} #{}", modal.issue_number);
     let mut column = dialog(frame, rect, &title, theme::title());
 
     column.text(frame, modal.issue_title.clone(), theme::muted());
@@ -1534,6 +1544,7 @@ mod tests {
         };
         Modal::StartWorkConfirm(Box::new(StartWorkConfirmModal::new(
             &repo(),
+            WorkMode::Issue,
             &issue(),
             branches,
             PathBuf::from("/forest"),

@@ -25,3 +25,9 @@ PASS UC-99     worktree-created                               expected=yes      
 PASS UC-99     branch-checked-out                             expected=fix/issue-298-proactive-metrics-coalesced-fire-rows-ov actual=fix/issue-298-proactive-metrics-coalesced-fire-rows-ov
 PASS UC-99     work-item-linked                               expected={'kind': 'issue', 'number': 298} actual={'kind': 'issue', 'number': 298}
 PASS UC-99     claude-window-named-after-worktree             expected=yes                          actual=yes
+PASS UC-100    bug-issues-not-listed                          expected=no                           actual=no
+PASS UC-100    titled-as-a-feature                            expected=yes                          actual=yes
+PASS UC-100    prompt-asks-for-a-plan                         expected=yes                          actual=yes
+PASS UC-100    worktree-created                               expected=yes                          actual=yes
+PASS UC-100    branch-checked-out                             expected=feat/feat-77-dark-mode-for-the-dashboard actual=feat/feat-77-dark-mode-for-the-dashboard
+PASS UC-100    work-item-linked                               expected={'kind': 'issue', 'number': 77} actual={'kind': 'issue', 'number': 77}

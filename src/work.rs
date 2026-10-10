@@ -3,10 +3,14 @@
 
 use crate::fuzzy::Searchable;
 use crate::models::GitHubIssue;
+use crate::prompt;
 
 /// The longest slug a title contributes to a name, so a long title cannot
 /// produce a directory or branch name nobody wants to type.
 const SLUG_LIMIT: usize = 40;
+
+/// The labels that make an issue a feature, until they become a setting.
+pub const DEFAULT_FEATURE_LABELS: &[&str] = &["enhancement"];
 
 /// The kind of work about to start, which decides what the item list holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,8 +43,47 @@ impl WorkMode {
     /// Whether the mode can be picked yet. Listing the others greyed out
     /// shows where the flow is going without offering what does not exist.
     pub fn is_enabled(self) -> bool {
-        matches!(self, WorkMode::Issue)
+        matches!(self, WorkMode::Issue | WorkMode::Feature)
     }
+
+    /// The built-in template the mode's first prompt is filled from.
+    /// `pr-review` cannot be picked yet and has no template of its own.
+    pub fn template(self) -> &'static str {
+        match self {
+            WorkMode::Issue | WorkMode::PrReview => prompt::ISSUE_TEMPLATE,
+            WorkMode::Feature => prompt::FEATURE_TEMPLATE,
+        }
+    }
+}
+
+/// Whether an issue carries one of the feature labels. GitHub treats label
+/// names case-insensitively, so `Enhancement` counts as `enhancement`.
+pub fn is_feature(issue: &GitHubIssue, feature_labels: &[&str]) -> bool {
+    issue.labels.iter().any(|label| {
+        feature_labels
+            .iter()
+            .any(|wanted| label.name.eq_ignore_ascii_case(wanted))
+    })
+}
+
+/// The issues a mode lists. Every issue lands in exactly one of `issue` and
+/// `feature`: a feature label wins over anything else it carries, so a
+/// `bug` + `enhancement` issue is a feature. `pr-review` lists no issues.
+pub fn issues_for(
+    mode: WorkMode,
+    issues: &[GitHubIssue],
+    feature_labels: &[&str],
+) -> Vec<GitHubIssue> {
+    let want_feature = match mode {
+        WorkMode::Issue => false,
+        WorkMode::Feature => true,
+        WorkMode::PrReview => return Vec::new(),
+    };
+    issues
+        .iter()
+        .filter(|issue| is_feature(issue, feature_labels) == want_feature)
+        .cloned()
+        .collect()
 }
 
 /// The worktree and branch a work item starts in.
@@ -151,12 +194,74 @@ mod tests {
     }
 
     #[test]
-    fn only_the_issue_mode_is_enabled_so_far() {
+    fn issue_and_feature_are_enabled_pr_review_not_yet() {
         let enabled: Vec<_> = WorkMode::ALL
             .into_iter()
             .filter(|m| m.is_enabled())
             .collect();
-        assert_eq!(enabled, vec![WorkMode::Issue]);
+        assert_eq!(enabled, vec![WorkMode::Issue, WorkMode::Feature]);
+    }
+
+    fn labelled(number: i64, labels: &[&str]) -> GitHubIssue {
+        serde_json::from_value(serde_json::json!({
+            "number": number,
+            "title": format!("issue {number}"),
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+            "labels": labels.iter().map(|l| serde_json::json!({"name": l})).collect::<Vec<_>>(),
+        }))
+        .unwrap()
+    }
+
+    fn numbers(issues: &[GitHubIssue]) -> Vec<i64> {
+        issues.iter().map(|i| i.number).collect()
+    }
+
+    #[test]
+    fn feature_labelled_issues_split_from_the_rest() {
+        let issues = vec![
+            labelled(1, &[]),
+            labelled(2, &["enhancement"]),
+            labelled(3, &["bug"]),
+            labelled(4, &["bug", "enhancement"]),
+            labelled(5, &["Enhancement"]),
+        ];
+        let labels = DEFAULT_FEATURE_LABELS;
+        assert_eq!(
+            numbers(&issues_for(WorkMode::Issue, &issues, labels)),
+            vec![1, 3]
+        );
+        assert_eq!(
+            numbers(&issues_for(WorkMode::Feature, &issues, labels)),
+            vec![2, 4, 5]
+        );
+        assert!(issues_for(WorkMode::PrReview, &issues, labels).is_empty());
+    }
+
+    /// Whatever the labels, the two lists partition the issues: none is
+    /// dropped and none is listed twice.
+    #[test]
+    fn every_issue_is_in_exactly_one_list() {
+        let issues = vec![
+            labelled(1, &["feature"]),
+            labelled(2, &["ui", "feature"]),
+            labelled(3, &["enhancement"]),
+        ];
+        let labels = ["feature", "ui"];
+        let mut both = numbers(&issues_for(WorkMode::Issue, &issues, &labels));
+        both.extend(numbers(&issues_for(WorkMode::Feature, &issues, &labels)));
+        both.sort();
+        assert_eq!(both, vec![1, 2, 3]);
+        assert_eq!(
+            numbers(&issues_for(WorkMode::Feature, &issues, &labels)),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn each_mode_fills_its_own_template() {
+        assert_eq!(WorkMode::Issue.template(), prompt::ISSUE_TEMPLATE);
+        assert_eq!(WorkMode::Feature.template(), prompt::FEATURE_TEMPLATE);
     }
 
     #[test]

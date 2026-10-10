@@ -4,6 +4,9 @@
 /// The built-in `issue` template, used until templates become editable files.
 pub const ISSUE_TEMPLATE: &str = include_str!("../assets/prompts/issue.md");
 
+/// The built-in `feature` template: plan first, build once the plan is approved.
+pub const FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/feature.md");
+
 /// What a template's placeholders are filled with.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateVars<'a> {
@@ -121,6 +124,20 @@ mod tests {
         assert!(prompt.contains("#42"), "{prompt}");
         assert!(prompt.contains("Fix login bug"), "{prompt}");
         assert!(prompt.contains("gh issue view 42 --comments"), "{prompt}");
+        assert!(
+            prompt.contains("propose a fix before changing any code"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
+    }
+
+    #[test]
+    fn the_feature_template_plans_and_waits_for_approval() {
+        let prompt = fill(FEATURE_TEMPLATE, &issue_vars());
+        assert!(prompt.contains("#42: Fix login bug"), "{prompt}");
+        assert!(prompt.contains("gh issue view 42 --comments"), "{prompt}");
+        assert!(prompt.contains("write a plan"), "{prompt}");
+        assert!(prompt.contains("approved the plan"), "{prompt}");
         assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
     }
 }

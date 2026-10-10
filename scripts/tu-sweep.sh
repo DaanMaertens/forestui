@@ -104,8 +104,8 @@ case "$1 $2" in
   "api user")    echo "sweep-user"; exit 0 ;;
   "repo view")   echo '{"owner":{"login":"sweep-user"},"name":"alpha"}'; exit 0 ;;
   "issue list")
-    # Only the --assignee query returns rows; the --author one returns none, so
-    # the de-duplication path is exercised too.
+    # The --assignee query returns the rows; the --author one returns none
+    # outside beta, so the de-duplication path is exercised too.
     case "$*" in
       *--assignee*)
         cat <<'JSON'
@@ -118,6 +118,22 @@ case "$1 $2" in
   "updatedAt":"2026-07-21T10:00:00Z","author":{"login":"sweep-user"},
   "assignees":[],"labels":[{"name":"metrics","color":"00ff00"},{"name":"p2","color":"0000ff"}]}]
 JSON
+        ;;
+      # beta alone also has a feature issue, for Start work's feature mode
+      # (UC-100). No compared frame shows beta's issue rows, so the frozen
+      # Python frames are unaffected.
+      *--author*)
+        case "$PWD" in
+          */beta)
+            cat <<'JSON'
+[{"number":77,"title":"Dark mode for the dashboard","state":"OPEN",
+  "url":"https://example.invalid/77","createdAt":"2026-07-10T10:00:00Z",
+  "updatedAt":"2026-07-11T10:00:00Z","author":{"login":"sweep-user"},
+  "assignees":[],"labels":[{"name":"enhancement","color":"a2eeef"}]}]
+JSON
+            ;;
+          *) echo "[]" ;;
+        esac
         ;;
       *) echo "[]" ;;
     esac
@@ -678,6 +694,32 @@ if [ "$LABEL" = "rust" ]; then
     "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('issue-298')][0]")"
   assert UC-99 claude-window-named-after-worktree "yes" \
     "$(screen_has "[0-9]:issue-298")"
+fi
+
+# --- UC-100: Start work for a feature ----------------------------------------
+#
+# Rust only, and after UC-99 for the same reason. The selection is still in
+# beta, whose gh stub also answers with #77, labelled `enhancement`.
+if [ "$LABEL" = "rust" ]; then
+  focus_app
+  press s; await "Work Mode"; sleep 0.8
+  press Down Enter; await "#77"; sleep 0.8
+  capture UC-100 start-work-feature-item
+  assert UC-100 bug-issues-not-listed "no" "$(screen_has '#298|#326')"
+  press Enter
+  await "Launch"; sleep 0.8
+  capture UC-100 start-work-feature-confirm
+  assert UC-100 titled-as-a-feature "yes" "$(screen_has 'Start Work: Feature #77')"
+  assert UC-100 prompt-asks-for-a-plan "yes" "$(screen_has 'approved the plan')"
+  press Enter
+  await "[0-9]:feat-77" 15000; sleep 2
+  capture UC-100 start-work-feature-launched
+  wt="$ROOT/forest/beta/feat-77-dark-mode-for-the-dashboard"
+  assert UC-100 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
+  assert UC-100 branch-checked-out "feat/feat-77-dark-mode-for-the-dashboard" \
+    "$(git -C "$wt" branch --show-current 2>/dev/null)"
+  assert UC-100 work-item-linked "{'kind': 'issue', 'number': 77}" \
+    "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('feat-77')][0]")"
 fi
 
 echo "done: $LABEL"
