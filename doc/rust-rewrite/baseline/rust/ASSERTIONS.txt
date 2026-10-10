@@ -50,4 +50,16 @@ PASS UC-103    branch-checked-out                             expected=feat/feat
 PASS UC-103    work-item-linked                               expected={'kind': 'free_text', 'description': 'Try a quick spike on caching'} actual={'kind': 'free_text', 'description': 'Try a quick spike on caching'}
 PASS UC-103    clash-offers-three-choices                     expected=yes                          actual=yes
 PASS UC-103    clash-names-the-copy                           expected=yes                          actual=yes
+PASS UC-103    flow-closed                                    expected=no                           actual=no
 PASS UC-103    nothing-created                                expected=5                            actual=5
+PASS UC-72     cancel-closes-confirm                          expected=no                           actual=no
+PASS UC-72     cancel-keeps-dir                               expected=yes                          actual=yes
+PASS UC-72     cancel-keeps-entry                             expected=True                         actual=True
+PASS UC-72     dir-removed                                    expected=no                           actual=no
+PASS UC-72     entry-removed                                  expected=False                        actual=False
+PASS UC-72     git-forgot-it                                  expected=no                           actual=no
+PASS UC-72     dirty-is-refused-first                         expected=yes                          actual=yes
+PASS UC-72     dirty-names-the-change                         expected=yes                          actual=yes
+PASS UC-72     dirty-dir-removed                              expected=no                           actual=no
+PASS UC-72     dirty-entry-removed                            expected=False                        actual=False
+PASS UC-72     dirty-git-forgot-it                            expected=no                           actual=no

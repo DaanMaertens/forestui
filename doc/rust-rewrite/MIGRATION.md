@@ -5,7 +5,7 @@ Companion documents in this directory:
 | Doc | Role |
 |---|---|
 | `ARCHITECTURE.md` | Crate/module design, verified dependency versions, CSS→Layout mapping |
-| `SPEC.md` | Implementation-grade behavioural spec of the **Python** build (2 200+ lines, present and complete — sections 1–10) |
+| `SPEC.md` | Implementation-grade behavioural spec of the **Python** build. **Removed** once the port shipped: it described the retired build, and its MUST rules (no generation guard on background updates, among others) contradicted the Rust code. It is in git history at `ae9cb1a`, where the references to it below still resolve. |
 | `TU_USECASES.md` | 96-case `tu` acceptance playbook, 52 of them P0 |
 | `MIGRATION.md` | This document: what actually changed, what is left, how to roll back |
 

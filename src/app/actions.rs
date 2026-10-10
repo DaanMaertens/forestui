@@ -414,14 +414,16 @@ impl App {
         let Some((repo, worktree)) = self.state.find_worktree(worktree_id) else {
             return;
         };
+        let name = worktree.name.clone();
         // A second confirm on the same worktree while git is still running
-        // would race a duplicate removal and stack a second destructive modal.
-        if !self.removals_in_flight.insert(worktree_id) {
+        // would race a duplicate removal and stack a second destructive modal;
+        // a rename still running would be moving the tree out from under it.
+        let Some(change) = self.worktree_sync.begin_removal(repo.id, worktree_id) else {
+            self.refuse_busy(&name);
             return;
-        }
+        };
         let repo_path = repo.source_path.clone();
         let worktree_path = worktree.path.clone();
-        let name = worktree.name.clone();
         // Immediate feedback: on a large tree the round trip takes seconds and
         // the frame would otherwise be identical to the one before confirming.
         self.notify(format!("Deleting '{name}'…"), Severity::Information);
@@ -435,10 +437,7 @@ impl App {
                 git::remove_worktree(&repo_path, &worktree_path).await
             }
             .map_err(|error| error.to_string());
-            tx.send(AppEvent::WorktreeRemoveResult {
-                worktree_id,
-                outcome,
-            });
+            tx.send(AppEvent::WorktreeRemoveResult { change, outcome });
         });
     }
 
@@ -714,7 +713,17 @@ impl App {
         if let Some((_repo, worktree)) = self.state.selected_worktree() {
             let name = worktree.name.clone();
             let id = worktree.id;
-            if self.removals_in_flight.contains(&id) {
+            // A removal running already shows on the disabled Delete control;
+            // a rename running is invisible, so it gets a word instead of a
+            // confirm whose answer would be refused.
+            if self.worktree_sync.is_removing(id) {
+                return;
+            }
+            if self.worktree_sync.change_running(id) {
+                self.notify(
+                    format!("'{name}' is still being renamed"),
+                    Severity::Information,
+                );
                 return;
             }
             self.modals.push(Modal::Confirm(ConfirmModal::new(
@@ -1144,6 +1153,7 @@ impl App {
             return;
         };
         let repo_path = repo.source_path.clone();
+        let repo_id = repo.id;
         let worktree_id = worktree.id;
         let old_name = worktree.name.clone();
         let old_branch = worktree.branch.clone();
@@ -1171,17 +1181,20 @@ impl App {
                 // the listing shows the new path while the config still holds
                 // the old one, which reads as "removed" to the reconcile.
                 // Every exit below releases the protection by event.
-                self.renames_in_flight.insert(worktree_id);
+                let Some(change) = self.worktree_sync.begin_rename(repo_id, worktree_id) else {
+                    self.refuse_busy(&old_name);
+                    return;
+                };
                 let tx = self.tx.clone();
                 tokio::spawn(async move {
                     if tokio::fs::try_exists(&new_path).await.unwrap_or(false) {
                         tx.error("Path already exists");
-                        tx.send(AppEvent::WorktreeRenameAborted { worktree_id });
+                        tx.send(AppEvent::WorktreeRenameAborted { change });
                         return;
                     }
                     if let Err(error) = tokio::fs::rename(&old_path, &new_path).await {
                         tx.error(format!("Rename failed: {error}"));
-                        tx.send(AppEvent::WorktreeRenameAborted { worktree_id });
+                        tx.send(AppEvent::WorktreeRenameAborted { change });
                         return;
                     }
                     let (migrate_old, migrate_new) = (old_path.clone(), new_path.clone());
@@ -1195,7 +1208,7 @@ impl App {
                         tx.error(format!("Rename failed: {error}"));
                     }
                     tx.send(AppEvent::WorktreeRenamed {
-                        worktree_id,
+                        change,
                         name: new_name,
                         path: new_path.to_string_lossy().to_string(),
                     });
@@ -1210,7 +1223,10 @@ impl App {
                 // Reconcile-protected like the directory rename: a listing
                 // captured mid-rename must not "correct" the branch either
                 // direction while git is still deciding.
-                self.renames_in_flight.insert(worktree_id);
+                let Some(change) = self.worktree_sync.begin_rename(repo_id, worktree_id) else {
+                    self.refuse_busy(&old_name);
+                    return;
+                };
                 let tx = self.tx.clone();
                 let requested = new_branch.clone();
                 tokio::spawn(async move {
@@ -1219,17 +1235,26 @@ impl App {
                         // the config — and the sidebar — permanently showing a
                         // branch git had refused to create.
                         Ok(()) => tx.send(AppEvent::WorktreeBranchRenamed {
-                            worktree_id,
+                            change,
                             branch: requested,
                         }),
                         Err(error) => {
                             tx.error(format!("Branch rename failed: {error}"));
-                            tx.send(AppEvent::WorktreeRenameAborted { worktree_id });
+                            tx.send(AppEvent::WorktreeRenameAborted { change });
                         }
                     }
                 });
             }
         }
+    }
+
+    /// A worktree takes one change at a time. A refusal says why: otherwise
+    /// Enter in a rename field, or "y" on a delete confirm, would look dead.
+    fn refuse_busy(&mut self, name: &str) {
+        self.notify(
+            format!("'{name}' is still being changed; try again when it finishes"),
+            Severity::Information,
+        );
     }
 
     fn add_repository(&mut self, path: String) {
@@ -1267,6 +1292,9 @@ impl App {
         let worktree_path = settings_service::get_forest_path()
             .join(&repo.name)
             .join(&name);
+        // Holds back this repository's scans until the fold: one landing
+        // mid-create would adopt the new tree as found outside forestui.
+        let create = self.worktree_sync.begin_create(repo_id);
         let tx = self.tx.clone();
 
         tokio::spawn(async move {
@@ -1299,6 +1327,7 @@ impl App {
             .await
             {
                 tx.error(format!("Failed to create worktree: {error}"));
+                tx.send(AppEvent::WorktreeAddFailed { create });
                 return;
             }
 
@@ -1315,7 +1344,7 @@ impl App {
             worktree.work_item = work_item;
 
             tx.send(AppEvent::WorktreeAdded {
-                repo_id,
+                create,
                 worktree: Box::new(worktree),
                 first_prompt,
                 yolo,

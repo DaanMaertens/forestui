@@ -844,10 +844,87 @@ if [ "$LABEL" = "rust" ]; then
     "$(screen_has 'Open existing.*Create copy.*Edit name')"
   assert UC-103 clash-names-the-copy "yes" \
     "$(screen_has 'create feat-try-a-quick-spike-on-caching-2 instead')"
-  # Esc walks back: clash → description → list → modes → closed.
-  press Escape Escape Escape Escape; sleep 1
+  # Esc walks back: clash → description → list → modes → closed. One press
+  # at a time: ESC bytes sent back to back read as Alt+Escape, and a lost
+  # press leaves the flow open under every case after this one.
+  press Escape; await "Describe the feature|Description"; sleep 0.5
+  press Escape; await "Enter picks"; sleep 0.5
+  press Escape; await "Work Mode"; sleep 0.5
+  press Escape; sleep 1
+  assert UC-103 flow-closed "no" "$(screen_has 'Start Work')"
   assert UC-103 nothing-created "$worktrees_before" \
     "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+fi
+
+# --- UC-72: delete a worktree, clean and dirty ---------------------------------
+#
+# Rust only, and last: deleting changes the sidebar of every frame after it.
+# Removal runs in the background and only the fold changes state, so the
+# outcome is asserted on disk, in the config and in git — a frame captured
+# while git still runs looks the same as one where the delete silently failed.
+#
+# wait_until <shell-test> — poll a condition on disk instead of sleeping, for
+# the same reason `await` polls the screen. Reported like a wait timeout.
+wait_until() {
+  local tries=0
+  until eval "$1"; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 75 ]; then
+      printf '  WAIT-TIMEOUT  %s\n' "$1" >&2
+      WAIT_TIMEOUTS=$((WAIT_TIMEOUTS + 1))
+      return
+    fi
+    sleep 0.2
+  done
+}
+tracked() { cfg "any(w['name'].startswith('$1') for r in d['repositories'] for w in r['worktrees'])"; }
+listed_by_git() {
+  git -C "$1" worktree list --porcelain 2>/dev/null | grep -qF "$2" && echo yes || echo no
+}
+
+if [ "$LABEL" = "rust" ]; then
+  wt="$ROOT/forest/beta/issue-298-proactive-metrics-coalesced-fire-rows-ov"
+  focus_app
+  tu mouse click --name "$SESS" --on-regex '[├└]─ issue-298' >/dev/null 2>&1
+  await 'Worktree: +issue-298'
+
+  # `n` cancels: nothing is touched.
+  press d; await "Permanently delete 'issue-298"; sleep 0.5
+  capture UC-72 delete-confirm
+  press n; sleep 1
+  assert UC-72 cancel-closes-confirm "no" "$(screen_has 'Permanently delete')"
+  assert UC-72 cancel-keeps-dir "yes" "$([ -d "$wt" ] && echo yes || echo no)"
+  assert UC-72 cancel-keeps-entry "True" "$(tracked issue-298)"
+
+  # `y` deletes: directory, config entry and git's own record all go.
+  press d; await "Permanently delete 'issue-298"; sleep 0.5
+  press y
+  wait_until "[ \"\$(tracked issue-298)\" = False ]"
+  await 'Repository: beta'; sleep 1
+  capture UC-72 deleted
+  assert UC-72 dir-removed "no" "$([ -d "$wt" ] && echo yes || echo no)"
+  assert UC-72 entry-removed "False" "$(tracked issue-298)"
+  assert UC-72 git-forgot-it "no" "$(listed_by_git "$ROOT/src/beta" "$wt")"
+
+  # A worktree with uncommitted work is refused first, then asks again. That
+  # second confirm comes from a background result, so it arms after a delay
+  # and swallows a keypress that was already on its way.
+  dirty="$ROOT/forest/alpha/wt-a-renamed"
+  echo "unsaved" > "$dirty/scratch.txt"
+  focus_app
+  tu mouse click --name "$SESS" --on-regex '[├└]─ wt-a-renamed' >/dev/null 2>&1
+  await 'Worktree: +wt-a-renamed'
+  press d; await "Permanently delete 'wt-a-renamed"; sleep 0.5
+  press y
+  await 'Uncommitted Changes'; sleep 1
+  capture UC-72 dirty-confirm
+  assert UC-72 dirty-is-refused-first "yes" "$([ -f "$dirty/scratch.txt" ] && echo yes || echo no)"
+  assert UC-72 dirty-names-the-change "yes" "$(screen_has 'untracked')"
+  press y
+  wait_until "[ \"\$(tracked wt-a-renamed)\" = False ]"
+  assert UC-72 dirty-dir-removed "no" "$([ -d "$dirty" ] && echo yes || echo no)"
+  assert UC-72 dirty-entry-removed "False" "$(tracked wt-a-renamed)"
+  assert UC-72 dirty-git-forgot-it "no" "$(listed_by_git "$ROOT/src/alpha" "$dirty")"
 fi
 
 echo "done: $LABEL"
