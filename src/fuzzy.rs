@@ -1,5 +1,82 @@
 //! Fuzzy branch search: score branches against a query, best first.
 
+/// Anything the fuzzy matcher can search.
+pub trait Searchable {
+    /// The text the query is matched against.
+    fn search_text(&self) -> &str;
+
+    /// A shorter form that also counts as an exact or prefix hit, e.g. a
+    /// branch without its `origin/`. Most entries have none.
+    fn short_text(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// A branch, with its remote prefix stripped once up front rather than on
+/// every keystroke.
+#[derive(Debug, Clone)]
+pub struct BranchEntry {
+    name: String,
+    /// `None` when the branch has no remote prefix.
+    local: Option<String>,
+}
+
+impl BranchEntry {
+    pub fn new(name: &str, remotes: &[String]) -> Self {
+        // Stripped from the lowercased name, as the matcher always did: so
+        // `Origin/x` counts as a branch of remote `origin`, while a remote
+        // spelled `Origin` never strips.
+        let lower = name.to_lowercase();
+        let stripped = strip_remote_prefix(&lower, remotes);
+        let local = (stripped != lower).then(|| stripped.to_string());
+        Self {
+            name: name.to_string(),
+            local,
+        }
+    }
+}
+
+impl Searchable for BranchEntry {
+    fn search_text(&self) -> &str {
+        &self.name
+    }
+
+    fn short_text(&self) -> Option<&str> {
+        self.local.as_deref()
+    }
+}
+
+/// Match any searchable list against a query. Returns positions into
+/// `items` with their scores, best first.
+pub fn fuzzy_match<T: Searchable>(
+    query: &str,
+    items: &[T],
+    max_results: usize,
+) -> Vec<(usize, f64)> {
+    if query.trim().is_empty() {
+        return (0..items.len().min(max_results))
+            .map(|i| (i, 0.0))
+            .collect();
+    }
+
+    let mut results: Vec<(usize, f64)> = items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, item)| {
+            match_score(query, item.search_text(), item.short_text()).map(|s| (i, s))
+        })
+        .collect();
+
+    let name = |i: usize| items[i].search_text().to_lowercase();
+    results.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| name(a.0).cmp(&name(b.0)))
+    });
+    results.truncate(max_results);
+    results
+}
+
 fn levenshtein_distance(s1: &[char], s2: &[char]) -> usize {
     if s1.len() < s2.len() {
         return levenshtein_distance(s2, s1);
@@ -33,13 +110,14 @@ pub fn strip_remote_prefix<'a>(branch: &'a str, remotes: &[String]) -> &'a str {
     branch
 }
 
-/// Score a branch against a query. Lower is better; `None` means no match.
+/// Score a text against a query. Lower is better; `None` means no match.
+/// `short` is the entry's short form; without one, the full text stands in.
 ///
 /// Scoring tiers (identical to the Textual implementation):
 /// `0.0` exact, `0.5` exact on local name, `1.0` prefix on full name,
 /// `1.5` prefix on local name, `2.0` substring at a word boundary,
 /// `3.0` substring anywhere, `4.0+` fuzzy (Levenshtein) on path segments.
-fn match_score(query: &str, branch: &str, remotes: &[String]) -> Option<f64> {
+fn match_score(query: &str, branch: &str, short: Option<&str>) -> Option<f64> {
     let q = query.to_lowercase();
     let b = branch.to_lowercase();
 
@@ -50,7 +128,7 @@ fn match_score(query: &str, branch: &str, remotes: &[String]) -> Option<f64> {
         return Some(0.0);
     }
 
-    let local = strip_remote_prefix(&b, remotes).to_string();
+    let local = short.map_or_else(|| b.clone(), str::to_lowercase);
 
     if q == local {
         return Some(0.5);
@@ -112,26 +190,14 @@ pub fn fuzzy_match_branches(
     remotes: &[String],
     max_results: usize,
 ) -> Vec<(String, f64)> {
-    if query.trim().is_empty() {
-        return branches
-            .iter()
-            .take(max_results)
-            .map(|b| (b.clone(), 0.0))
-            .collect();
-    }
-
-    let mut results: Vec<(String, f64)> = branches
+    let entries: Vec<BranchEntry> = branches
         .iter()
-        .filter_map(|b| match_score(query, b, remotes).map(|s| (b.clone(), s)))
+        .map(|b| BranchEntry::new(b, remotes))
         .collect();
-
-    results.sort_by(|a, b| {
-        a.1.partial_cmp(&b.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
-    });
-    results.truncate(max_results);
-    results
+    fuzzy_match(query, &entries, max_results)
+        .into_iter()
+        .map(|(i, score)| (branches[i].clone(), score))
+        .collect()
 }
 
 /// Byte range of the literal `query` inside `branch`, for highlighting.
@@ -179,6 +245,116 @@ mod tests {
         // Typo still matches through the Levenshtein tier.
         let out = fuzzy_match_branches("relase", &branches, &remotes, 10);
         assert!(out.iter().any(|(b, _)| b == "release-2"));
+    }
+
+    /// One branch per scoring tier, in scrambled order, so the whole ranking
+    /// is pinned before the matcher stops being branch-specific. Every score
+    /// was worked out by hand from the tiers on `match_score`.
+    #[test]
+    fn ranks_branches_through_every_scoring_tier() {
+        let remotes = vec!["origin".to_string()];
+        let branches: Vec<String> = [
+            "main",
+            "defeat",
+            "fxatures",
+            "fest",
+            "origin/feat/login",
+            "B-feat",
+            "feat/login",
+            "origin/feat",
+            "a-feat",
+            "Feat",
+            "origin/main",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let out = fuzzy_match_branches("feat", &branches, &remotes, 50);
+
+        let ranked: Vec<(&str, f64)> = out.iter().map(|(b, s)| (b.as_str(), *s)).collect();
+        assert_eq!(
+            ranked,
+            vec![
+                ("Feat", 0.0),              // exact, ignoring case
+                ("origin/feat", 0.5),       // exact on the local name
+                ("feat/login", 1.0),        // prefix
+                ("origin/feat/login", 1.5), // prefix on the local name
+                ("a-feat", 2.0),            // substring after a separator...
+                ("B-feat", 2.0),            // ...ties sort by name, ignoring case
+                ("defeat", 3.0),            // substring anywhere
+                ("fest", 4.1),              // one edit away from a whole segment
+                ("fxatures", 4.6),          // one edit away from a segment's prefix
+            ]
+        );
+    }
+
+    /// The remote prefix is stripped from the *lowercased* branch and compared
+    /// with the remote names as spelled. So `Origin/feat` counts as a remote
+    /// branch of `origin`, while a remote spelled `Origin` never strips at
+    /// all. Pinned so that precomputing the local name keeps this quirk.
+    #[test]
+    fn remote_prefix_is_stripped_after_lowercasing() {
+        let branches = vec!["Origin/feat".to_string()];
+
+        let lower_remote = vec!["origin".to_string()];
+        let out = fuzzy_match_branches("feat", &branches, &lower_remote, 50);
+        assert_eq!(out, vec![("Origin/feat".to_string(), 0.5)]); // exact on local name
+
+        let upper_remote = vec!["Origin".to_string()];
+        let out = fuzzy_match_branches("feat", &branches, &upper_remote, 50);
+        assert_eq!(out, vec![("Origin/feat".to_string(), 2.0)]); // substring after `/`
+    }
+
+    /// A blank query lists entries as given, not sorted by name, so a list
+    /// that arrives ordered (recent branches first) keeps that order.
+    #[test]
+    fn a_blank_query_keeps_the_given_order() {
+        let branches: Vec<String> = ["zeta", "Alpha", "mid"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        for query in ["", "   "] {
+            let out = fuzzy_match_branches(query, &branches, &[], 2);
+            assert_eq!(
+                out,
+                vec![("zeta".to_string(), 0.0), ("Alpha".to_string(), 0.0)]
+            );
+        }
+    }
+
+    /// The smallest possible entry: one text and no short form.
+    struct Entry(&'static str);
+
+    impl Searchable for Entry {
+        fn search_text(&self) -> &str {
+            self.0
+        }
+    }
+
+    #[test]
+    fn matches_any_searchable_list() {
+        let items = [Entry("defeat"), Entry("feat/login"), Entry("main")];
+
+        let out = fuzzy_match("feat", &items, 50);
+
+        // Positions into `items`, best first: a prefix, then a substring.
+        assert_eq!(out, vec![(1, 1.0), (0, 3.0)]);
+    }
+
+    #[test]
+    fn a_remote_branch_also_matches_by_its_local_name() {
+        let remotes = vec!["origin".to_string()];
+        let items = [
+            BranchEntry::new("origin/feat", &remotes),
+            BranchEntry::new("feat/login", &remotes),
+        ];
+
+        let out = fuzzy_match("feat", &items, 50);
+
+        // Exact on the local name, then a prefix of the full name.
+        assert_eq!(out, vec![(0, 0.5), (1, 1.0)]);
     }
 
     #[test]
