@@ -1407,10 +1407,19 @@ out `release-2` (not a detached HEAD) and records
 `base_branch=release-2`, `created_from_ref=<sha>`.
 
 ### UC-72 — Delete confirmation: `n` cancels, `y` deletes
-**Area:** Modals | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Area:** Modals | **Priority:** P0 | 🟢 EXECUTED (Rust) · automated in the sweep (Rust only, runs last)
 **Expected:** after `d` then `n`, the worktree still exists on disk and in config.
 After `d` then `y`, the directory is gone, the config entry is gone, and
 `git worktree list` no longer lists it.
+**Dirty:** with an untracked file in the worktree, `d` then `y` is refused
+first: a second `Uncommitted Changes` confirm names `1 untracked`, and the
+file is still there. That confirm comes from a background result, so it arms
+after a short delay; `y` once it has armed deletes as above.
+**Automated as:** the sweep deletes beta's `issue-298…` worktree (clean) and
+alpha's `wt-a-renamed` (dirty), capturing `UC-72-delete-confirm`,
+`UC-72-deleted` and `UC-72-dirty-confirm`. Removal runs in the background, so
+every outcome is asserted on disk, in the config and in `git worktree list`
+rather than read off a frame.
 
 ### UC-73 — Custom buttons: add, reorder, delete, save
 **Area:** Modals | **Priority:** P1 | 🟢 EXECUTED (Rust)
