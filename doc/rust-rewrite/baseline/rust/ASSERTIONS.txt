@@ -20,3 +20,8 @@ PASS UC-82     single-forestui-window                         expected=1        
 PASS UC-83     detail-follows-click                           expected=yes                          actual=yes
 PASS UC-84     terminal-window-opened                         expected=yes                          actual=yes
 PASS UC-86     modal-dismissed-by-click                       expected=no                           actual=no
+PASS UC-99     prompt-names-the-issue                         expected=yes                          actual=yes
+PASS UC-99     worktree-created                               expected=yes                          actual=yes
+PASS UC-99     branch-checked-out                             expected=fix/issue-298-proactive-metrics-coalesced-fire-rows-ov actual=fix/issue-298-proactive-metrics-coalesced-fire-rows-ov
+PASS UC-99     work-item-linked                               expected={'kind': 'issue', 'number': 298} actual={'kind': 'issue', 'number': 298}
+PASS UC-99     claude-window-named-after-worktree             expected=yes                          actual=yes

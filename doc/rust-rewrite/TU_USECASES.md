@@ -1317,7 +1317,7 @@ sweep caught it and it was fixed in `ui/widgets.rs`.
 **Expected:** `to alpha`, `Worktree Name`, `Branch`, `New Branch`, `Existing`,
 branch placeholder `feat/my-feature`.
 
-### UC-57 — `s` opens Settings
+### UC-57 — `S` opens Settings
 **Area:** Sweep | **Priority:** P0 | 🟢 EXECUTED (both builds)
 **Expected:** `DEFAULT EDITOR` = `Vim (tmux)`, `BRANCH PREFIX` = `feat/`,
 `THEME` = `Forest Dark…` (a button opening the theme picker; the frozen python
@@ -1410,7 +1410,7 @@ After `d` then `y`, the directory is gone, the config entry is gone, and
 
 ### UC-73 — Custom buttons: add, reorder, delete, save
 **Area:** Modals | **Priority:** P1 | 🟢 EXECUTED (Rust)
-**Steps:** `s` → `Tab`×3 → `Enter` (Manage) → `a` add a second button →
+**Steps:** `S` → `Tab`×3 → `Enter` (Manage) → `a` add a second button →
 `Down`, `K`, `J`, `d`, `s` → save settings.
 **Expected:** `K` moves the selection up, `J` down, `d` removes it, `s` saves the
 list back into the parent Settings modal, and the saved
@@ -1610,6 +1610,23 @@ the frame and therefore absent from the comparison.
 **Fails if:** the tall capture is missing either marker, which means the frame
 being diffed stops short of the content the case exists to compare.
 
+### UC-99 — Start work for an issue, from `s` to a running Claude
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** with beta selected, `s` → `Enter` (mode `issue`) → type `metrics`
+→ `Enter` (issue #298) → `Enter` (Launch, from the focused name field).
+**Expected:** the mode step lists `issue`, `feature` and `pr-review`, the last
+two greyed out with `(not yet)`. The item step lists `#326` and `#298`. The
+confirm screen is titled `Start Work: Issue #298`, names the worktree
+`issue-298-proactive-metrics-coalesced-fire-rows-ov` on
+`fix/issue-298-proactive-metrics-coalesced-fire-rows-ov`, has the base branch,
+Fetch and a ticked `Pull repo before creating`, and shows the filled-in prompt
+with `gh issue view 298 --comments`. Launch creates the worktree on that
+branch, records `{"kind": "issue", "number": 298}` as its `work_item` in the
+config, and opens a window named after the worktree running Claude with `-n`
+set to the same name and the prompt as its first message.
+**Fails if:** any step is skipped, the worktree or branch is named otherwise,
+the link is missing from the config, or the window carries a mode prefix.
+
 ---
 
 ## Known visual divergences (accepted, not defects)
@@ -1653,6 +1670,7 @@ composite shows a difference not listed above, treat it as a regression.
 | Hand-driven, unscripted | 71–77 | 4 |
 | Flows & mouse | 78–89 | 8 |
 | Visual parity | 90–94 (93 retired) | 1 |
+| Start work | 99 | 1 |
 
 **96 numbered use cases, 3 retired with the `?` binding (UC-26, 59, 93) —
 93 active · 52 P0 · 78 executed live · 17 written from source only.**

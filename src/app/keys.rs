@@ -10,18 +10,19 @@ use crate::ui::widgets::{TextInput, is_plain_press};
 /// screen, so a binding missing from this table is undiscoverable by design
 /// review, not by accident. `handle_key` below must handle every character
 /// listed here.
-pub const BINDINGS: [(char, &str); 13] = [
+pub const BINDINGS: [(char, &str); 14] = [
     ('a', "Add Repo"),
     ('q', "Quit"),
-    ('w', "Add Worktree"),
+    ('s', "Start"),
+    ('w', "Add WT"),
     ('e', "Editor"),
-    ('t', "Terminal"),
+    ('t', "Term"),
     ('o', "Files"),
     ('n', "Claude"),
     ('y', "YOLO"),
     ('h', "Archive"),
     ('d', "Delete"),
-    ('s', "Settings"),
+    ('S', "Settings"),
     ('r', "Refresh"),
     ('A', "Archived"),
 ];
@@ -155,6 +156,7 @@ impl App {
             KeyCode::Char('a') => self
                 .modals
                 .push(Modal::AddRepository(AddRepositoryModal::new())),
+            KeyCode::Char('s') => self.action_start_work(),
             KeyCode::Char('w') => self.action_add_worktree(),
             KeyCode::Char('e') => self.run_action(Action::Editor),
             KeyCode::Char('t') => self.run_action(Action::Terminal),
@@ -163,7 +165,7 @@ impl App {
             KeyCode::Char('y') => self.run_action(Action::ClaudeYolo),
             KeyCode::Char('h') => self.action_toggle_archive(),
             KeyCode::Char('d') => self.action_delete(),
-            KeyCode::Char('s') => self
+            KeyCode::Char('S') => self
                 .modals
                 .push(Modal::Settings(Box::new(SettingsModal::new(
                     &self.settings,

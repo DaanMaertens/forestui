@@ -19,6 +19,7 @@ use ratatui::style::Style;
 /// Textual's buttons.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
+    StartWork,
     Sync,
     AddWorktree,
     Editor,
@@ -220,6 +221,7 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
     controls(
         nodes,
         vec![
+            ControlSpec::new(Action::StartWork, "Start work", theme::Variant::Primary),
             sync_control(app, false),
             ControlSpec::new(Action::AddWorktree, "Add Worktree", theme::Variant::Normal),
         ],

@@ -106,6 +106,9 @@ pub enum ModalClick {
     Cycle(Direction),
     /// A row of a list: focus the list and select that row.
     Row(usize),
+    /// A row of a list a click chooses from: select that row, then activate
+    /// it as Enter does.
+    Pick(usize),
 }
 
 /// Which way a [`ModalClick::Cycle`] steps.
@@ -424,12 +427,12 @@ impl App {
 
         if let Some(modal) = self.modals.last_mut() {
             modal.set_focus(index);
-            if let ModalClick::Row(row) = click {
+            if let ModalClick::Row(row) | ModalClick::Pick(row) = click {
                 modal.set_row(row);
             }
         }
         match click {
-            ModalClick::Activate => self.send_modal_key(KeyCode::Enter),
+            ModalClick::Activate | ModalClick::Pick(_) => self.send_modal_key(KeyCode::Enter),
             ModalClick::Cycle(Direction::Next) => self.send_modal_key(KeyCode::Right),
             ModalClick::Cycle(Direction::Previous) => self.send_modal_key(KeyCode::Left),
             // Focusing a field must not submit the dialog, and selecting a row
