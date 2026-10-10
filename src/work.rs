@@ -130,13 +130,20 @@ pub fn title_slug(title: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct IssueEntry {
     pub issue: GitHubIssue,
+    /// The name of the worktree already started for this issue, if any. Shown
+    /// as a marker only; it is not searched.
+    pub worktree: Option<String>,
     text: String,
 }
 
 impl IssueEntry {
-    pub fn new(issue: GitHubIssue) -> Self {
+    pub fn new(issue: GitHubIssue, worktree: Option<String>) -> Self {
         let text = format!("#{} {}", issue.number, issue.title);
-        Self { issue, text }
+        Self {
+            issue,
+            worktree,
+            text,
+        }
     }
 }
 
@@ -271,6 +278,10 @@ mod tests {
                 "updatedAt":"2026-01-01T00:00:00Z"}"#,
         )
         .unwrap();
-        assert_eq!(IssueEntry::new(issue).search_text(), "#42 Fix login bug");
+        assert_eq!(
+            IssueEntry::new(issue, Some("issue-42-x".into())).search_text(),
+            "#42 Fix login bug",
+            "the linked worktree is a marker, not search text"
+        );
     }
 }

@@ -739,7 +739,23 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
                 DROPDOWN_ROWS.min(space),
                 ListFocus::of(StartWorkModal::FOCUS_LIST, modal.focus),
                 ModalClick::Pick,
-                |entry, query, style| branch_line(entry.search_text(), query, style),
+                |entry, query, style| {
+                    let mut line = branch_line(entry.search_text(), query, style);
+                    // Picking a marked item jumps to its worktree rather than
+                    // creating one, so the row says where it will land.
+                    // Accent on a plain row; the highlighted row keeps its own
+                    // colours, where accent on the accent-dark cursor would fade.
+                    if let Some(worktree) = &entry.worktree {
+                        let marker = if style.bg.is_some() {
+                            style
+                        } else {
+                            theme::accent()
+                        };
+                        line.spans
+                            .push(Span::styled(format!("  → {worktree}"), marker));
+                    }
+                    line
+                },
             );
         }
     }

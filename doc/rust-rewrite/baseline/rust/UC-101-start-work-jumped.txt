@@ -1,0 +1,44 @@
+claude stub --remote-control -n feat-77-dark-mode-for-the-dashboard --session-id <uuid> Build the feature from
+ GitHub issue #77: Dark mode for the dashboard Start by reading it with `gh issue view 77 --comments`, so you have its current text and ever
+y comment. You are in the `feat-77-dark-mode-for-the-dashboard` worktree of beta, on the branch `feat/feat-77-dark-mode-for-the-dashboard`.
+Explore the code it touches and write a plan: what you will change, where, and how you will test it. Do not change any code until I have app
+roved the plan.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[forestui-<7:term:beta  8:issue-298-proactive-metrics-coalesced-fire-rows-ov  9:feat-77-dark-mode-for-the-dashboard*"<host>" <clock>

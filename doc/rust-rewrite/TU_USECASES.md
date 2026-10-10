@@ -1643,6 +1643,22 @@ worktree on that branch and records `{"kind": "issue", "number": 77}` as its
 **Fails if:** a non-feature issue is listed, the worktree or branch is named
 otherwise, the prompt is the `issue` template, or the link is missing.
 
+### UC-101 — Picking a started work item jumps to its worktree
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** after UC-100, with feat-77's Claude still running in its window,
+`Up` (move the selection off the feature worktree) → `s` → `Down` `Enter`
+(mode `feature`) → `Enter` (issue #77).
+**Expected:** the item step marks the row
+`#77 Dark mode for the dashboard  → feat-77-dark-mode-for-the-dashboard`.
+Picking it opens no confirm screen and creates nothing: Start work closes, the
+sidebar selects `feat-77-dark-mode-for-the-dashboard`, and tmux switches to
+its Claude window, which becomes the current one in the status bar. The match
+is by the recorded work item link, so it holds after a rename (unit-tested).
+With no Claude running there the worktree is only selected; one running
+outside forestui's tmux session is named by pid instead.
+**Fails if:** the row is unmarked, the confirm screen opens, a second worktree
+appears in the config, or the window does not switch.
+
 ---
 
 ## Known visual divergences (accepted, not defects)
@@ -1686,10 +1702,10 @@ composite shows a difference not listed above, treat it as a regression.
 | Hand-driven, unscripted | 71–77 | 4 |
 | Flows & mouse | 78–89 | 8 |
 | Visual parity | 90–94 (93 retired) | 1 |
-| Start work | 99–100 | 2 |
+| Start work | 99–101 | 3 |
 
-**97 numbered use cases, 3 retired with the `?` binding (UC-26, 59, 93) —
-94 active · 53 P0 · 79 executed live · 17 written from source only.**
+**98 numbered use cases, 3 retired with the `?` binding (UC-26, 59, 93) —
+95 active · 54 P0 · 80 executed live · 17 written from source only.**
 
 UC-01–52 were written against the Python build on 2026-08-14 (35 executed).
 UC-53–70 are the automated sweep and have been executed against **both** builds

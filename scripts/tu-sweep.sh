@@ -86,6 +86,23 @@ if [ "\$1" = "--help" ]; then
   exit 0
 fi
 echo "claude stub \$*"
+# Once the sweep raises the flag (UC-100 onward), a fresh launch also leaves a
+# transcript under its --session-id, as a real Claude would: the jump in
+# UC-101 finds the running session through the worktree's session list.
+# Earlier launches write none, so no compared frame grows a session card.
+if [ -f "$ROOT/write-transcripts" ]; then
+  sid=""; prev=""
+  for arg in "\$@"; do
+    [ "\$prev" = "--session-id" ] && sid="\$arg"
+    prev="\$arg"
+  done
+  if [ -n "\$sid" ]; then
+    dir="\$HOME/.claude/projects/\$(pwd -P | tr '/' '-')"
+    mkdir -p "\$dir"
+    printf '%s\n' '{"type":"user","timestamp":"2026-08-09T10:00:00Z","message":{"content":"start on the feature"}}' \
+      > "\$dir/\$sid.jsonl"
+  fi
+fi
 printf '%s\t%s\n' \
   "\$(tmux display-message -p '#{window_name}' 2>/dev/null)" \
   "\$(tmux show-options -wqv @claude_birth_name 2>/dev/null)" >> "$ROOT/birth.txt"
@@ -711,6 +728,8 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-100 start-work-feature-confirm
   assert UC-100 titled-as-a-feature "yes" "$(screen_has 'Start Work: Feature #77')"
   assert UC-100 prompt-asks-for-a-plan "yes" "$(screen_has 'approved the plan')"
+  # This launch's Claude is the one UC-101 jumps back to.
+  touch "$ROOT/write-transcripts"
   press Enter
   await "[0-9]:feat-77" 15000; sleep 2
   capture UC-100 start-work-feature-launched
@@ -720,6 +739,32 @@ if [ "$LABEL" = "rust" ]; then
     "$(git -C "$wt" branch --show-current 2>/dev/null)"
   assert UC-100 work-item-linked "{'kind': 'issue', 'number': 77}" \
     "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('feat-77')][0]")"
+fi
+
+# --- UC-101: one work item, one worktree --------------------------------------
+#
+# Rust only, after UC-100: #77 now has a worktree with its Claude running in
+# a window. Picking #77 again must go there, not to the confirm screen.
+if [ "$LABEL" = "rust" ]; then
+  focus_app
+  # Move off the feature worktree, so the jump has to bring the selection back.
+  press Up; sleep 0.8
+  worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+  press s; await "Work Mode"; sleep 0.8
+  press Down Enter; await "#77"; sleep 0.8
+  capture UC-101 start-work-linked-item
+  assert UC-101 linked-item-marked "yes" \
+    "$(screen_has '#77 Dark mode for the dashboard +→ feat-77-dark-mode-for-the-dashboard')"
+  press Enter
+  # The switch lands on the Claude window: the stub's output is on screen and
+  # the window is the current one in the status bar.
+  await "claude stub" 15000; sleep 1
+  capture UC-101 start-work-jumped
+  assert UC-101 switched-to-claude-window "yes" "$(screen_has '[0-9]:feat-77[^ ]*\*')"
+  assert UC-101 nothing-created "$worktrees_before" \
+    "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+  focus_app
+  assert UC-101 worktree-selected "yes" "$(screen_has 'Worktree: +feat-77')"
 fi
 
 echo "done: $LABEL"

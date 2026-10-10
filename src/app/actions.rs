@@ -5,7 +5,7 @@
 //! `EventTx`; results come back as events, and only the main loop ever
 //! writes the state file.
 
-use super::{Action, App, Field};
+use super::{Action, App, Field, PendingJump};
 use crate::event::Severity;
 use crate::event::{AppEvent, BranchList, BranchTarget, EventTx};
 use crate::modal::{
@@ -14,6 +14,7 @@ use crate::modal::{
 };
 use crate::modal::{IntegrationAction, ModalOutcome};
 use crate::models::{CustomClaudeButton, Repository, WorkItemLink, Worktree};
+use crate::services::live::LivePlace;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use crate::work::WorkMode;
 use std::path::{Path, PathBuf};
@@ -140,6 +141,17 @@ impl App {
                     return;
                 };
                 let repo_id = flow.repo_id;
+                // One work item, one worktree: an item already started goes to
+                // its worktree instead of the confirm screen. Checked against
+                // the state now, not the marker the list drew at open.
+                let link = WorkItemLink::Issue {
+                    number: issue.number,
+                };
+                if let Some(worktree) = self.state.linked_worktree(repo_id, &link) {
+                    let worktree_id = worktree.id;
+                    self.jump_to_worktree(repo_id, worktree_id, issue.number);
+                    return;
+                }
                 self.pending_issue = Some((*issue, mode));
                 self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
             }
@@ -352,16 +364,7 @@ impl App {
             ConfirmAction::SwitchToWindow {
                 window_id,
                 window_name,
-            } => {
-                if tmux::select_window(&window_id) {
-                    self.notify(format!("Switched to {window_name}"), Severity::Information);
-                } else {
-                    // The window closed between the scan and the click; the
-                    // next sweep drops its badge.
-                    self.notify(format!("Window {window_name} is gone"), Severity::Warning);
-                    self.scan_live_sessions();
-                }
-            }
+            } => self.switch_to_window(&window_id, &window_name),
             ConfirmAction::ForceResume {
                 path,
                 session_id,
@@ -458,6 +461,102 @@ impl App {
                     ),
                 )));
             }
+        }
+    }
+
+    pub(super) fn switch_to_window(&mut self, window_id: &str, window_name: &str) {
+        if tmux::select_window(window_id) {
+            self.notify(format!("Switched to {window_name}"), Severity::Information);
+        } else {
+            // The window closed between the scan and the click; the next
+            // sweep drops its badge.
+            self.notify(format!("Window {window_name} is gone"), Severity::Warning);
+            self.scan_live_sessions();
+        }
+    }
+
+    /// Go to the worktree an issue was already started in, closing Start work.
+    ///
+    /// Selecting it loads its sessions and rescans the live map; once both
+    /// have answered, [`Self::finish_jump`] switches to a running Claude there.
+    /// With none running the worktree is only selected — which session to
+    /// resume is the user's call, and relaunching would resend the prompt.
+    fn jump_to_worktree(&mut self, repo_id: Uuid, worktree_id: Uuid, number: i64) {
+        let Some((_, worktree)) = self.state.find_worktree(worktree_id) else {
+            return;
+        };
+        let (name, path, archived) = (
+            worktree.name.clone(),
+            worktree.path.clone(),
+            worktree.is_archived,
+        );
+        self.modals.retain(|m| !matches!(m, Modal::StartWork(_)));
+        // Reveal the row, as the create fold does, or the cursor would point
+        // at nothing.
+        self.collapsed.remove(&repo_id);
+        if archived {
+            self.state.show_archived = true;
+        }
+        self.state.select_worktree(repo_id, worktree_id);
+        self.rebuild_rows();
+        self.sync_sidebar_index();
+        self.reload_detail();
+        self.pending_jump = Some(PendingJump {
+            path,
+            sessions: false,
+            live: false,
+        });
+        self.notify(
+            format!("Issue #{number} is already in worktree '{name}'"),
+            Severity::Information,
+        );
+    }
+
+    /// Complete a jump once the worktree's sessions and the live map have
+    /// both come back: switch to the most recent session running in one of
+    /// our windows. One running elsewhere cannot be switched to, so it is
+    /// only pointed out.
+    pub(super) fn finish_jump(&mut self) {
+        let Some(jump) = self.pending_jump.take_if(|j| j.sessions && j.live) else {
+            return;
+        };
+        // `reload_detail` already drops a jump on any selection change; this
+        // only keeps a late answer from acting on a pane it does not show.
+        if jump.path != self.meta.path {
+            return;
+        }
+        let mut window: Option<(chrono::DateTime<chrono::Utc>, String, String)> = None;
+        let mut elsewhere: Option<u32> = None;
+        for session in self.sessions.iter().flatten() {
+            match self.live_sessions.get(&session.id).map(|live| &live.place) {
+                Some(LivePlace::Window {
+                    window_id,
+                    window_name,
+                }) => {
+                    if window
+                        .as_ref()
+                        .is_none_or(|(newest, _, _)| session.last_timestamp > *newest)
+                    {
+                        window = Some((
+                            session.last_timestamp,
+                            window_id.clone(),
+                            window_name.clone(),
+                        ));
+                    }
+                }
+                Some(LivePlace::Elsewhere { pid }) => {
+                    elsewhere.get_or_insert(*pid);
+                }
+                None => {}
+            }
+        }
+        if let Some((_, window_id, window_name)) = window {
+            self.switch_to_window(&window_id, &window_name);
+        } else if let Some(pid) = elsewhere {
+            self.notify(
+                format!("Its Claude session is running outside this tmux session (pid {pid})"),
+                Severity::Information,
+            );
         }
     }
 

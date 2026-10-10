@@ -1,0 +1,44 @@
+
+
+
+
+
+
+
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work: feature                                                        │
+                              │                                                                              │
+                              │  in beta                                                                     │
+                              │  Issue                                                                       │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │Type a number or part of a title...                                     │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  1 features                                                                  │
+                              │   #77 Dark mode for the dashboard  → feat-77-dark-mode-for-the-dashboard     │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │                                                                              │
+                              │  Enter picks · Esc goes back                                                 │
+                              │                            ┌────────┐ ┌────────┐                             │
+                              │                            │  Back  │ │ Cancel │                             │
+                              │                            └────────┘ └────────┘                             │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>
