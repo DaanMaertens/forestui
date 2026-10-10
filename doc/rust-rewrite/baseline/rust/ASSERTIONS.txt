@@ -31,3 +31,7 @@ PASS UC-100    prompt-asks-for-a-plan                         expected=yes      
 PASS UC-100    worktree-created                               expected=yes                          actual=yes
 PASS UC-100    branch-checked-out                             expected=feat/feat-77-dark-mode-for-the-dashboard actual=feat/feat-77-dark-mode-for-the-dashboard
 PASS UC-100    work-item-linked                               expected={'kind': 'issue', 'number': 77} actual={'kind': 'issue', 'number': 77}
+PASS UC-101    linked-item-marked                             expected=yes                          actual=yes
+PASS UC-101    switched-to-claude-window                      expected=yes                          actual=yes
+PASS UC-101    nothing-created                                expected=4                            actual=4
+PASS UC-101    worktree-selected                              expected=yes                          actual=yes

@@ -9,8 +9,8 @@ use crate::event::BranchList;
 use crate::fuzzy::{self, BranchEntry, Searchable};
 use crate::models::{
     CustomClaudeButton, GitHubIssue, MAX_BUTTON_LABEL_LENGTH, MAX_BUTTON_PREFIX_LENGTH,
-    MAX_CLAUDE_COMMAND_LENGTH, Repository, Settings, derive_prefix, validate_button_label,
-    validate_button_prefix, validate_claude_command,
+    MAX_CLAUDE_COMMAND_LENGTH, Repository, Settings, WorkItemLink, derive_prefix,
+    validate_button_label, validate_button_prefix, validate_claude_command,
 };
 use crate::picker::SearchPicker;
 use crate::prompt;
@@ -18,6 +18,7 @@ use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
 use crate::util;
 use crate::work::{self, IssueEntry, WorkMode};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -683,6 +684,9 @@ pub struct StartWorkModal {
     issues: Option<Vec<GitHubIssue>>,
     /// The issues `mode` lists. `None` while the issues are still loading.
     pub picker: Option<SearchPicker<IssueEntry>>,
+    /// Issue number → the worktree already started for it, as the flow
+    /// opened. Only marks the list: picking an item checks the live state.
+    linked: HashMap<i64, String>,
     /// One of the `FOCUS_*` constants; see [`StartWorkModal::ring`].
     pub focus: usize,
 }
@@ -705,6 +709,14 @@ impl StartWorkModal {
             mode: WorkMode::Issue,
             issues: None,
             picker: None,
+            linked: repo
+                .worktrees
+                .iter()
+                .filter_map(|w| match &w.work_item {
+                    Some(WorkItemLink::Issue { number }) => Some((*number, w.name.clone())),
+                    _ => None,
+                })
+                .collect(),
             focus: Self::FOCUS_LIST,
         };
         if let Some(issues) = issues {
@@ -739,7 +751,10 @@ impl StartWorkModal {
         };
         let entries = work::issues_for(self.mode, issues, work::DEFAULT_FEATURE_LABELS)
             .into_iter()
-            .map(IssueEntry::new)
+            .map(|issue| {
+                let worktree = self.linked.get(&issue.number).cloned();
+                IssueEntry::new(issue, worktree)
+            })
             .collect();
         self.picker = Some(SearchPicker::new(
             entries,

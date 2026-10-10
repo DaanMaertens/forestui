@@ -580,11 +580,11 @@ interactions, or UI regressions. Use the `test-forestui` skill to drive forestui
 in a headless terminal with `tu` and verify the change works. Do this
 proactively, not only when asked.
 
-`doc/rust-rewrite/TU_USECASES.md` is the acceptance playbook: 97 numbered
+`doc/rust-rewrite/TU_USECASES.md` is the acceptance playbook: 98 numbered
 scenarios with exact keystrokes and expected output. The P0 cases are the
 regression suite — run the relevant ones after any behavioural change.
 
-UC-53–70 (except the retired UC-59), the flow cases UC-78–84/86/99/100, and the
+UC-53–70 (except the retired UC-59), the flow cases UC-78–84/86/99–101, and the
 guards UC-90/96 are automated —
 frames plus on-disk assertions (`ASSERTIONS.txt`). Capture a build and compare
 two builds with:

@@ -3,7 +3,7 @@
 //! Stored as `.forestui-config.json` inside the forest directory itself, which
 //! is what makes multiple independent forests possible.
 
-use crate::models::{AppStateData, Repository, Selection, Worktree};
+use crate::models::{AppStateData, Repository, Selection, WorkItemLink, Worktree};
 use crate::services::git::WorktreeInfo;
 use crate::services::settings::get_forest_path;
 use std::path::{Path, PathBuf};
@@ -156,6 +156,15 @@ impl AppState {
                 .find(|w| w.id == worktree_id)
                 .map(|w| (repo, w))
         })
+    }
+
+    /// The worktree a work item was started in, archived or not. Matched on
+    /// the recorded link, never on names, so a renamed worktree still answers.
+    pub fn linked_worktree(&self, repo_id: Uuid, link: &WorkItemLink) -> Option<&Worktree> {
+        self.find_repository(repo_id)?
+            .worktrees
+            .iter()
+            .find(|w| w.work_item.as_ref() == Some(link))
     }
 
     pub fn add_worktree(&mut self, repo_id: Uuid, worktree: Worktree) {
@@ -496,6 +505,39 @@ mod tests {
         assert_eq!(reloaded.repositories().len(), 1);
         assert_eq!(reloaded.repositories()[0].worktrees.len(), 1);
         assert_eq!(reloaded.repositories()[0].worktrees[0].branch, "feat/x");
+    }
+
+    /// The link is the match, not the name: a worktree renamed away from its
+    /// issue's slug still answers for it, and another repository's worktree
+    /// with the same link does not.
+    #[test]
+    fn a_work_item_finds_its_worktree_by_link() {
+        let (_dir, mut state) = temp_state();
+        let repo = Repository::new("demo".into(), "/tmp/demo".into());
+        let other = Repository::new("other".into(), "/tmp/other".into());
+        let (repo_id, other_id) = (repo.id, other.id);
+        state.add_repository(repo);
+        state.add_repository(other);
+        let link = WorkItemLink::Issue { number: 7 };
+        let mut linked = Worktree::new("renamed".into(), "b".into(), "/f/renamed".into());
+        linked.work_item = Some(link.clone());
+        let linked_id = linked.id;
+        state.add_worktree(repo_id, linked);
+        state.add_worktree(
+            repo_id,
+            Worktree::new("issue-7-x".into(), "fix/issue-7-x".into(), "/f/x".into()),
+        );
+
+        assert_eq!(
+            state.linked_worktree(repo_id, &link).map(|w| w.id),
+            Some(linked_id)
+        );
+        assert!(
+            state
+                .linked_worktree(repo_id, &WorkItemLink::Issue { number: 8 })
+                .is_none()
+        );
+        assert!(state.linked_worktree(other_id, &link).is_none());
     }
 
     #[test]

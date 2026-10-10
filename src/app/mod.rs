@@ -233,6 +233,19 @@ pub struct App {
     /// Issue whose modal is waiting on a branch list to finish loading.
     /// The issue a Create-WT click captured, held across the branch load.
     pub(crate) pending_issue: Option<(crate::models::GitHubIssue, crate::work::WorkMode)>,
+    /// A jump to an already-started worktree, waiting to learn whether a
+    /// Claude session is running there. See [`App::finish_jump`].
+    pub(crate) pending_jump: Option<PendingJump>,
+}
+
+/// What a jump still waits for: the jumped-to worktree's session list, and
+/// the next live scan. Only together do they answer whether a
+/// Claude session is running there.
+#[derive(Debug)]
+pub(crate) struct PendingJump {
+    pub path: String,
+    pub sessions: bool,
+    pub live: bool,
 }
 
 impl App {
@@ -302,6 +315,7 @@ impl App {
             branch_input: TextInput::new(""),
             rename_target: None,
             pending_issue: None,
+            pending_jump: None,
         };
         app.rebuild_rows();
         app
@@ -792,8 +806,10 @@ impl App {
         // control from the previous pane against the new selection would act
         // on the wrong thing entirely.
         self.drawn_items.clear();
-        // A Start work confirm screen belongs to the selection that started it.
+        // A Start work confirm screen belongs to the selection that started it,
+        // and a jump to the worktree that was selected.
         self.pending_issue = None;
+        self.pending_jump = None;
 
         let Some(path) = self.state.selected_path() else {
             self.meta = DetailMeta::default();
@@ -1076,6 +1092,12 @@ impl App {
             AppEvent::Sessions { path, sessions } => {
                 // Release the guard even for a result the checks below drop.
                 self.sessions_in_flight.remove(&path);
+                // A failed scan still answers a jump: the cache is all there is.
+                if let Some(jump) = self.pending_jump.as_mut()
+                    && jump.path == path
+                {
+                    jump.sessions = true;
+                }
                 // A failed scan (None) keeps whatever the cache painted; an
                 // empty *successful* scan is real content and lands normally.
                 if let Some(mut sessions) = sessions
@@ -1092,6 +1114,7 @@ impl App {
                         self.redraw = true;
                     }
                 }
+                self.finish_jump();
             }
             AppEvent::LiveSessions { sessions } => {
                 self.live_scan_in_flight = false;
@@ -1110,6 +1133,10 @@ impl App {
                     self.live_sessions = fresh;
                     self.redraw = true;
                 }
+                if let Some(jump) = self.pending_jump.as_mut() {
+                    jump.live = true;
+                }
+                self.finish_jump();
             }
             AppEvent::SessionDeleted {
                 path,
@@ -4132,5 +4159,236 @@ mod tests {
         assert!(confirm.contains("Start Work: Issue #42"), "{confirm}");
         assert!(confirm.contains("gh issue view 42 --comments"), "{confirm}");
         assert!(confirm.contains("Launch"), "{confirm}");
+    }
+
+    // ------------------------------------------------- one work item, one worktree
+
+    /// Record on the fixture's worktree `name` that it was started for issue
+    /// `number`, as a launch would. Returns its id and path.
+    fn link_worktree(app: &mut App, name: &str, number: i64) -> (Uuid, String) {
+        let (id, path) = app.state.repositories()[0]
+            .worktrees
+            .iter()
+            .find(|w| w.name == name)
+            .map(|w| (w.id, w.path.clone()))
+            .expect("fixture worktree");
+        app.state.update_worktree(id, |w| {
+            w.work_item = Some(crate::models::WorkItemLink::Issue { number });
+        });
+        (id, path)
+    }
+
+    fn rendered(app: &mut App) -> String {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 50)).expect("terminal");
+        terminal
+            .draw(|frame| crate::ui::draw(frame, app))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        buffer
+            .content
+            .chunks(buffer.area.width as usize)
+            .map(|row| row.iter().map(|c| c.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn notified(app: &App) -> Vec<&str> {
+        app.notifications.iter().map(|n| n.text.as_str()).collect()
+    }
+
+    /// Pick issue #7 ("Crash on save") from the `issue` list.
+    fn pick_crash(app: &mut App) {
+        app.handle_key(key(KeyCode::Char('s')));
+        app.handle_key(key(KeyCode::Enter));
+        type_text(app, "crash");
+        app.handle_key(key(KeyCode::Enter));
+    }
+
+    fn two_issues() -> Vec<crate::models::GitHubIssue> {
+        vec![
+            open_issue(42, "Fix login bug"),
+            open_issue(7, "Crash on save"),
+        ]
+    }
+
+    #[tokio::test]
+    async fn an_issue_with_a_worktree_is_marked_in_the_list() {
+        let (_dir, mut app, _) = app_with_issues(two_issues());
+        link_worktree(&mut app, "beta", 7);
+
+        app.handle_key(key(KeyCode::Char('s')));
+        app.handle_key(key(KeyCode::Enter));
+
+        let picker = start_work(&app).picker.as_ref().expect("issues loaded");
+        let marks: Vec<_> = picker
+            .entries()
+            .map(|e| (e.issue.number, e.worktree.as_deref()))
+            .collect();
+        assert_eq!(marks, vec![(42, None), (7, Some("beta"))]);
+        let screen = rendered(&mut app);
+        let row = screen
+            .lines()
+            .find(|l| l.contains("#7 Crash on save"))
+            .expect("the issue is listed");
+        assert!(row.contains("→ beta"), "{row}");
+        let other = screen
+            .lines()
+            .find(|l| l.contains("#42 Fix login bug"))
+            .expect("the issue is listed");
+        assert!(!other.contains('→'), "{other}");
+    }
+
+    /// Picking a started item selects its worktree, closes the flow and
+    /// creates nothing. With no Claude running there, that is all it does.
+    #[tokio::test]
+    async fn picking_a_started_issue_jumps_to_its_worktree() {
+        let (_dir, mut app, _) = app_with_issues(two_issues());
+        let (beta, path) = link_worktree(&mut app, "beta", 7);
+        let worktrees = app.state.repositories()[0].worktrees.len();
+
+        pick_crash(&mut app);
+
+        assert!(app.modals.is_empty(), "no confirm screen: {:?}", app.modals);
+        assert!(
+            app.pending_issue.is_none(),
+            "no branch load for a confirm screen"
+        );
+        assert_eq!(app.state.selection.worktree_id, Some(beta));
+        assert_eq!(app.meta.path, path);
+        assert_eq!(app.state.repositories()[0].worktrees.len(), worktrees);
+        assert!(
+            notified(&app).contains(&"Issue #7 is already in worktree 'beta'"),
+            "{:?}",
+            notified(&app)
+        );
+
+        // Both scans answer: a session exists there, but none is running.
+        app.handle_event(AppEvent::Sessions {
+            path,
+            sessions: Some(vec![a_session("stopped")]),
+        });
+        app.handle_event(AppEvent::LiveSessions {
+            sessions: vec![a_live_window("somewhere-else")],
+        });
+
+        assert!(app.pending_jump.is_none(), "the jump is settled");
+        assert!(app.modals.is_empty(), "nothing is launched or offered");
+        assert_eq!(notified(&app).len(), 1, "{:?}", notified(&app));
+    }
+
+    /// A Claude running in one of our windows is switched to, once both the
+    /// worktree's sessions and the live map are in, and not before.
+    #[tokio::test]
+    async fn the_jump_switches_to_a_live_session_window() {
+        let (_dir, mut app, _) = app_with_issues(two_issues());
+        let (_, path) = link_worktree(&mut app, "beta", 7);
+
+        pick_crash(&mut app);
+        app.handle_event(AppEvent::Sessions {
+            path,
+            sessions: Some(vec![a_session("stopped"), a_session("running")]),
+        });
+        assert!(app.pending_jump.is_some(), "still waiting for the live map");
+
+        app.handle_event(AppEvent::LiveSessions {
+            sessions: vec![a_live_window("running")],
+        });
+
+        // Unit tests never reach tmux, so the switch reports the window as
+        // gone — which still shows it was aimed at the session's window.
+        assert!(
+            notified(&app).iter().any(|n| n.contains("claude:demo:wt")),
+            "{:?}",
+            notified(&app)
+        );
+        assert!(app.pending_jump.is_none());
+    }
+
+    /// One running outside this tmux session cannot be switched to; the jump
+    /// says where it is instead.
+    #[tokio::test]
+    async fn a_session_running_elsewhere_is_pointed_out() {
+        let (_dir, mut app, _) = app_with_issues(two_issues());
+        let (_, path) = link_worktree(&mut app, "beta", 7);
+
+        pick_crash(&mut app);
+        app.handle_event(AppEvent::LiveSessions {
+            sessions: vec![a_live_elsewhere("running", 4242)],
+        });
+        app.handle_event(AppEvent::Sessions {
+            path,
+            sessions: Some(vec![a_session("running")]),
+        });
+
+        assert!(
+            notified(&app).iter().any(|n| n.contains("pid 4242")),
+            "{:?}",
+            notified(&app)
+        );
+    }
+
+    /// Moving on before the scans land drops the jump: switching windows
+    /// out from under a selection the user has left would be a surprise.
+    #[tokio::test]
+    async fn a_jump_the_user_moved_away_from_does_not_switch() {
+        let (_dir, mut app, _) = app_with_issues(two_issues());
+        let (_, path) = link_worktree(&mut app, "beta", 7);
+
+        pick_crash(&mut app);
+        app.handle_key(key(KeyCode::Up));
+        app.handle_event(AppEvent::Sessions {
+            path,
+            sessions: Some(vec![a_session("running")]),
+        });
+        app.handle_event(AppEvent::LiveSessions {
+            sessions: vec![a_live_window("running")],
+        });
+
+        assert!(
+            !notified(&app).iter().any(|n| n.contains("claude:demo:wt")),
+            "{:?}",
+            notified(&app)
+        );
+    }
+
+    /// The link is not derived from names: renaming the worktree and its
+    /// branch keeps the item pointing at it.
+    #[tokio::test]
+    async fn the_jump_survives_a_rename() {
+        let (_dir, mut app, _) = app_with_issues(two_issues());
+        let (beta, _) = link_worktree(&mut app, "beta", 7);
+        app.state.update_worktree(beta, |w| {
+            w.name = "crash-hunt".into();
+            w.branch = "fix/crash-hunt".into();
+        });
+
+        pick_crash(&mut app);
+
+        assert!(app.modals.is_empty());
+        assert_eq!(app.state.selection.worktree_id, Some(beta));
+        assert!(
+            notified(&app).contains(&"Issue #7 is already in worktree 'crash-hunt'"),
+            "{:?}",
+            notified(&app)
+        );
+    }
+
+    /// An archived worktree still holds the work; the jump shows the archived
+    /// section so the cursor lands on a row rather than on nothing.
+    #[tokio::test]
+    async fn the_jump_reveals_an_archived_worktree() {
+        let (_dir, mut app, _) = app_with_issues(two_issues());
+        let (old, _) = link_worktree(&mut app, "old", 7);
+        assert!(!app.state.show_archived);
+
+        pick_crash(&mut app);
+
+        assert!(app.state.show_archived);
+        assert_eq!(app.state.selection.worktree_id, Some(old));
+        assert_eq!(
+            app.rows.get(app.sidebar_index).and_then(|row| row.ids()),
+            Some((app.state.repositories()[0].id, Some(old)))
+        );
     }
 }
