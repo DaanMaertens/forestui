@@ -1223,6 +1223,7 @@ impl App {
                 repo_id,
                 worktree,
                 first_prompt,
+                yolo,
             } => {
                 // The repository can be removed while git runs; dropping the
                 // result beats resurrecting an entry nothing owns.
@@ -1250,7 +1251,35 @@ impl App {
                 // Named after the worktree itself, with no prefix: the window,
                 // the session and the worktree carry one recognisable name.
                 if let Some(prompt) = first_prompt {
-                    self.start_claude(&path, None, false, None, Some(name), Some(&prompt));
+                    self.start_claude(&path, None, yolo, None, Some(name), Some(&prompt));
+                }
+            }
+            AppEvent::PromptEdited {
+                repo_id,
+                issue_number,
+                result,
+            } => {
+                // The screen the editor was opened from, still on top; any
+                // other has its own prompt, which this text is not.
+                let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last_mut() else {
+                    return;
+                };
+                if confirm.repo_id != repo_id || confirm.issue_number != issue_number {
+                    return;
+                }
+                match result {
+                    Ok(text) => {
+                        if !confirm.finish_edit(&text) {
+                            self.notify("Prompt left empty; kept as it was", Severity::Warning);
+                        }
+                    }
+                    Err(error) => {
+                        confirm.is_editing = false;
+                        self.notify(
+                            format!("Could not edit the prompt: {error}"),
+                            Severity::Error,
+                        );
+                    }
                 }
             }
             AppEvent::WorktreesScanned {
@@ -1958,6 +1987,7 @@ mod tests {
             repo_id,
             worktree: Box::new(worktree),
             first_prompt: None,
+            yolo: false,
         });
 
         assert!(app.state.find_worktree(worktree_id).is_some());
@@ -1997,6 +2027,7 @@ mod tests {
             repo_id,
             worktree: Box::new(worktree),
             first_prompt: None,
+            yolo: false,
         });
         let link = |app: &App| {
             app.state
@@ -2049,6 +2080,7 @@ mod tests {
             repo_id,
             worktree: Box::new(worktree),
             first_prompt: None,
+            yolo: false,
         });
 
         let last = app.notifications.last().expect("a toast");
@@ -2085,6 +2117,7 @@ mod tests {
             repo_id,
             worktree: Box::new(worktree),
             first_prompt: None,
+            yolo: false,
         });
 
         assert!(app.state.find_worktree(worktree_id).is_none());
@@ -4057,6 +4090,120 @@ mod tests {
         assert_eq!(base_branch.as_deref(), Some("origin/main"));
         assert_eq!(first_prompt, shown);
         assert!(first_prompt.contains("`issue-42-fix-login-bug-2`"));
+    }
+
+    fn confirm_screen_mut(app: &mut App) -> &mut crate::modal::StartWorkConfirmModal {
+        match app.modals.last_mut() {
+            Some(Modal::StartWorkConfirm(confirm)) => confirm,
+            other => panic!("the confirm screen expected, found {other:?}"),
+        }
+    }
+
+    /// Launch the confirm screen as it stands, asked of the modal directly:
+    /// through the app, the launch would go on to create a real worktree.
+    fn submitted(app: &mut App) -> crate::modal::ModalResult {
+        confirm_screen_mut(app).focus = crate::modal::StartWorkConfirmModal::FOCUS_LAUNCH;
+        let modal = app.modals.last_mut().expect("the confirm screen");
+        match modal.handle_key(key(KeyCode::Enter)) {
+            crate::modal::ModalOutcome::Submit(result) => result,
+            outcome => panic!("a launch expected, got {outcome:?}"),
+        }
+    }
+
+    /// Edit prompt hands the text to an editor; what comes back is what
+    /// Claude starts with, and no template is touched on the way.
+    #[tokio::test]
+    async fn an_edited_prompt_is_what_launches() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        walk_to_confirm(&mut app, "login");
+        let original = confirm_screen_mut(&mut app).prompt();
+        let repo_id = app.state.repositories()[0].id;
+
+        confirm_screen_mut(&mut app).focus = crate::modal::StartWorkConfirmModal::FOCUS_EDIT;
+        app.handle_key(key(KeyCode::Enter));
+        assert!(confirm_screen_mut(&mut app).is_editing);
+
+        // What the editor task delivers once the editor closes.
+        app.handle_event(AppEvent::PromptEdited {
+            repo_id,
+            issue_number: 42,
+            result: Ok("Only fix the login bug.\n\nNothing else.\n".into()),
+        });
+        let confirm = confirm_screen_mut(&mut app);
+        assert!(!confirm.is_editing);
+        assert_eq!(confirm.prompt(), "Only fix the login bug.\n\nNothing else.");
+
+        let crate::modal::ModalResult::WorktreeFromIssue { first_prompt, .. } = submitted(&mut app)
+        else {
+            panic!("a launch from the issue expected");
+        };
+        assert_eq!(first_prompt, "Only fix the login bug.\n\nNothing else.");
+
+        // The built-in template is what a fresh confirm screen fills again.
+        assert_eq!(
+            crate::work::WorkMode::Issue.template(),
+            crate::prompt::ISSUE_TEMPLATE
+        );
+        app.modals.clear();
+        walk_to_confirm(&mut app, "login");
+        assert_eq!(confirm_screen_mut(&mut app).prompt(), original);
+    }
+
+    /// A failed or emptied edit keeps the prompt the screen showed, and a
+    /// result for a confirm screen that has gone is dropped.
+    #[tokio::test]
+    async fn an_edit_that_fails_or_strays_changes_nothing() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        walk_to_confirm(&mut app, "login");
+        let original = confirm_screen_mut(&mut app).prompt();
+        let repo_id = app.state.repositories()[0].id;
+
+        for result in [Err("no editor".to_string()), Ok("  \n".to_string())] {
+            confirm_screen_mut(&mut app).is_editing = true;
+            app.handle_event(AppEvent::PromptEdited {
+                repo_id,
+                issue_number: 42,
+                result,
+            });
+            assert!(!confirm_screen_mut(&mut app).is_editing);
+            assert_eq!(confirm_screen_mut(&mut app).prompt(), original);
+        }
+
+        // Saved as it was: still the template, so it keeps following the
+        // name fields rather than freezing at the name it was opened with.
+        confirm_screen_mut(&mut app).is_editing = true;
+        app.handle_event(AppEvent::PromptEdited {
+            repo_id,
+            issue_number: 42,
+            result: Ok(format!("{original}\n")),
+        });
+        assert!(confirm_screen_mut(&mut app).edited_prompt.is_none());
+
+        app.handle_event(AppEvent::PromptEdited {
+            repo_id,
+            issue_number: 7,
+            result: Ok("Another issue's prompt".into()),
+        });
+        assert_eq!(confirm_screen_mut(&mut app).prompt(), original);
+    }
+
+    /// The yolo toggle starts off and reaches the launch when switched on.
+    #[tokio::test]
+    async fn the_yolo_toggle_reaches_the_launch() {
+        let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+        walk_to_confirm(&mut app, "login");
+        let crate::modal::ModalResult::WorktreeFromIssue { yolo, .. } = submitted(&mut app) else {
+            panic!("a launch from the issue expected");
+        };
+        assert!(!yolo, "yolo is off by default");
+
+        confirm_screen_mut(&mut app).focus = crate::modal::StartWorkConfirmModal::FOCUS_YOLO;
+        app.handle_key(key(KeyCode::Char(' ')));
+        assert!(confirm_screen_mut(&mut app).yolo);
+        let crate::modal::ModalResult::WorktreeFromIssue { yolo, .. } = submitted(&mut app) else {
+            panic!("a launch from the issue expected");
+        };
+        assert!(yolo);
     }
 
     /// With a cold cache the mode step opens at once and the issue list fills

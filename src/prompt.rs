@@ -1,6 +1,8 @@
 //! Prompt templates: the text that, with a work item filled in, becomes
 //! Claude's first prompt.
 
+use std::path::Path;
+
 /// The built-in `issue` template, used until templates become editable files.
 pub const ISSUE_TEMPLATE: &str = include_str!("../assets/prompts/issue.md");
 
@@ -60,6 +62,25 @@ pub fn fill(template: &str, vars: &TemplateVars<'_>) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Let `edit` change `text` through a file, and return what it left there.
+///
+/// The file lives in the system temp dir, never in the worktree, so an edit
+/// cannot show up as a change there or be committed by Claude; and it is
+/// removed whatever `edit` reports. The text stays with the caller: nothing
+/// here writes back to a template, so an edit applies to one launch only.
+pub fn edit_via_file(
+    text: &str,
+    edit: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<String, String> {
+    let path = std::env::temp_dir().join(format!("forestui-prompt-{}.md", uuid::Uuid::new_v4()));
+    std::fs::write(&path, text).map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    let edited = edit(&path).and_then(|()| {
+        std::fs::read_to_string(&path).map_err(|e| format!("could not read the prompt back: {e}"))
+    });
+    let _ = std::fs::remove_file(&path);
+    edited
 }
 
 #[cfg(test)]
@@ -139,5 +160,32 @@ mod tests {
         assert!(prompt.contains("write a plan"), "{prompt}");
         assert!(prompt.contains("approved the plan"), "{prompt}");
         assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
+    }
+
+    /// The editor sees the prompt in a file outside any worktree, what it
+    /// saves comes back, and the file is gone afterwards.
+    #[test]
+    fn an_edit_round_trips_through_a_temp_file() {
+        let mut seen = None;
+        let edited = edit_via_file("Work on issue 3", |path| {
+            seen = Some(path.to_path_buf());
+            assert!(path.starts_with(std::env::temp_dir()), "{}", path.display());
+            assert_eq!(std::fs::read_to_string(path).unwrap(), "Work on issue 3");
+            std::fs::write(path, "Work on issue 3, carefully\n").map_err(|e| e.to_string())
+        });
+        assert_eq!(edited.as_deref(), Ok("Work on issue 3, carefully\n"));
+        let seen = seen.expect("the editor ran");
+        assert!(!seen.exists(), "{} left behind", seen.display());
+    }
+
+    #[test]
+    fn a_failed_edit_still_removes_the_file() {
+        let mut seen = None;
+        let edited = edit_via_file("Work on issue 3", |path| {
+            seen = Some(path.to_path_buf());
+            Err("no editor".to_string())
+        });
+        assert_eq!(edited, Err("no editor".to_string()));
+        assert!(!seen.expect("the editor ran").exists());
     }
 }
