@@ -1,0 +1,80 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work: Issue #326                                                     │
+                              │                                                                              │
+                              │  Fansly conversation discovery has no backoff                                │
+                              │  Worktree Name                                                               │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │issue-326-fansly-conversation-discovery-has-no-bac                      │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  Path: <ROOT>/forest/beta/issue-326-fansly-conversation-disc  │
+                              │  Branch Name                                                                 │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │fix/issue-326-fansly-conversation-discovery-has-no-bac                  │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │  Base Branch                                                                 │
+                              │  ┌────────────────────────────────────────────────────────────────────────┐  │
+                              │  │main                                                                    │  │
+                              │  └────────────────────────────────────────────────────────────────────────┘  │
+                              │                                                                              │
+                              │  ┌────────┐ ┌───────────────────────────────┐                                │
+                              │  │ Fetch  │ │ [x] Pull repo before creating │                                │
+                              │  └────────┘ └───────────────────────────────┘                                │
+                              │  Prompt                                                                      │
+                              │   Work on GitHub issue #326: Fansly conversation discovery has no backoff    │
+                              │                                                                              │
+                              │   Start by reading it with `gh issue view 326 --comments`, so you have its   │
+                              │   current text and every comment.                                            │
+                              │                                                                              │
+                              │   You are in the `issue-326-fansly-conversation-discovery-has-no-bac`        │
+                              │   worktree of beta, on the branch                                            │
+                              │   `fix/issue-326-fansly-conversation-discovery-has-no-bac`.                  │
+                              │                                                                              │
+                              │   Investigate the cause and propose a fix before changing any code. Wait     │
+                              │   for my go-ahead, then implement it.                                        │
+                              │                                                                              │
+                              │                            ┌────────┐ ┌────────┐                             │
+                              │                            │ Launch │ │ Cancel │                             │
+                              │                            └────────┘ └────────┘                             │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

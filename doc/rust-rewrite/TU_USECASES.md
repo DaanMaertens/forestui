@@ -887,7 +887,7 @@ the file is written somewhere other than `$HOME/.config/forestui/settings.json`.
 **Expected:** no `Settings saved` toast; the file is unchanged (or still absent).
 `Escape` is bound to `action_cancel` on **every** modal
 (`AddRepository`, `AddWorktree`, `Settings`, `ConfirmDelete`,
-`CreateWorktreeFromIssue`, `CustomButtons`, `CustomButtonEdit`).
+`StartWorkConfirm`, `CustomButtons`, `CustomButtonEdit`).
 **Fails if:** `Escape` saves, or does not close the modal.
 
 ---
@@ -945,23 +945,27 @@ window name.
 
 ---
 
-### UC-38 — Create worktree from a GitHub issue
+### UC-38 — Start work from a GitHub issue card
 **Area:** Modals | **Priority:** P2 | ⚪ SOURCE
 **Setup:** requires a **real** authenticated `gh` and a GitHub repo with an open
 issue assigned to or authored by the user. Cannot run under the isolated `HOME`;
 run it as an opt-in tier with `--env HOME=$REAL_HOME` and a scratch clone.
+UC-102 covers the same path against the sweep's `gh` stub.
 **Steps:**
 1. Select the repo, wait for `MY OPEN GITHUB ISSUES` to populate.
-2. `tu mouse click --name fui --on-text "Create WT"`; `sleep 2`; `tu screenshot --name fui`
+2. `tu mouse click --name fui --on-text "Start work" --match-index 1` (index 0 is
+   the pane's own Start work); `sleep 2`; `tu screenshot --name fui`
 
-**Expected:** modal title `Create Worktree from Issue #<n>`; name pre-filled
-`<n>-<slugified-title-truncated-to-40>`; branch pre-filled
-`<branch_prefix><that name>`; base branch defaults to `<remote>/<current branch>` if
-that ref exists, else the local current branch; `Pull repo before creating` checked;
-a `Fetch` button that spins `| / - \` at 10Hz while `git fetch` runs and refreshes
-the suggester afterwards.
-**Fails if:** the branch slug differs (`[^a-z0-9]+` → `-`, first 40 chars, trimmed of
-`-`), or the base-branch preference order is wrong.
+**Expected:** Start work's confirm screen, with no mode or item step before it,
+titled `Start Work: Issue #<n>` — or `Feature #<n>` when the issue carries a
+feature label (`enhancement`). Name, branch and prompt follow that mode
+(UC-99/UC-100); the base branch defaults to the remote's default branch;
+`Pull repo before creating` is ticked; `Fetch` spins `| / - \` at 10Hz while
+`git fetch` runs and refreshes the suggester afterwards. Its dismiss button
+reads `Cancel`, since nothing is beneath it. An issue that already has a
+worktree jumps there instead (UC-101).
+**Fails if:** a card still reads `Create WT`, the mode or item step shows, the
+mode ignores the labels, or a started issue opens the confirm screen.
 
 ---
 
@@ -1658,6 +1662,19 @@ With no Claude running there the worktree is only selected; one running
 outside forestui's tmux session is named by pid instead.
 **Fails if:** the row is unmarked, the confirm screen opens, a second worktree
 appears in the config, or the window does not switch.
+
+### UC-102 — An issue card's Start work
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** after UC-101, click beta's sidebar row, grow the terminal to 140x80
+so the issue cards are on screen, then click the first card's `Start work`
+(#326). `Escape`, then click `#77`'s card's `Start work`.
+**Expected:** every card carries `Start work`; none reads `Create WT`. #326's
+opens the confirm screen directly, titled `Start Work: Issue #326` — no
+`Work Mode` step — and `Escape` closes it. #77 was started in UC-100, so its
+card jumps to that worktree's Claude window instead, and no worktree is
+created. That #77 would otherwise open as a feature is unit-tested.
+**Fails if:** a card reads `Create WT`, the mode step shows, the confirm
+screen does not open, or the started issue is not jumped to.
 
 ---
 

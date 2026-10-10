@@ -898,7 +898,7 @@ impl StartWorkModal {
 /// Start work's confirm screen: the worktree an issue will start in, the
 /// base it branches from, and the prompt Claude will be started with.
 ///
-/// Also opened directly by an issue card's Create WT, with nothing beneath it.
+/// Also opened directly by an issue card's Start work, with nothing beneath it.
 #[derive(Debug)]
 pub struct StartWorkConfirmModal {
     pub repo_id: Uuid,

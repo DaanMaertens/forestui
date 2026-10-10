@@ -112,7 +112,7 @@ chmod +x "$ROOT/bin/claude"
 
 # A `gh` that answers the four calls both builds make. Without it the GitHub
 # section renders "No issues found" on both sides and the issue rows — card,
-# title, labels, Create WT button — go uncompared, which is exactly how the
+# title, labels, Start work button — go uncompared, which is exactly how the
 # session cards stayed unexamined for so long.
 cat > "$ROOT/bin/gh" <<'GH'
 #!/bin/sh
@@ -765,6 +765,36 @@ if [ "$LABEL" = "rust" ]; then
     "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
   focus_app
   assert UC-101 worktree-selected "yes" "$(screen_has 'Worktree: +feat-77')"
+fi
+
+# --- UC-102: an issue card's Start work ---------------------------------------
+#
+# Rust only, after UC-101. The cards sit below the fold, so the terminal grows
+# as in UC-96. Start work matches in screen order: the pane's own button
+# first, then one per card, newest issue first — #326, #298, #77.
+if [ "$LABEL" = "rust" ]; then
+  focus_app
+  tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
+  await "Repository: beta"
+  tu resize --name "$SESS" 140x80 >/dev/null 2>&1
+  await "#77 Dark mode"; sleep 1
+  worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+  capture UC-102 issue-card-start-work
+  assert UC-102 card-offers-start-work "no" "$(screen_has 'Create WT')"
+  tu mouse click --name "$SESS" --on-text "Start work" --match-index 1 >/dev/null 2>&1
+  await "Launch"; sleep 0.8
+  capture UC-102 issue-card-confirm
+  assert UC-102 straight-to-confirm "yes" "$(screen_has 'Start Work: Issue #326')"
+  assert UC-102 mode-step-skipped "no" "$(screen_has 'Work Mode')"
+  press Escape; sleep 1
+  assert UC-102 cancel-closes-it "no" "$(screen_has 'Launch')"
+  # #77 was started in UC-100: its card jumps rather than confirming.
+  tu mouse click --name "$SESS" --on-text "Start work" --match-index 3 >/dev/null 2>&1
+  await "claude stub" 15000; sleep 1
+  assert UC-102 started-card-jumps "yes" "$(screen_has '[0-9]:feat-77[^ ]*\*')"
+  assert UC-102 nothing-created "$worktrees_before" \
+    "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+  tu resize --name "$SESS" 140x44 >/dev/null 2>&1
 fi
 
 echo "done: $LABEL"
