@@ -205,12 +205,19 @@ the fold, not the task: a result the fold drops must not be announced.
 change, focus return, a 30s sweep) and the fold adopts, prunes and
 branch-corrects via `AppState::reconcile_worktrees` — the config only
 annotates worktrees (name, archived flag, sort order). A scan result is a
-*snapshot*, so it must never outrank a fresher mutation: results carry the
-repository's mutation epoch and fold as stale when a create/remove/rename
-folded in between, and entries in `removals_in_flight` / `renames_in_flight`
-are excluded from reconciliation entirely. Any new worktree-mutating flow must
-bump the epoch in its fold and, if it has a mid-flight window a listing could
-misread, register itself in an in-flight set.
+*snapshot*, so it must never outrank a fresher mutation. `app/worktree_sync.rs`
+owns that rule: a scan starts with a `ScanTicket`, and handing the ticket back
+with the listing says whether to ignore it (stale, or a create running on that
+repository), keep state (git could not list), or reconcile it while leaving
+the worktrees with a change in flight alone.
+
+**Every worktree-mutating flow goes through `WorktreeSync`.** Starting the
+change returns a change ticket — or nothing, if the worktree already has a
+change running, since a worktree takes one change at a time — the task carries
+it in its result event, and the fold hands it back. Finishing always moves the
+repository's epoch on, success or not, so every exit path of the task must
+send an event that carries the ticket; a path that only toasts leaves the
+change in flight for good.
 
 **The tick must earn its repaints.** Ticks arrive ten times a second; an idle
 frame repaints once a second (matching the second granularity of the relative
@@ -590,8 +597,8 @@ proactively, not only when asked.
 scenarios with exact keystrokes and expected output. The P0 cases are the
 regression suite — run the relevant ones after any behavioural change.
 
-UC-53–70 (except the retired UC-59), the flow cases UC-78–84/86/99–102, and the
-guards UC-90/96 are automated —
+UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–102,
+and the guards UC-90/96 are automated —
 frames plus on-disk assertions (`ASSERTIONS.txt`). Capture a build and compare
 two builds with:
 
