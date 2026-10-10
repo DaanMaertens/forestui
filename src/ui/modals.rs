@@ -1602,7 +1602,10 @@ mod tests {
         let short = render(&confirm_modal(), 120, 36);
         assert!(short.contains("gh issue view 42"), "{short}");
         assert!(short.contains('…'), "{short}");
-        assert!(short.contains("Launch"), "the buttons stay on screen: {short}");
+        assert!(
+            short.contains("Launch"),
+            "the buttons stay on screen: {short}"
+        );
     }
 
     #[test]
