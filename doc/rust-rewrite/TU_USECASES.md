@@ -1644,8 +1644,10 @@ the link is missing from the config, or the window carries a mode prefix.
 ### UC-100 — Start work for a feature
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
 **Steps:** after UC-99, with beta still selected, `s` → `Down` `Enter` (mode
-`feature`) → `Enter` (issue #77) → `Enter` (Launch).
-**Expected:** the item step lists only `#77 Dark mode for the dashboard`, the
+`feature`) → `Down` `Enter` (issue #77, below the free-text entry) → `Enter`
+(Launch).
+**Expected:** the item step lists `✎ Free-text feature…` first (UC-103), then
+only `#77 Dark mode for the dashboard`, the
 one issue labelled `enhancement`; `#326` and `#298` are not in it. The confirm
 screen is titled `Start Work: Feature #77`, names the worktree
 `feat-77-dark-mode-for-the-dashboard` on
@@ -1660,7 +1662,7 @@ otherwise, the prompt is the `issue` template, or the link is missing.
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
 **Steps:** after UC-100, with feat-77's Claude still running in its window,
 `Up` (move the selection off the feature worktree) → `s` → `Down` `Enter`
-(mode `feature`) → `Enter` (issue #77).
+(mode `feature`) → `Down` `Enter` (issue #77).
 **Expected:** the item step marks the row
 `#77 Dark mode for the dashboard  → feat-77-dark-mode-for-the-dashboard`.
 Picking it opens no confirm screen and creates nothing: Start work closes, the
@@ -1684,6 +1686,31 @@ card jumps to that worktree's Claude window instead, and no worktree is
 created. That #77 would otherwise open as a feature is unit-tested.
 **Fails if:** a card reads `Create WT`, the mode step shows, the confirm
 screen does not open, or the started issue is not jumped to.
+
+### UC-103 — Start work for a free-text feature
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** after UC-102, click beta's sidebar row, `s` → `Down` `Enter` (mode
+`feature`) → `Enter` (`✎ Free-text feature…`, first in the list) → type
+`Try a quick spike on caching` → `Enter` → `Enter` (Launch). Then the same
+again up to the second `Enter` on the description, and `Escape` four times.
+**Expected:** the description step previews
+`Worktree: feat-try-a-quick-spike-on-caching`. The confirm screen is titled
+`Start Work: Free-text feature`, names the worktree
+`feat-try-a-quick-spike-on-caching` on
+`feat/feat-try-a-quick-spike-on-caching`, and its prompt carries the
+description itself and no `gh issue view`. Launch creates the worktree on that
+branch and records
+`{"kind": "free_text", "description": "Try a quick spike on caching"}` as its
+`work_item`; nothing is created on GitHub. The second run does not jump to that
+worktree — free text is never matched by its link — but asks, because the name
+is taken: `Open existing`, `Create copy` (naming
+`feat-try-a-quick-spike-on-caching-2`) and `Edit name`, exactly those three.
+Each `Escape` steps back one screen and nothing is created. What each choice
+does, and that a repository without a GitHub remote offers only this mode with
+`issue` greyed out as `(needs GitHub)`, are unit-tested.
+**Fails if:** the free-text entry is not first, the worktree or branch is
+named otherwise, the prompt points at an issue, the link is missing, or the
+second run opens a confirm screen or jumps instead of asking.
 
 ---
 

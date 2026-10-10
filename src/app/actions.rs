@@ -5,18 +5,18 @@
 //! `EventTx`; results come back as events, and only the main loop ever
 //! writes the state file.
 
-use super::{Action, App, Field, PendingJump};
+use super::{Action, App, Field, PendingJump, PendingStart};
 use crate::event::Severity;
 use crate::event::{AppEvent, BranchList, BranchTarget, EventTx};
 use crate::modal::{
-    AddWorktreeModal, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult,
+    AddWorktreeModal, Clash, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult,
     StartWorkConfirmModal, StartWorkModal,
 };
 use crate::modal::{IntegrationAction, ModalOutcome};
 use crate::models::{CustomClaudeButton, GitHubIssue, Repository, WorkItemLink, Worktree};
 use crate::services::live::LivePlace;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
-use crate::work::{self, WorkMode};
+use crate::work::{self, WorkItem, WorkMode};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -67,7 +67,7 @@ impl App {
                 // An issue picked just before closing must not open its
                 // confirm screen over nothing once the branches arrive.
                 if matches!(closed, Some(Modal::StartWork(_))) {
-                    self.pending_issue = None;
+                    self.pending_start = None;
                 }
                 // The integration dialog installs and removes the plugin, so
                 // the Settings section that opened it has to re-read the status
@@ -145,11 +145,26 @@ impl App {
                 let repo_id = flow.repo_id;
                 self.start_work_on_issue(repo_id, *issue, mode);
             }
+            ModalEffect::ConfirmFreeText { description, copy } => {
+                let Some(Modal::StartWork(flow)) = self.modals.last() else {
+                    return;
+                };
+                let repo_id = flow.repo_id;
+                self.start_free_text(repo_id, description, copy);
+            }
+            ModalEffect::OpenWorktree(worktree_id) => {
+                let Some(Modal::StartWork(flow)) = self.modals.last() else {
+                    return;
+                };
+                let repo_id = flow.repo_id;
+                // Chosen by the user, so there is nothing to tell them.
+                self.jump_to_worktree(repo_id, worktree_id, None);
+            }
             ModalEffect::EditPrompt(text) => {
                 let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last() else {
                     return;
                 };
-                let (repo_id, issue_number) = (confirm.repo_id, confirm.issue_number);
+                let (repo_id, link) = (confirm.repo_id, confirm.item.link());
                 let editor = self.prompt_editor();
                 let tx = self.tx.clone();
                 tokio::spawn(async move {
@@ -162,7 +177,7 @@ impl App {
                     .unwrap_or_else(|_| Err("the editor task panicked".to_string()));
                     tx.send(AppEvent::PromptEdited {
                         repo_id,
-                        issue_number,
+                        link,
                         result,
                     });
                 });
@@ -190,9 +205,9 @@ impl App {
                 branch,
                 new_branch,
             } => self.create_worktree(repo_id, name, branch, new_branch, None, false, None),
-            ModalResult::WorktreeFromIssue {
+            ModalResult::WorktreeForWorkItem {
                 repo_id,
-                issue_number,
+                link,
                 name,
                 branch,
                 pull_first,
@@ -204,9 +219,7 @@ impl App {
                 // the confirm screen has nothing more to offer.
                 self.modals.retain(|m| !matches!(m, Modal::StartWork(_)));
                 let start = WorkStart {
-                    link: WorkItemLink::Issue {
-                        number: issue_number,
-                    },
+                    link,
                     first_prompt,
                     yolo,
                 };
@@ -449,7 +462,7 @@ impl App {
                     ))));
             }
             BranchTarget::StartWorkConfirm => {
-                let Some((issue, mode)) = self.pending_issue.take() else {
+                let Some(start) = self.pending_start.take() else {
                     return;
                 };
                 let Some(repo) = self.state.find_repository(repo_id) else {
@@ -466,8 +479,9 @@ impl App {
                 self.modals.push(Modal::StartWorkConfirm(Box::new(
                     StartWorkConfirmModal::new(
                         repo,
-                        mode,
-                        &issue,
+                        start.mode,
+                        start.item,
+                        start.names,
                         list,
                         settings_service::get_forest_path(),
                         has_parent,
@@ -498,28 +512,69 @@ impl App {
         };
         if let Some(worktree) = self.state.linked_worktree(repo_id, &link) {
             let worktree_id = worktree.id;
-            self.jump_to_worktree(repo_id, worktree_id, issue.number);
+            let notice = format!(
+                "Issue #{} is already in worktree '{}'",
+                issue.number, worktree.name
+            );
+            self.jump_to_worktree(repo_id, worktree_id, Some(notice));
             return;
         }
-        self.pending_issue = Some((issue, mode));
+        self.pending_start = Some(PendingStart {
+            mode,
+            names: work::names(mode, issue.number, &issue.title),
+            item: WorkItem::from_issue(&issue),
+        });
         self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
     }
 
-    /// Go to the worktree an issue was already started in, closing Start work.
+    /// Start work on a free-text feature: the confirm screen once the
+    /// branches load. Its link is never looked up — a description is not an
+    /// identity, and the same words may well mean new work. What can collide
+    /// is the names: then the flow asks, and `copy` is its answer to take the
+    /// next free suffix.
+    fn start_free_text(&mut self, repo_id: Uuid, description: String, copy: bool) {
+        let Some(repo) = self.state.find_repository(repo_id) else {
+            return;
+        };
+        let Some(names) = work::free_text_names(&description) else {
+            return;
+        };
+        let worktrees = &repo.worktrees;
+        let copy_names = work::first_free_copy(&names, |n| work::clash(n, worktrees).is_some());
+        let names = if copy {
+            copy_names
+        } else if let Some(existing) = work::clash(&names, worktrees) {
+            let clash = Clash {
+                worktree_id: existing.id,
+                worktree_name: existing.name.clone(),
+                copy_name: copy_names.worktree,
+            };
+            if let Some(Modal::StartWork(flow)) = self.modals.last_mut() {
+                flow.ask_clash(clash);
+            }
+            return;
+        } else {
+            names
+        };
+        self.pending_start = Some(PendingStart {
+            mode: WorkMode::Feature,
+            item: WorkItem::FreeText { description },
+            names,
+        });
+        self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
+    }
+
+    /// Go to a worktree the work was already started in, closing Start work.
     ///
     /// Selecting it loads its sessions and rescans the live map; once both
     /// have answered, [`Self::finish_jump`] switches to a running Claude there.
     /// With none running the worktree is only selected — which session to
     /// resume is the user's call, and relaunching would resend the prompt.
-    fn jump_to_worktree(&mut self, repo_id: Uuid, worktree_id: Uuid, number: i64) {
+    fn jump_to_worktree(&mut self, repo_id: Uuid, worktree_id: Uuid, notice: Option<String>) {
         let Some((_, worktree)) = self.state.find_worktree(worktree_id) else {
             return;
         };
-        let (name, path, archived) = (
-            worktree.name.clone(),
-            worktree.path.clone(),
-            worktree.is_archived,
-        );
+        let (path, archived) = (worktree.path.clone(), worktree.is_archived);
         self.modals.retain(|m| !matches!(m, Modal::StartWork(_)));
         // Reveal the row, as the create fold does, or the cursor would point
         // at nothing.
@@ -536,10 +591,9 @@ impl App {
             sessions: false,
             live: false,
         });
-        self.notify(
-            format!("Issue #{number} is already in worktree '{name}'"),
-            Severity::Information,
-        );
+        if let Some(notice) = notice {
+            self.notify(notice, Severity::Information);
+        }
     }
 
     /// Complete a jump once the worktree's sessions and the live map have
@@ -616,6 +670,18 @@ impl App {
         let cached = github::peek_issues(&path);
         let modal = StartWorkModal::new(repo, cached.as_ref().map(|(issues, _)| issues.clone()));
         self.modals.push(Modal::StartWork(Box::new(modal)));
+        // Asked on every open rather than cached: a remote can be added or
+        // `gh repo set-default` run between two opens, and nobody waits on
+        // the answer — the modes stay usable until it says otherwise.
+        let tx = self.tx.clone();
+        let probe_path = path.clone();
+        tokio::spawn(async move {
+            let is_github = github::get_repo_info(&probe_path).await.is_some();
+            tx.send(AppEvent::GitHubChecked {
+                path: probe_path,
+                is_github,
+            });
+        });
         if !matches!(cached, Some((_, true))) {
             self.fetch_issues_for(path);
         }

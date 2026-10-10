@@ -16,7 +16,7 @@ use crate::picker::SearchPicker;
 use crate::prompt;
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
 use crate::util;
-use crate::work::{self, IssueEntry, WorkMode};
+use crate::work::{self, ItemEntry, WorkItem, WorkMode, WorktreeNames};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -61,6 +61,12 @@ pub enum ModalEffect {
     /// Start work picked an issue in a work mode: load the branches and open
     /// the confirm screen for it on top of the picker.
     ConfirmIssue(Box<GitHubIssue>, WorkMode),
+    /// Start work was given a free-text feature: open the confirm screen for
+    /// it — asking first if its names are taken, unless this is the answer
+    /// to that question (`copy`), which takes the next free suffix instead.
+    ConfirmFreeText { description: String, copy: bool },
+    /// The clash question's "open existing": go to that worktree.
+    OpenWorktree(Uuid),
     /// Open the confirm screen's prompt in an editor; the text comes back as
     /// [`crate::event::AppEvent::PromptEdited`].
     EditPrompt(String),
@@ -167,9 +173,10 @@ pub enum ModalResult {
         branch: String,
         new_branch: bool,
     },
-    WorktreeFromIssue {
+    WorktreeForWorkItem {
         repo_id: Uuid,
-        issue_number: i64,
+        /// What the worktree records it was started for.
+        link: WorkItemLink,
         name: String,
         branch: String,
         pull_first: bool,
@@ -668,14 +675,29 @@ impl AddWorktreeModal {
 // -------------------------------------------------------------------- Start work
 
 /// Which step of Start work is on screen. The confirm screen is a modal of
-/// its own, pushed on top, so Esc there lands back on the item step.
+/// its own, pushed on top, so Esc there lands back on the step before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartWorkStep {
     Mode,
     Item,
+    /// Typing a free-text feature's description.
+    Describe,
+    /// The description's names are taken: open that worktree, make a
+    /// numbered copy, or go back and edit.
+    Clash,
 }
 
-/// Start work's first two steps: choose a work mode, then a work item.
+/// The worktree a free-text feature's names collided with.
+#[derive(Debug, Clone)]
+pub struct Clash {
+    pub worktree_id: Uuid,
+    pub worktree_name: String,
+    /// The worktree name a copy would take, so the dialog can say what it makes.
+    pub copy_name: String,
+}
+
+/// Start work's steps before the confirm screen: choose a work mode, then a
+/// work item — or describe a free-text feature.
 #[derive(Debug)]
 pub struct StartWorkModal {
     pub repo_id: Uuid,
@@ -685,10 +707,20 @@ pub struct StartWorkModal {
     pub step: StartWorkStep,
     /// The highlighted mode on the mode step, and the chosen one after it.
     pub mode: WorkMode,
+    /// Whether `gh` resolves a GitHub repository for the checkout. `None`
+    /// until the probe answers, and treated as yes meanwhile: nearly every
+    /// repository has one, and greying its modes out for the length of a
+    /// `gh` call would flash on every open.
+    pub github: Option<bool>,
     /// Every loaded issue; the picker holds the ones `mode` lists.
     issues: Option<Vec<GitHubIssue>>,
-    /// The issues `mode` lists. `None` while the issues are still loading.
-    pub picker: Option<SearchPicker<IssueEntry>>,
+    /// The rows `mode` lists. `None` while the issues are still loading.
+    pub picker: Option<SearchPicker<ItemEntry>>,
+    /// A free-text feature's description, kept across Back so an edit after
+    /// a clash starts from what was typed.
+    pub description: TextInput,
+    /// Set on the clash step.
+    pub clash: Option<Clash>,
     /// Issue number → the worktree already started for it, as the flow
     /// opened. Only marks the list: picking an item checks the live state.
     linked: HashMap<i64, String>,
@@ -699,11 +731,15 @@ pub struct StartWorkModal {
 impl StartWorkModal {
     /// The mode list on the mode step; the query and its results on the item
     /// step, which share one focus stop so typing and Up/Down both work
-    /// without tabbing between them.
+    /// without tabbing between them; the description on the describe step.
     pub const FOCUS_LIST: usize = 0;
-    /// Only on the item step.
+    /// Only on the item and describe steps.
     pub const FOCUS_BACK: usize = 1;
     pub const FOCUS_CANCEL: usize = 2;
+    /// The clash step's three answers.
+    pub const FOCUS_OPEN: usize = 3;
+    pub const FOCUS_COPY: usize = 4;
+    pub const FOCUS_EDIT: usize = 5;
 
     pub fn new(repo: &Repository, issues: Option<Vec<GitHubIssue>>) -> Self {
         let mut modal = Self {
@@ -712,8 +748,11 @@ impl StartWorkModal {
             repo_path: repo.source_path.clone(),
             step: StartWorkStep::Mode,
             mode: WorkMode::Issue,
+            github: None,
             issues: None,
             picker: None,
+            description: TextInput::new("").with_placeholder("Describe the feature..."),
+            clash: None,
             linked: repo
                 .worktrees
                 .iter()
@@ -728,6 +767,57 @@ impl StartWorkModal {
             modal.set_issues(issues);
         }
         modal
+    }
+
+    pub fn has_github(&self) -> bool {
+        self.github != Some(false)
+    }
+
+    /// Whether `mode` can be picked here: it exists, and either the
+    /// repository is on GitHub or the mode needs nothing from it — only
+    /// `feature` does, through its free-text entry.
+    pub fn mode_enabled(&self, mode: WorkMode) -> bool {
+        mode.is_enabled() && (self.has_github() || mode == WorkMode::Feature)
+    }
+
+    /// Take the probe's answer. A repository found not to be on GitHub moves
+    /// off any mode it can no longer offer — even mid-list, if the answer
+    /// was slower than the user — and drops the issues from its list.
+    pub fn set_github(&mut self, is_github: bool) {
+        self.github = Some(is_github);
+        // A yes is what the flow assumed all along: nothing on screen
+        // changes, and rebuilding the list would drop a half-typed query.
+        if is_github {
+            return;
+        }
+        if !self.mode_enabled(self.mode) {
+            self.mode = WorkMode::Feature;
+        }
+        self.picker = None;
+        self.fill_picker();
+    }
+
+    /// Where Esc and Back go from the describe step: the list the free-text
+    /// entry was picked from, or the modes when there was no list to show.
+    fn before_describe(&self) -> StartWorkStep {
+        if self.has_github() {
+            StartWorkStep::Item
+        } else {
+            StartWorkStep::Mode
+        }
+    }
+
+    /// Ask what to do about a taken slug.
+    pub fn ask_clash(&mut self, clash: Clash) {
+        self.clash = Some(clash);
+        self.go_to(StartWorkStep::Clash);
+        self.focus = Self::FOCUS_OPEN;
+    }
+
+    /// The description as it would be recorded: trimmed, so stray spaces do
+    /// not make two links for the same words.
+    fn typed_description(&self) -> String {
+        self.description.value().trim().to_string()
     }
 
     /// Fill the item list once the issues have loaded. Issues already loaded
@@ -751,16 +841,16 @@ impl StartWorkModal {
     }
 
     fn fill_picker(&mut self) {
-        let Some(issues) = self.issues.as_deref() else {
-            return;
+        // Without GitHub there are no issues to wait for: the list is the
+        // free-text entry alone.
+        let issues = match (self.has_github(), self.issues.as_deref()) {
+            (false, _) => &[][..],
+            (true, Some(issues)) => issues,
+            (true, None) => return,
         };
-        let entries = work::issues_for(self.mode, issues, work::DEFAULT_FEATURE_LABELS)
-            .into_iter()
-            .map(|issue| {
-                let worktree = self.linked.get(&issue.number).cloned();
-                IssueEntry::new(issue, worktree)
-            })
-            .collect();
+        let entries = work::item_entries(self.mode, issues, work::DEFAULT_FEATURE_LABELS, |n| {
+            self.linked.get(&n).cloned()
+        });
         self.picker = Some(SearchPicker::new(
             entries,
             "Type a number or part of a title...",
@@ -771,7 +861,10 @@ impl StartWorkModal {
     pub fn ring(&self) -> &'static [usize] {
         match self.step {
             StartWorkStep::Mode => &[Self::FOCUS_LIST, Self::FOCUS_CANCEL],
-            StartWorkStep::Item => &[Self::FOCUS_LIST, Self::FOCUS_BACK, Self::FOCUS_CANCEL],
+            StartWorkStep::Item | StartWorkStep::Describe => {
+                &[Self::FOCUS_LIST, Self::FOCUS_BACK, Self::FOCUS_CANCEL]
+            }
+            StartWorkStep::Clash => &[Self::FOCUS_OPEN, Self::FOCUS_COPY, Self::FOCUS_EDIT],
         }
     }
 
@@ -786,7 +879,7 @@ impl StartWorkModal {
         match self.step {
             StartWorkStep::Mode => {
                 if let Some(mode) = WorkMode::ALL.get(row).copied()
-                    && mode.is_enabled()
+                    && self.mode_enabled(mode)
                 {
                     self.set_mode(mode);
                 }
@@ -796,6 +889,7 @@ impl StartWorkModal {
                     picker.select_row(row);
                 }
             }
+            StartWorkStep::Describe | StartWorkStep::Clash => {}
         }
     }
 
@@ -816,7 +910,7 @@ impl StartWorkModal {
                 return;
             }
             position = next as usize;
-            if modes[position].is_enabled() {
+            if self.mode_enabled(modes[position]) {
                 self.set_mode(modes[position]);
                 return;
             }
@@ -842,8 +936,8 @@ impl StartWorkModal {
         if is_escape(key) {
             return match self.step {
                 StartWorkStep::Mode => ModalOutcome::Close,
-                StartWorkStep::Item => {
-                    self.go_to(StartWorkStep::Mode);
+                StartWorkStep::Item | StartWorkStep::Describe | StartWorkStep::Clash => {
+                    self.go_back();
                     ModalOutcome::None
                 }
             };
@@ -860,8 +954,16 @@ impl StartWorkModal {
                         self.step_mode(1);
                         return ModalOutcome::None;
                     }
-                    KeyCode::Enter if self.mode.is_enabled() => {
-                        self.go_to(StartWorkStep::Item);
+                    KeyCode::Enter if self.mode_enabled(self.mode) => {
+                        // Without GitHub the list would hold the free-text
+                        // entry and nothing else; picking it is a step
+                        // with nothing to decide.
+                        let next = if self.has_github() {
+                            StartWorkStep::Item
+                        } else {
+                            StartWorkStep::Describe
+                        };
+                        self.go_to(next);
                         return ModalOutcome::None;
                     }
                     _ => {}
@@ -873,15 +975,39 @@ impl StartWorkModal {
                         }
                         if key.code == KeyCode::Enter {
                             return match picker.selected() {
-                                Some(entry) => ModalOutcome::Effect(ModalEffect::ConfirmIssue(
-                                    Box::new(entry.issue.clone()),
-                                    self.mode,
-                                )),
+                                Some(ItemEntry::Issue(entry)) => {
+                                    ModalOutcome::Effect(ModalEffect::ConfirmIssue(
+                                        Box::new(entry.issue.clone()),
+                                        self.mode,
+                                    ))
+                                }
+                                Some(ItemEntry::FreeText) => {
+                                    self.go_to(StartWorkStep::Describe);
+                                    ModalOutcome::None
+                                }
                                 None => ModalOutcome::None,
                             };
                         }
                     }
                 }
+                StartWorkStep::Describe => {
+                    if edit_input(&mut self.description, key) {
+                        return ModalOutcome::None;
+                    }
+                    if key.code == KeyCode::Enter {
+                        // Words with nothing to name a worktree after go
+                        // nowhere; the field stays up to say so by not moving.
+                        let description = self.typed_description();
+                        if work::free_text_names(&description).is_none() {
+                            return ModalOutcome::None;
+                        }
+                        return ModalOutcome::Effect(ModalEffect::ConfirmFreeText {
+                            description,
+                            copy: false,
+                        });
+                    }
+                }
+                StartWorkStep::Clash => {}
             }
         }
 
@@ -890,17 +1016,40 @@ impl StartWorkModal {
         }
 
         match (self.focus, key.code) {
-            (Self::FOCUS_BACK, KeyCode::Enter) => {
-                self.go_to(StartWorkStep::Mode);
+            (Self::FOCUS_BACK, KeyCode::Enter) | (Self::FOCUS_EDIT, KeyCode::Enter) => {
+                self.go_back();
                 ModalOutcome::None
             }
             (Self::FOCUS_CANCEL, KeyCode::Enter) => ModalOutcome::Close,
+            (Self::FOCUS_OPEN, KeyCode::Enter) => match &self.clash {
+                Some(clash) => ModalOutcome::Effect(ModalEffect::OpenWorktree(clash.worktree_id)),
+                None => ModalOutcome::None,
+            },
+            (Self::FOCUS_COPY, KeyCode::Enter) => {
+                ModalOutcome::Effect(ModalEffect::ConfirmFreeText {
+                    description: self.typed_description(),
+                    copy: true,
+                })
+            }
             _ => ModalOutcome::None,
         }
     }
+
+    /// One step back: the clash question back to the description it was
+    /// asked about, the description back to where it was picked from, the
+    /// list back to the modes.
+    fn go_back(&mut self) {
+        let previous = match self.step {
+            StartWorkStep::Mode | StartWorkStep::Item => StartWorkStep::Mode,
+            StartWorkStep::Describe => self.before_describe(),
+            StartWorkStep::Clash => StartWorkStep::Describe,
+        };
+        self.clash = None;
+        self.go_to(previous);
+    }
 }
 
-/// Start work's confirm screen: the worktree an issue will start in, the
+/// Start work's confirm screen: the worktree a work item will start in, the
 /// base it branches from, and the prompt Claude will be started with.
 ///
 /// Also opened directly by an issue card's Start work, with nothing beneath it.
@@ -911,8 +1060,8 @@ pub struct StartWorkConfirmModal {
     pub repo_path: String,
     /// `issue` or `feature`: decides the names and the prompt template.
     pub mode: WorkMode,
-    pub issue_number: i64,
-    pub issue_title: String,
+    /// The issue or free-text feature the worktree is for.
+    pub item: WorkItem,
     pub branches: BranchList,
     pub forest_dir: PathBuf,
     pub name: TextInput,
@@ -949,23 +1098,24 @@ impl StartWorkConfirmModal {
     pub const FOCUS_CANCEL: usize = 8;
     pub const FIELDS: usize = Self::FOCUS_CANCEL + 1;
 
+    /// `names` are passed in rather than derived from `item`: a free-text
+    /// feature's may carry a suffix the clash question chose.
     pub fn new(
         repo: &Repository,
         mode: WorkMode,
-        issue: &GitHubIssue,
+        item: WorkItem,
+        names: WorktreeNames,
         branches: BranchList,
         forest_dir: PathBuf,
         has_parent: bool,
     ) -> Self {
-        let names = work::names(mode, issue.number, &issue.title);
         let base = default_base_branch(&branches);
         Self {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
             repo_path: repo.source_path.clone(),
             mode,
-            issue_number: issue.number,
-            issue_title: issue.title.clone(),
+            item,
             branches,
             forest_dir,
             name: TextInput::new(names.worktree).with_placeholder("worktree-name"),
@@ -998,15 +1148,28 @@ impl StartWorkConfirmModal {
         if let Some(edited) = &self.edited_prompt {
             return edited.clone();
         }
+        // A free-text feature has no number and no title of its own; its
+        // description stands in for the title and is the only `{body}`.
+        let (template, number, title, body) = match &self.item {
+            WorkItem::Issue { number, title } => {
+                (self.mode.template(), Some(*number), title.as_str(), None)
+            }
+            WorkItem::FreeText { description } => (
+                prompt::FREE_FEATURE_TEMPLATE,
+                None,
+                description.as_str(),
+                Some(description.as_str()),
+            ),
+        };
         prompt::fill(
-            self.mode.template(),
+            template,
             &prompt::TemplateVars {
-                number: Some(self.issue_number),
-                title: &self.issue_title,
+                number,
+                title,
                 branch: self.branch.value(),
                 worktree: self.name.value(),
                 repo: &self.repo_name,
-                body: None,
+                body,
             },
         )
     }
@@ -1125,9 +1288,9 @@ impl StartWorkConfirmModal {
                     return ModalOutcome::None;
                 }
                 let base = self.base_branch.value().to_string();
-                ModalOutcome::Submit(ModalResult::WorktreeFromIssue {
+                ModalOutcome::Submit(ModalResult::WorktreeForWorkItem {
                     repo_id: self.repo_id,
-                    issue_number: self.issue_number,
+                    link: self.item.link(),
                     name: self.name.value().to_string(),
                     branch: self.branch.value().to_string(),
                     pull_first: self.pull_first,

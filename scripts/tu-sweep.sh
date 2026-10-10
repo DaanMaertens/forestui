@@ -723,7 +723,9 @@ if [ "$LABEL" = "rust" ]; then
   press Down Enter; await "#77"; sleep 0.8
   capture UC-100 start-work-feature-item
   assert UC-100 bug-issues-not-listed "no" "$(screen_has '#298|#326')"
-  press Enter
+  assert UC-100 free-text-entry-listed "yes" "$(screen_has 'Free-text feature')"
+  # Down past the free-text entry, which leads the list (UC-103).
+  press Down Enter
   await "Launch"; sleep 0.8
   capture UC-100 start-work-feature-confirm
   assert UC-100 titled-as-a-feature "yes" "$(screen_has 'Start Work: Feature #77')"
@@ -755,7 +757,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-101 start-work-linked-item
   assert UC-101 linked-item-marked "yes" \
     "$(screen_has '#77 Dark mode for the dashboard +→ feat-77-dark-mode-for-the-dashboard')"
-  press Enter
+  press Down Enter
   # The switch lands on the Claude window: the stub's output is on screen and
   # the window is the current one in the status bar.
   await "claude stub" 15000; sleep 1
@@ -795,6 +797,63 @@ if [ "$LABEL" = "rust" ]; then
   assert UC-102 nothing-created "$worktrees_before" \
     "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
   tu resize --name "$SESS" 140x44 >/dev/null 2>&1
+fi
+
+# --- UC-103: Start work for a free-text feature --------------------------------
+#
+# Rust only, after UC-102. The free-text entry leads beta's `feature` list; the
+# description names the worktree, rides into the prompt as `{body}`, and is
+# what the worktree's link records. Nothing is asked of GitHub. Starting the
+# same words a second time asks about the taken name instead of matching it.
+if [ "$LABEL" = "rust" ]; then
+  focus_app
+  tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
+  await "Repository: beta"
+  press s; await "Work Mode"; sleep 0.8
+  press Down Enter; await "Free-text feature"; sleep 0.8
+  press Enter; await "Description"; sleep 0.8
+  type_ "Try a quick spike on caching"; sleep 0.5
+  await "Worktree: feat-try-a-quick-spike-on-caching"
+  capture UC-103 free-text-describe
+  press Enter
+  await "Launch"; sleep 0.8
+  capture UC-103 free-text-confirm
+  assert UC-103 titled-as-free-text "yes" "$(screen_has 'Start Work: Free-text feature')"
+  assert UC-103 prompt-carries-description "yes" "$(screen_has 'Try a quick spike on caching')"
+  assert UC-103 prompt-reads-no-issue "no" "$(screen_has 'gh issue view')"
+  press Enter
+  await "[0-9]:feat-try-a-quick" 15000; sleep 2
+  capture UC-103 free-text-launched
+  wt="$ROOT/forest/beta/feat-try-a-quick-spike-on-caching"
+  assert UC-103 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
+  assert UC-103 branch-checked-out "feat/feat-try-a-quick-spike-on-caching" \
+    "$(git -C "$wt" branch --show-current 2>/dev/null)"
+  assert UC-103 work-item-linked \
+    "{'kind': 'free_text', 'description': 'Try a quick spike on caching'}" \
+    "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('feat-try')][0]")"
+
+  focus_app
+  worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+  press s; await "Work Mode"; sleep 0.8
+  press Down Enter; await "Free-text feature"; sleep 0.8
+  press Enter; await "Description"; sleep 0.8
+  type_ "Try a quick spike on caching"; sleep 0.5; press Enter
+  await "already exists"; sleep 0.8
+  capture UC-103 free-text-clash
+  assert UC-103 clash-offers-three-choices "yes" \
+    "$(screen_has 'Open existing.*Create copy.*Edit name')"
+  assert UC-103 clash-names-the-copy "yes" \
+    "$(screen_has 'create feat-try-a-quick-spike-on-caching-2 instead')"
+  # Esc walks back: clash → description → list → modes → closed. One press
+  # at a time: ESC bytes sent back to back read as Alt+Escape, and a lost
+  # press leaves the flow open under every case after this one.
+  press Escape; await "Describe the feature|Description"; sleep 0.5
+  press Escape; await "Enter picks"; sleep 0.5
+  press Escape; await "Work Mode"; sleep 0.5
+  press Escape; sleep 1
+  assert UC-103 flow-closed "no" "$(screen_has 'Start Work')"
+  assert UC-103 nothing-created "$worktrees_before" \
+    "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
 fi
 
 # --- UC-72: delete a worktree, clean and dirty ---------------------------------

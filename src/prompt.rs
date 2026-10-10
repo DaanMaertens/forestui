@@ -9,6 +9,10 @@ pub const ISSUE_TEMPLATE: &str = include_str!("../assets/prompts/issue.md");
 /// The built-in `feature` template: plan first, build once the plan is approved.
 pub const FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/feature.md");
 
+/// The built-in `free-feature` template: the typed description as `{body}`,
+/// and the same plan-first rule as a feature from an issue.
+pub const FREE_FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/free-feature.md");
+
 /// What a template's placeholders are filled with.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateVars<'a> {

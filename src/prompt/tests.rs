@@ -75,6 +75,25 @@ fn the_feature_template_plans_and_waits_for_approval() {
     assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
 }
 
+/// The free-text template carries the typed description itself, and sends
+/// Claude to no issue: there is none.
+#[test]
+fn the_free_feature_template_carries_the_description() {
+    let free = TemplateVars {
+        number: None,
+        title: "Dark mode for the sidebar",
+        body: Some("Dark mode for the sidebar"),
+        branch: "feat/feat-dark-mode-for-the-sidebar",
+        worktree: "feat-dark-mode-for-the-sidebar",
+        repo: "forestui",
+    };
+    let prompt = fill(FREE_FEATURE_TEMPLATE, &free);
+    assert!(prompt.contains("Dark mode for the sidebar"), "{prompt}");
+    assert!(!prompt.contains("gh issue"), "{prompt}");
+    assert!(prompt.contains("approved the plan"), "{prompt}");
+    assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
+}
+
 /// The editor sees the prompt in a file outside any worktree, what it
 /// saves comes back, and the file is gone afterwards.
 #[test]

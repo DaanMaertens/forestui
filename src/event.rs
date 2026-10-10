@@ -26,7 +26,7 @@ pub enum Severity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BranchTarget {
     AddWorktree,
-    /// Start work's confirm screen, for the issue in `App::pending_issue`.
+    /// Start work's confirm screen, for the work item in `App::pending_start`.
     StartWorkConfirm,
     /// Refresh of the branch list inside an already-open modal, after a fetch.
     RefetchOpenModal,
@@ -107,6 +107,9 @@ pub enum AppEvent {
         path: String,
         issues: Vec<GitHubIssue>,
     },
+    /// Start work asked `gh` whether a checkout resolves to a GitHub
+    /// repository; without one, only a free-text feature can be started.
+    GitHubChecked { path: String, is_github: bool },
     /// Detail-pane header data finished loading.
     Meta(Box<DetailMeta>),
     /// Branch and remote lists finished loading.
@@ -145,7 +148,7 @@ pub enum AppEvent {
     /// from, if that is still on top.
     PromptEdited {
         repo_id: Uuid,
-        issue_number: i64,
+        link: crate::models::WorkItemLink,
         result: Result<String, String>,
     },
     /// A `git worktree list` scan finished; the fold reconciles the config

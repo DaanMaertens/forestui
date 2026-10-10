@@ -218,12 +218,22 @@ pub struct App {
     pub branch_input: TextInput,
     /// Worktree the rename inputs belong to, so a selection change resets them.
     pub(crate) rename_target: Option<Uuid>,
-    /// Issue whose modal is waiting on a branch list to finish loading.
-    /// The issue a Create-WT click captured, held across the branch load.
-    pub(crate) pending_issue: Option<(crate::models::GitHubIssue, crate::work::WorkMode)>,
+    /// The work item Start work picked, held while the branch list its
+    /// confirm screen needs is loading.
+    pub(crate) pending_start: Option<PendingStart>,
     /// A jump to an already-started worktree, waiting to learn whether a
     /// Claude session is running there. See [`App::finish_jump`].
     pub(crate) pending_jump: Option<PendingJump>,
+}
+
+/// What Start work's confirm screen opens on once the branches load. The
+/// names travel separately from the item: a free-text feature's may carry the
+/// suffix its clash question chose.
+#[derive(Debug)]
+pub(crate) struct PendingStart {
+    pub mode: crate::work::WorkMode,
+    pub item: crate::work::WorkItem,
+    pub names: crate::work::WorktreeNames,
 }
 
 /// What a jump still waits for: the jumped-to worktree's session list, and
@@ -299,7 +309,7 @@ impl App {
             name_input: TextInput::new(""),
             branch_input: TextInput::new(""),
             rename_target: None,
-            pending_issue: None,
+            pending_start: None,
             pending_jump: None,
         };
         app.rebuild_rows();
@@ -768,7 +778,7 @@ impl App {
         self.drawn_items.clear();
         // A Start work confirm screen belongs to the selection that started it,
         // and a jump to the worktree that was selected.
-        self.pending_issue = None;
+        self.pending_start = None;
         self.pending_jump = None;
 
         let Some(path) = self.state.selected_path() else {
@@ -1161,6 +1171,16 @@ impl App {
                     self.issues = Some(issues);
                 }
             }
+            AppEvent::GitHubChecked { path, is_github } => {
+                // The flow may be beneath its confirm screen by now.
+                for modal in &mut self.modals {
+                    if let Modal::StartWork(flow) = modal
+                        && flow.repo_path == path
+                    {
+                        flow.set_github(is_github);
+                    }
+                }
+            }
             AppEvent::Meta(meta) => {
                 if meta.path == self.meta.path {
                     self.meta = *meta;
@@ -1217,7 +1237,7 @@ impl App {
             }
             AppEvent::PromptEdited {
                 repo_id,
-                issue_number,
+                link,
                 result,
             } => {
                 // The screen the editor was opened from, still on top; any
@@ -1225,7 +1245,7 @@ impl App {
                 let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last_mut() else {
                     return;
                 };
-                if confirm.repo_id != repo_id || confirm.issue_number != issue_number {
+                if confirm.repo_id != repo_id || confirm.item.link() != link {
                     return;
                 }
                 match result {

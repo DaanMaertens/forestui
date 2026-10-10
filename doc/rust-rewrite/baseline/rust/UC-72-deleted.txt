@@ -5,10 +5,10 @@
 ▼ alpha                           │  Repository: beta
 └─ wt-a-renamed [feat/wt-a-v2]    │  Branch:     main
 ▼ beta                            │  Commit:     <sha> (<rel>)
-└─ feat-77-dark-mode-for-the-dashb│
-▼ gamma                           │  ┌────────────┐ ┌────────────────────────┐ ┌──────────────┐
-└─ gamma-imported [feat/imported] │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Add Worktree │
-                                  │  └────────────┘ └────────────────────────┘ └──────────────┘
+├─ feat-try-a-quick-spike-on-cachi│
+└─ feat-77-dark-mode-for-the-dashb│  ┌────────────┐ ┌────────────────────────┐ ┌──────────────┐
+▼ gamma                           │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Add Worktree │
+└─ gamma-imported [feat/imported] │  └────────────┘ └────────────────────────┘ └──────────────┘
                                   │
                                   │  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                   │

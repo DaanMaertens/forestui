@@ -151,3 +151,110 @@ fn an_issue_entry_is_searched_by_number_and_title() {
         "the linked worktree is a marker, not search text"
     );
 }
+
+/// A free-text feature is named from its first words alone: there is no
+/// number to put in front of them.
+#[test]
+fn a_free_text_feature_is_named_from_its_first_words() {
+    assert_eq!(
+        free_text_names("Try a dark theme for the sidebar and every modal"),
+        Some(WorktreeNames {
+            worktree: "feat-try-a-dark-theme-for-the".into(),
+            branch: "feat/feat-try-a-dark-theme-for-the".into(),
+        })
+    );
+    assert_eq!(
+        free_text_names("  Spike:   GraphQL?  ").map(|n| n.worktree),
+        Some("feat-spike-graphql".into())
+    );
+}
+
+/// A description with nothing sluggable names nothing, rather than a bare
+/// `feat-` that every such description would share.
+#[test]
+fn a_description_with_nothing_sluggable_has_no_names() {
+    assert_eq!(free_text_names(""), None);
+    assert_eq!(free_text_names("!!! ???"), None);
+}
+
+#[test]
+fn long_first_words_are_still_capped() {
+    let names = free_text_names(&"abcdefghij ".repeat(6)).unwrap();
+    assert!(names.worktree.len() <= "feat-".len() + 40, "{names:?}");
+    assert!(!names.worktree.ends_with('-'), "{names:?}");
+}
+
+#[test]
+fn a_copy_takes_the_first_free_suffix_from_two() {
+    let names = free_text_names("Dark mode").unwrap();
+    let copy = first_free_copy(&names, |_| false);
+    assert_eq!(copy.worktree, "feat-dark-mode-2");
+    assert_eq!(copy.branch, "feat/feat-dark-mode-2");
+
+    let copy = first_free_copy(&names, |n| n.worktree == "feat-dark-mode-2");
+    assert_eq!(copy.worktree, "feat-dark-mode-3");
+    assert_eq!(copy.branch, "feat/feat-dark-mode-3");
+}
+
+fn worktree(name: &str, branch: &str) -> crate::models::Worktree {
+    crate::models::Worktree::new(name.into(), branch.into(), format!("/forest/{name}"))
+}
+
+/// Taken means a worktree already has the name or the branch: either one
+/// would make git refuse the create.
+#[test]
+fn names_clash_on_the_worktree_name_or_the_branch() {
+    let names = free_text_names("Dark mode").unwrap();
+    let by_name = [worktree("feat-dark-mode", "elsewhere")];
+    let by_branch = [worktree("renamed", "feat/feat-dark-mode")];
+    let neither = [worktree("feat-dark-mode-2", "feat/feat-dark-mode-2")];
+    assert_eq!(
+        clash(&names, &by_name).map(|w| w.name.as_str()),
+        Some("feat-dark-mode")
+    );
+    assert_eq!(
+        clash(&names, &by_branch).map(|w| w.name.as_str()),
+        Some("renamed")
+    );
+    assert!(clash(&names, &neither).is_none());
+}
+
+#[test]
+fn a_work_item_links_to_what_it_was_started_for() {
+    assert_eq!(
+        WorkItem::FreeText {
+            description: "Dark mode".into()
+        }
+        .link(),
+        crate::models::WorkItemLink::FreeText {
+            description: "Dark mode".into()
+        }
+    );
+    assert_eq!(
+        WorkItem::Issue {
+            number: 7,
+            title: "x".into()
+        }
+        .link(),
+        crate::models::WorkItemLink::Issue { number: 7 }
+    );
+}
+
+/// The free-text entry is first, and the issues follow in their own order.
+#[test]
+fn the_feature_list_leads_with_free_text() {
+    let issues = vec![labelled(2, &["enhancement"]), labelled(3, &["enhancement"])];
+    let entries = item_entries(WorkMode::Feature, &issues, DEFAULT_FEATURE_LABELS, |_| None);
+    assert!(matches!(entries[0], ItemEntry::FreeText));
+    let numbers: Vec<_> = entries
+        .iter()
+        .filter_map(|e| match e {
+            ItemEntry::Issue(entry) => Some(entry.issue.number),
+            ItemEntry::FreeText => None,
+        })
+        .collect();
+    assert_eq!(numbers, vec![2, 3]);
+
+    let entries = item_entries(WorkMode::Issue, &issues, DEFAULT_FEATURE_LABELS, |_| None);
+    assert!(entries.is_empty(), "no free text outside `feature`");
+}

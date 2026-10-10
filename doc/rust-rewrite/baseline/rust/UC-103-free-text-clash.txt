@@ -1,0 +1,44 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work: Free-text feature                                              │
+                              │                                                                              │
+                              │  in beta                                                                     │
+                              │  A worktree named 'feat-try-a-quick-spike-on-caching' already exists.        │
+                              │                                                                              │
+                              │  Open it, create feat-try-a-quick-spike-on-caching-2 instead,                │
+                              │  or go back and edit the description.                                        │
+                              │               ┌───────────────┐ ┌─────────────┐ ┌───────────┐                │
+                              │               │ Open existing │ │ Create copy │ │ Edit name │                │
+                              │               └───────────────┘ └─────────────┘ └───────────┘                │
+                              │                                                                              │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>
