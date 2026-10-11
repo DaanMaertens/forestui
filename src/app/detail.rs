@@ -46,6 +46,8 @@ pub enum Action {
     StartWorkOnIssue(usize),
     /// Choose one of the repository's settings files to open in an editor.
     RepositorySettings,
+    /// Remove the repository's finished worktrees and their branches.
+    PruneFinished,
     RemoveRepository,
     Archive,
     Unarchive,
@@ -239,14 +241,22 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
     }
     commit_line(nodes, app);
 
-    controls(
-        nodes,
-        vec![
-            ControlSpec::new(Action::StartWork, "Start work", theme::Variant::Primary),
-            sync_control(app, false),
-            ControlSpec::new(Action::AddWorktree, "Add Worktree", theme::Variant::Normal),
-        ],
-    );
+    let mut top = vec![
+        ControlSpec::new(Action::StartWork, "Start work", theme::Variant::Primary),
+        sync_control(app, false),
+        ControlSpec::new(Action::AddWorktree, "Add Worktree", theme::Variant::Normal),
+    ];
+    // Only there when it has something to do: a control that is always
+    // drawn, mostly disabled, is clutter on the pane's busiest row.
+    let finished = repository.map_or(0, |repo| app.finished_worktrees(repo.id).len());
+    if finished > 0 {
+        top.push(ControlSpec::new(
+            Action::PruneFinished,
+            format!("Prune finished ({finished})"),
+            theme::Variant::Normal,
+        ));
+    }
+    controls(nodes, top);
 
     nodes.push(DetailNode::Rule);
     nodes.push(DetailNode::Section("LOCATION"));

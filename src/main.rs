@@ -8,6 +8,7 @@ mod modal;
 mod models;
 mod picker;
 mod prompt;
+mod prune;
 mod repo_settings;
 mod services;
 mod state;

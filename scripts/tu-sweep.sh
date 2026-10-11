@@ -1037,6 +1037,51 @@ if [ "$LABEL" = "rust" ]; then
   assert UC-72 dirty-git-forgot-it "no" "$(listed_by_git "$ROOT/src/alpha" "$dirty")"
 fi
 
+# --- UC-106: prune finished worktrees ----------------------------------------
+#
+# Rust only, after UC-72 (it gives beta a remote, which would change the
+# Git Pull label in every frame before it). pr-45 is finished since UC-105.
+# beta has no remote yet, so its commits are on no remote branch and prune
+# must skip it as unpushed; once pushed, prune removes it and its branch.
+if [ "$LABEL" = "rust" ]; then
+  wt="$ROOT/forest/beta/pr-45-retry-uploads-with-backoff"
+  focus_app
+  tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
+  await "Prune finished \(1\)"; sleep 0.5
+  capture UC-106 prune-control
+  assert UC-106 control-shows-the-count "yes" "$(screen_has 'Prune finished \(1\)')"
+
+  click_text "Prune finished (1)"
+  await "Prune Finished Worktrees"; sleep 0.5
+  capture UC-106 prune-confirm
+  assert UC-106 confirm-lists-the-worktree "yes" "$(screen_has '│ {2,}pr-45-retry-uploads-with-backoff')"
+  press y
+  await "Skipped 'pr-45"; sleep 0.5
+  capture UC-106 unpushed-skipped
+  # The toast wraps, so the name and the reason are matched apart.
+  assert UC-106 unpushed-named "yes" "$(screen_has "Skipped 'pr-45-retry-uploads-with-backoff'")"
+  assert UC-106 unpushed-reason "yes" "$(screen_has '\(no remote to push to\)')"
+  assert UC-106 unpushed-kept "yes" "$([ -d "$wt" ] && echo yes || echo no)"
+  assert UC-106 unpushed-still-tracked "True" "$(tracked pr-45)"
+
+  git init -q --bare "$ROOT/beta-remote.git"
+  git -C "$ROOT/src/beta" remote add origin "$ROOT/beta-remote.git"
+  git -C "$wt" push -q origin HEAD:refs/heads/fix/retry-backoff
+  git -C "$ROOT/src/beta" fetch -q origin
+  focus_app
+  click_text "Prune finished (1)"
+  await "Prune Finished Worktrees"; sleep 0.5
+  press y
+  wait_until "[ \"\$(tracked pr-45)\" = False ]"
+  await "Pruned 'pr-45"; sleep 0.5
+  capture UC-106 pruned
+  assert UC-106 dir-removed "no" "$([ -d "$wt" ] && echo yes || echo no)"
+  assert UC-106 git-forgot-it "no" "$(listed_by_git "$ROOT/src/beta" "$wt")"
+  assert UC-106 branch-deleted "no" \
+    "$(git -C "$ROOT/src/beta" rev-parse --verify --quiet refs/heads/fix/retry-backoff >/dev/null && echo yes || echo no)"
+  assert UC-106 control-gone "no" "$(screen_has 'Prune finished')"
+fi
+
 echo "done: $LABEL"
 if [ "$WAIT_TIMEOUTS" -gt 0 ]; then
   # Loud on purpose: every timed-out wait captured a frame of whatever was on

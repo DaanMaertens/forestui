@@ -738,6 +738,22 @@ impl App {
         }
     }
 
+    /// The repository's finished worktrees still tracked, in sidebar order:
+    /// what Prune would remove. Archived ones count — finished is about the
+    /// work item, not about where the worktree is shown.
+    pub fn finished_worktrees(&self, repo_id: Uuid) -> Vec<(Uuid, String)> {
+        self.state
+            .find_repository(repo_id)
+            .map(|repo| {
+                repo.worktrees
+                    .iter()
+                    .filter(|worktree| self.finished.contains(worktree.id))
+                    .map(|worktree| (worktree.id, worktree.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Move the sidebar cursor onto whatever is currently selected.
     fn sync_sidebar_index(&mut self) {
         let selection = self.state.selection;
@@ -1443,6 +1459,9 @@ impl App {
             AppEvent::WorktreeRemoveResult { change, outcome } => {
                 self.on_worktree_remove_result(change, outcome)
             }
+            AppEvent::WorktreesPruned { removals, busy } => {
+                self.on_worktrees_pruned(removals, busy)
+            }
             AppEvent::WorktreeRenameAborted { change } => self.worktree_sync.finish(change),
             AppEvent::WorktreeAddFailed { create } => self.worktree_sync.finish_create(create),
             AppEvent::ReloadDetail => self.reload_detail(),
@@ -1500,6 +1519,46 @@ impl App {
                 );
             }
         }
+    }
+
+    /// Fold a prune: finish every removal it started, drop the worktrees
+    /// git removed, and say in one notification what was pruned and what
+    /// was skipped.
+    fn on_worktrees_pruned(
+        &mut self,
+        removals: Vec<(worktree_sync::ChangeTicket, String, crate::prune::Outcome)>,
+        busy: Vec<String>,
+    ) {
+        let mut outcomes = Vec::with_capacity(removals.len() + busy.len());
+        let mut removed_any = false;
+        for (change, name, outcome) in removals {
+            let worktree_id = change.worktree_id();
+            self.worktree_sync.finish(change);
+            if matches!(outcome, crate::prune::Outcome::Removed { .. })
+                && self.state.find_worktree(worktree_id).is_some()
+            {
+                self.state.remove_worktree(worktree_id);
+                removed_any = true;
+            }
+            outcomes.push((name, outcome));
+        }
+        outcomes.extend(busy.into_iter().map(|name| {
+            (
+                name,
+                crate::prune::Outcome::Skipped(crate::prune::Skip::Busy),
+            )
+        }));
+        if self.quit_pending && !self.worktree_sync.any_removal_running() {
+            self.should_quit = true;
+        }
+        if removed_any {
+            self.rebuild_rows();
+            self.sync_sidebar_index();
+            self.reload_detail();
+            self.report_save_error();
+        }
+        let report = crate::prune::report(&outcomes);
+        self.notify(report.lines.join(" "), report.severity);
     }
 
     fn handle_term_event(&mut self, event: ratatui::crossterm::event::Event) {

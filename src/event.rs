@@ -221,6 +221,13 @@ pub enum AppEvent {
         change: ChangeTicket,
         outcome: Result<crate::services::git::RemoveOutcome, String>,
     },
+    /// A prune finished: each removal it started with its ticket, the
+    /// worktree's name and what came of it, plus the names of the worktrees
+    /// `WorktreeSync` refused because a change was already running on them.
+    WorktreesPruned {
+        removals: Vec<(ChangeTicket, String, crate::prune::Outcome)>,
+        busy: Vec<String>,
+    },
     /// Reload the detail pane only.
     ReloadDetail,
 }

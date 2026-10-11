@@ -221,6 +221,14 @@ derived and never saved. A worktree the check could not answer for (`gh`
 signed out, no remote default branch) keeps its previous mark — "could not
 tell" must not unmark it.
 
+**Prune is one routine, `prune::prune_worktree`**, shared by the repository
+pane's **Prune finished (N)** and, once it exists, the CLI (#16). It skips a worktree with
+uncommitted changes or commits on no remote branch (any remote branch counts,
+so a merged PR whose branch was deleted upstream is still prunable), then
+removes it and force-deletes its local branch. In the App each removal starts
+through `WorktreeSync` like a Delete, and one task hands every ticket back in
+`WorktreesPruned`, so the user gets one notification for the whole prune.
+
 **Every worktree-mutating flow goes through `WorktreeSync`.** Starting the
 change returns a change ticket — or nothing, if the worktree already has a
 change running, since a worktree takes one change at a time — the task carries
@@ -637,7 +645,7 @@ proactively, not only when asked.
 scenarios with exact keystrokes and expected output. The P0 cases are the
 regression suite — run the relevant ones after any behavioural change.
 
-UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–105,
+UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–106,
 and the guards UC-90/96 are automated —
 frames plus on-disk assertions (`ASSERTIONS.txt`). Capture a build and compare
 two builds with:
