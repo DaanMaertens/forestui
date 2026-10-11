@@ -70,9 +70,9 @@ fn add_repository_requires_a_git_directory() {
 }
 
 #[test]
-fn add_worktree_autofills_branch_from_name() {
+fn worktree_form_autofills_branch_from_name() {
     let repo = Repository::new("demo".into(), "/tmp/demo".into());
-    let mut modal = AddWorktreeModal::new(
+    let mut modal = WorktreeForm::new(
         &repo,
         vec!["main".into()],
         vec![],
@@ -91,9 +91,9 @@ fn add_worktree_autofills_branch_from_name() {
 }
 
 #[test]
-fn add_worktree_rejects_unknown_existing_branch() {
+fn worktree_form_rejects_unknown_existing_branch() {
     let repo = Repository::new("demo".into(), "/tmp/demo".into());
-    let mut modal = AddWorktreeModal::new(
+    let mut modal = WorktreeForm::new(
         &repo,
         vec!["main".into()],
         vec![],
@@ -114,41 +114,6 @@ fn add_worktree_rejects_unknown_existing_branch() {
         modal.handle_key(key(KeyCode::Enter)),
         ModalOutcome::Submit(ModalResult::WorktreeCreated { .. })
     ));
-}
-
-/// Clicking a branch row has to *pick* the branch, not just light it up:
-/// `can_create` reads the query, so a mouse-only user was left with Create
-/// permanently disabled and no way to choose.
-#[test]
-fn clicking_a_branch_row_selects_that_branch() {
-    let repo = Repository::new("demo".into(), "/tmp/demo".into());
-    let mut modal = Modal::AddWorktree(Box::new(AddWorktreeModal::new(
-        &repo,
-        vec!["main".into(), "feat/login".into()],
-        vec![],
-        PathBuf::from("/forest"),
-        "feat/".into(),
-    )));
-    let expected = if let Modal::AddWorktree(m) = &mut modal {
-        m.name.set_value("wt");
-        m.new_branch = false;
-        assert!(!m.can_create(), "nothing is picked yet");
-        m.picker
-            .matches()
-            .nth(1)
-            .map(|b| b.search_text().to_string())
-            .unwrap()
-    } else {
-        panic!("add worktree modal expected")
-    };
-
-    modal.set_row(1);
-
-    let Modal::AddWorktree(m) = &modal else {
-        panic!("add worktree modal expected")
-    };
-    assert_eq!(m.selected_branch(), expected);
-    assert!(m.can_create(), "the clicked branch was never committed");
 }
 
 #[test]

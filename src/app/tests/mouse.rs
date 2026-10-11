@@ -338,44 +338,6 @@ async fn clicking_a_field_or_cycle_does_not_submit_the_modal() {
 }
 
 #[tokio::test]
-async fn clicking_a_branch_row_selects_that_row() {
-    use crate::modal::AddWorktreeModal;
-    let (_dir, mut app) = app_with_fixture();
-    let repo = app.state.repositories()[0].clone();
-    let branches = vec!["main".into(), "release-2".into(), "feat/other".into()];
-    let mut modal = AddWorktreeModal::new(
-        &repo,
-        branches,
-        vec![],
-        PathBuf::from("/forest"),
-        "feat/".into(),
-    );
-    modal.new_branch = false;
-    app.modals.push(Modal::AddWorktree(Box::new(modal)));
-
-    app.push_hit(
-        rect(0, 7, 40, 1),
-        HitTarget::ModalControl {
-            index: 3,
-            click: ModalClick::Row(2),
-        },
-    );
-    app.handle_mouse(click(5, 7));
-
-    match app.modals.last() {
-        Some(Modal::AddWorktree(m)) => {
-            assert_eq!(
-                m.selected_branch(),
-                "feat/other",
-                "the clicked row was not selected"
-            );
-            assert_eq!(m.focus, 3, "focus did not move to the results list");
-        }
-        _ => panic!("add-worktree modal expected"),
-    }
-}
-
-#[tokio::test]
 async fn pointer_motion_is_ignored() {
     use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     let (_dir, mut app) = app_with_fixture();

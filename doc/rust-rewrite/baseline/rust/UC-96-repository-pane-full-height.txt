@@ -6,9 +6,9 @@
 └─ wt-a                           │  Branch:     main
   beta                            │  Commit:     <sha> (<rel>)
                                   │
-                                  │  ┌────────────┐ ┌────────────────────────┐ ┌──────────────┐
-                                  │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Add Worktree │
-                                  │  └────────────┘ └────────────────────────┘ └──────────────┘
+                                  │  ┌────────────┐ ┌────────────────────────┐
+                                  │  │ Start work │ │ ↓ Git Pull (No remote) │
+                                  │  └────────────┘ └────────────────────────┘
                                   │
                                   │  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                   │
@@ -88,13 +88,11 @@
                                   │  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                   │
                                   │  MANAGE
+                                  │  Settings for sweep-user/alpha
                                   │
-                                  │  ┌───────────────────┐
-                                  │  │ Remove Repository │
-                                  │  └───────────────────┘
-                                  │
-                                  │
-                                  │
+                                  │  ┌─────────────────────┐ ┌───────────────────┐
+                                  │  │ Repository settings │ │ Remove Repository │
+                                  │  └─────────────────────┘ └───────────────────┘
                                   │
                                   │
                                   │
@@ -136,5 +134,7 @@
                                   │
                                   │
                                   │
- a Add Repo  q Quit  s Start  w Add WT  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
+                                  │
+                                  │
+ a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>*                                                                              "<host>" <clock>

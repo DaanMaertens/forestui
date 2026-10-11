@@ -6,9 +6,9 @@
 └─ wt-a-renamed [feat/wt-a-v2]    │  Branch:     main
 ▼ beta                            │  Commit:     <sha> (<rel>)
 ├─ feat-77-dark-mode-for-the-dashb│
-└─ issue-298-proactive-metrics-coa│  ┌────────────┐ ┌────────────────────────┐ ┌──────────────┐
-▼ gamma                           │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Add Worktree │
-└─ gamma-imported [feat/imported] │  └────────────┘ └────────────────────────┘ └──────────────┘
+└─ issue-298-proactive-metrics-coa│  ┌────────────┐ ┌────────────────────────┐
+▼ gamma                           │  │ Start work │ │ ↓ Git Pull (No remote) │
+└─ gamma-imported [feat/imported] │  └────────────┘ └────────────────────────┘
                                   │
                                   │  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                   │
@@ -67,14 +67,14 @@
                                   │  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                   │
                                   │  MANAGE
+                                  │  Settings for sweep-user/alpha
                                   │
-                                  │  ┌───────────────────┐
-                                  │  │ Remove Repository │
-                                  │  └───────────────────┘
-                                  │
+                                  │  ┌─────────────────────┐ ┌───────────────────┐
+                                  │  │ Repository settings │ │ Remove Repository │
+                                  │  └─────────────────────┘ └───────────────────┘
                                   │                                            Issue #77 is already in worktree
                                   │                                            'feat-77-dark-mode-for-the-dashboard'
                                   │                                            Switched to feat-77-dark-mode-for-the-dashboard
                                   │
- a Add Repo  q Quit  s Start  w Add WT  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
+ a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

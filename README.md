@@ -161,8 +161,7 @@ pane, `↑`/`↓` move and `Enter` activates.
 | `↑` / `↓` | Move within the focused pane |
 | `Enter` | Select a row / activate the focused control |
 | `a` | Add repository |
-| `s` | Start work |
-| `w` | Add worktree |
+| `s` | Start work (an issue, a feature, a PR review, or a plain worktree) |
 | `e` | Open in editor |
 | `t` | Open in terminal |
 | `o` | Open in file manager |

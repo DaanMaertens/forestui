@@ -40,5 +40,5 @@
                                   │
                                   │  ───────────────────────────────────────── Opened terminal in term:alpha:wt-a
                                   │
- a Add Repo  q Quit  s Start  w Add WT  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
+ a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt->"<host>" <clock>

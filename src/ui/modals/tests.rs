@@ -73,16 +73,29 @@ fn repo() -> Repository {
     Repository::new("demo".into(), "/tmp/demo".into())
 }
 
-fn worktree_modal(new_branch: bool) -> Modal {
-    let mut modal = AddWorktreeModal::new(
+fn worktree_form(new_branch: bool) -> WorktreeForm {
+    let mut form = WorktreeForm::new(
         &repo(),
         vec!["main".into(), "feat/login".into(), "origin/main".into()],
         vec!["origin".into()],
         PathBuf::from("/forest"),
         "feat/".into(),
     );
-    modal.new_branch = new_branch;
-    Modal::AddWorktree(Box::new(modal))
+    form.new_branch = new_branch;
+    form
+}
+
+/// Start work on its `worktree` step, showing `form`.
+fn in_flow(form: WorktreeForm) -> Modal {
+    let mut modal = StartWorkModal::new(&repo(), Some(vec![issue()]), Default::default(), false);
+    modal.mode = WorkMode::Worktree;
+    modal.step = StartWorkStep::Worktree;
+    modal.worktree = Some(Box::new(form));
+    Modal::StartWork(Box::new(modal))
+}
+
+fn worktree_modal(new_branch: bool) -> Modal {
+    in_flow(worktree_form(new_branch))
 }
 
 fn issue() -> GitHubIssue {
@@ -139,7 +152,7 @@ fn every_modal() -> Vec<(Modal, &'static str)> {
             Modal::AddRepository(AddRepositoryModal::new()),
             "Add Repository",
         ),
-        (worktree_modal(true), "Add Worktree"),
+        (worktree_modal(true), "Start Work: worktree"),
         (start_work_modal(StartWorkStep::Mode), "Start Work"),
         (start_work_modal(StartWorkStep::Item), "Start Work: issue"),
         (confirm_modal(), "Start Work: Issue #42"),
@@ -311,13 +324,11 @@ fn add_repository_shows_the_validation_message() {
 }
 
 #[test]
-fn add_worktree_dropdown_lists_matching_branches() {
-    let Modal::AddWorktree(mut modal) = worktree_modal(false) else {
-        panic!("wrong modal");
-    };
-    modal.picker.set_query("main");
-    modal.focus = AddWorktreeModal::FOCUS_RESULTS;
-    let screen = render(&Modal::AddWorktree(modal), 100, 40);
+fn the_worktree_form_dropdown_lists_matching_branches() {
+    let mut form = worktree_form(false);
+    form.picker.set_query("main");
+    form.focus = WorktreeForm::FOCUS_RESULTS;
+    let screen = render(&in_flow(form), 100, 40);
     // Two of the three branches match "main", so the count line says so.
     assert!(screen.contains("2 matches"), "{screen}");
     assert!(screen.contains("origin/main"), "{screen}");
@@ -325,7 +336,7 @@ fn add_worktree_dropdown_lists_matching_branches() {
 }
 
 #[test]
-fn add_worktree_counts_every_branch_with_an_empty_query() {
+fn the_worktree_form_counts_every_branch_with_an_empty_query() {
     let screen = render(&worktree_modal(false), 100, 40);
     assert!(screen.contains("3 branches"), "{screen}");
 }
@@ -467,7 +478,7 @@ fn branch_rows_are_clickable() {
     let (screen, hits) = render_with_hits(&worktree_modal(false), 100, 40);
     // The dropdown is a single focus stop, so every visible row records a
     // region against the results-list index.
-    let results = AddWorktreeModal::FOCUS_RESULTS;
+    let results = WorktreeForm::FOCUS_RESULTS;
     let rows = hits
         .iter()
         .filter(|(_, index, _)| *index == results)
@@ -518,10 +529,8 @@ fn the_count_line_agrees_with_its_count() {
 
 #[test]
 fn a_single_branch_is_counted_in_the_singular() {
-    let Modal::AddWorktree(mut modal) = worktree_modal(false) else {
-        panic!("wrong modal");
-    };
-    modal.picker = SearchPicker::new(modal.picker.entries().take(1).cloned().collect(), "");
-    let screen = render(&Modal::AddWorktree(modal), 100, 40);
+    let mut form = worktree_form(false);
+    form.picker = SearchPicker::new(form.picker.entries().take(1).cloned().collect(), "");
+    let screen = render(&in_flow(form), 100, 40);
     assert!(screen.contains("1 branch "), "{screen}");
 }

@@ -224,10 +224,11 @@ async fn free_text_is_never_matched_by_its_link() {
     assert_ne!(app.state.selection.worktree_id, Some(id));
 }
 
-/// Without a GitHub remote only a free-text feature can be started: the
-/// other modes are greyed out and the highlight cannot reach them.
+/// Without a GitHub remote only a free-text feature or a plain worktree
+/// can be started: the other modes are greyed out and the highlight cannot
+/// reach them.
 #[tokio::test]
-async fn a_repository_without_github_offers_only_free_text() {
+async fn a_repository_without_github_offers_only_free_text_and_worktree() {
     let (_dir, mut app, path) = app_with_issues(Vec::new());
     app.handle_key(key(KeyCode::Char('s')));
     no_github(&mut app, &path);
@@ -236,6 +237,7 @@ async fn a_repository_without_github_offers_only_free_text() {
     assert_eq!(flow.mode, crate::work::WorkMode::Feature);
     assert!(!flow.mode_enabled(crate::work::WorkMode::Issue));
     assert!(!flow.mode_enabled(crate::work::WorkMode::PrReview));
+    assert!(flow.mode_enabled(crate::work::WorkMode::Worktree));
     app.handle_key(key(KeyCode::Up));
     if let Some(modal) = app.modals.last_mut() {
         modal.set_row(0);

@@ -696,16 +696,17 @@ client falls through to a surviving window; `tu status` reports `"alive":true`
 **Setup:** empty forest (UC-06), no repositories.
 **Steps:**
 1. `tu press --name fui-c t`; `sleep 2`; `tu screenshot --name fui-c`
-2. `tu press --name fui-c w`; `sleep 1`; `tu screenshot --name fui-c --png -o /tmp/uc28.png`; `Read` it.
+2. `tu press --name fui-c s`; `sleep 1`; `tu screenshot --name fui-c --png -o /tmp/uc28.png`; `Read` it.
 
 **Expected:**
 - `t` (also `e`, `o`, `n`, `y`): **nothing happens** — no new tmux window, no toast.
-- `w`: a **warning** toast reading `Select a repository first`, rendered with an
+- `s`: a **warning** toast reading `Select a repository first`, rendered with an
   orange/amber left bar (visible only in PNG).
 
 **Fails if:** a window named `term:session` is created (the `_get_tmux_window_name`
-fallback string is `session` — it must never be reachable), or `w` opens an empty
-modal.
+fallback string is `session` — it must never be reachable), or `s` opens an empty
+modal. (This was `w` while it opened Add Worktree; issue #49 folded that into
+Start work.)
 
 ---
 
@@ -751,21 +752,21 @@ Validation strings, all rendered in the destructive colour:
 
 **Expected:** modal closes, repo appears in the sidebar, detail pane shows
 `MAIN REPOSITORY` / `Repository: alpha`.
-**Fails if:** `Enter` inserts a newline or does nothing (the Add Worktree modal is
+**Fails if:** `Enter` inserts a newline or does nothing (the worktree form is
 deliberately different — see UC-32).
 
 ---
 
-### UC-31 — Add Worktree modal: name sanitising, path preview, auto branch
+### UC-31 — Start work's worktree form: name sanitising, path preview, auto branch
 **Area:** Modals | **Priority:** P0 | 🟢 EXECUTED (partial — layout, preview and
 auto-branch driven live; the `myfeature` sanitising example is from source)
 **Setup:** UC-08, `alpha` selected.
 **Steps:**
-1. `tu press --name fui w`; `sleep 2`; `tu screenshot --name fui`
+1. `tu press --name fui s`, `Down` ×3, `Enter`; `sleep 2`; `tu screenshot --name fui`
 2. `tu type --name fui "wt-two"`; `sleep 1`; `tu screenshot --name fui`
 
 **Expected:**
-- Title ` Add Worktree`, subtitle `to alpha`.
+- Title ` Start Work: worktree`, subtitle `in alpha`.
 - Name input placeholder `my-feature`; branch input placeholder `feat/my-feature`
   (the `feat/` half is `settings.branch_prefix`).
 - Mode buttons `[  New Branch ] [  Existing ]`, `New Branch` active by default and
@@ -780,7 +781,7 @@ one; the branch does not track the name while in New Branch mode; sanitising dif
 
 ---
 
-### UC-32 — Add Worktree: `Create Worktree` must be clicked, and validates
+### UC-32 — Worktree form: `Create Worktree` must be clicked, and validates
 **Area:** Modals | **Priority:** P1 | 🟢 EXECUTED
 **Setup:** UC-31 with the name left **empty**, `Existing` mode, branch
 `feature/login` picked from the dropdown.
@@ -1316,10 +1317,15 @@ control is enabled without a remote.
 **Fails if:** the placeholder is hidden on focus. The Rust build did hide it; the
 sweep caught it and it was fixed in `ui/widgets.rs`.
 
-### UC-56 — `w` opens Add Worktree
+### UC-56 — Start work's `worktree` mode opens the worktree form
 **Area:** Sweep | **Priority:** P0 | 🟢 EXECUTED (both builds)
-**Expected:** `to alpha`, `Worktree Name`, `Branch`, `New Branch`, `Existing`,
-branch placeholder `feat/my-feature`.
+**Steps:** `s`, `Down` ×3 (→ `worktree`, the last mode), `Enter`.
+**Expected:** title `Start Work: worktree`, `in alpha`, `Worktree Name`,
+`Branch`, `New Branch`, `Existing`, branch placeholder `feat/my-feature`, and
+`Create Worktree`, `Back`, `Cancel`. `Esc` returns to the mode list.
+**History:** this was `w` opening the standalone Add Worktree modal until
+issue #49 folded it into Start work; the frozen python frame still shows that
+modal, and `w` now does nothing.
 
 ### UC-57 — `S` opens Settings
 **Area:** Sweep | **Priority:** P0 | 🟢 EXECUTED (both builds)
@@ -1398,7 +1404,8 @@ when they stabilise.
 
 ### UC-71 — Existing-branch mode with fuzzy search
 **Area:** Modals | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** `w`, type a name, `Tab`, `Right` (→ `Existing`), `Tab`, type `rel`.
+**Steps:** `s`, `Down` ×3, `Enter` (the `worktree` mode), type a name, `Tab`,
+`Right` (→ `Existing`), `Tab`, type `rel`.
 **Expected:** the count line reads `1 match`; `release-2` is listed with `rel`
 highlighted; `Create Worktree` is **disabled** while the typed text is not a real
 branch, and enables once a branch is picked from the list.

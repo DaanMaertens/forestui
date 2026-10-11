@@ -78,7 +78,7 @@ fn a_clicked_row_is_selected_and_clamped_to_the_list() {
     assert_eq!(selected_text(&picker), None);
 }
 
-/// A dialog that writes the query itself (Add Worktree commits a picked
+/// A dialog that writes the query itself (the worktree form commits a picked
 /// branch into the field) gets matches for the new text, not stale ones.
 #[test]
 fn setting_the_query_matches_again() {

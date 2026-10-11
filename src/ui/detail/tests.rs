@@ -681,7 +681,7 @@ async fn a_control_is_three_rows_and_clickable_on_its_border() {
     app.issues = Some(vec![]);
     let buffer = render_buffer(&mut app, 100, TALL);
 
-    let (x, y) = find_cell(&buffer, "Add Worktree");
+    let (x, y) = find_cell(&buffer, "Start work");
     let symbol = |x: u16, y: u16| {
         buffer
             .cell((x, y))

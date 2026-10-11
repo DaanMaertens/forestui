@@ -12,6 +12,7 @@ mod free_text;
 mod linked_worktrees;
 mod mouse;
 mod navigation;
+mod plain_worktree;
 mod pr_review;
 mod prompt_templates;
 mod prune;

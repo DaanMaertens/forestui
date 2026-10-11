@@ -10,11 +10,10 @@ use crate::ui::widgets::{TextInput, is_plain_press};
 /// screen, so a binding missing from this table is undiscoverable by design
 /// review, not by accident. `handle_key` below must handle every character
 /// listed here.
-pub const BINDINGS: [(char, &str); 14] = [
+pub const BINDINGS: [(char, &str); 13] = [
     ('a', "Add Repo"),
     ('q', "Quit"),
     ('s', "Start"),
-    ('w', "Add WT"),
     ('e', "Editor"),
     ('t', "Term"),
     ('o', "Files"),
@@ -157,7 +156,6 @@ impl App {
                 .modals
                 .push(Modal::AddRepository(AddRepositoryModal::new())),
             KeyCode::Char('s') => self.action_start_work(),
-            KeyCode::Char('w') => self.action_add_worktree(),
             KeyCode::Char('e') => self.run_action(Action::Editor),
             KeyCode::Char('t') => self.run_action(Action::Terminal),
             KeyCode::Char('o') => self.run_action(Action::Files),

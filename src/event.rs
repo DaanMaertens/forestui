@@ -26,7 +26,8 @@ pub enum Severity {
 /// Where a freshly loaded branch list should go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BranchTarget {
-    AddWorktree,
+    /// The form of Start work's `worktree` mode.
+    StartWorkWorktree,
     /// Start work's confirm screen, for the work item in `App::pending_start`.
     StartWorkConfirm,
     /// Refresh of the branch list inside an already-open modal, after a fetch.

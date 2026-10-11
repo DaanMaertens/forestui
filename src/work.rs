@@ -17,17 +17,26 @@ pub enum WorkMode {
     Issue,
     Feature,
     PrReview,
+    /// A plain worktree: no work item, no prompt, no Claude. It has no item
+    /// list; its step is a form for the worktree and its branch.
+    Worktree,
 }
 
 impl WorkMode {
     /// Every mode, in the order the mode step lists them.
-    pub const ALL: [WorkMode; 3] = [WorkMode::Issue, WorkMode::Feature, WorkMode::PrReview];
+    pub const ALL: [WorkMode; 4] = [
+        WorkMode::Issue,
+        WorkMode::Feature,
+        WorkMode::PrReview,
+        WorkMode::Worktree,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             WorkMode::Issue => "issue",
             WorkMode::Feature => "feature",
             WorkMode::PrReview => "pr-review",
+            WorkMode::Worktree => "worktree",
         }
     }
 
@@ -36,6 +45,7 @@ impl WorkMode {
             WorkMode::Issue => "Fix a bug or chore from an open issue",
             WorkMode::Feature => "Build a feature from a labelled issue",
             WorkMode::PrReview => "Review a pull request",
+            WorkMode::Worktree => "A plain worktree: new or existing branch, no Claude",
         }
     }
 }
@@ -152,6 +162,9 @@ pub fn names(
             &settings.feature.name_pattern,
         ),
         WorkMode::PrReview => (&String::new(), &settings.pr_review.name_pattern),
+        // Never reached: a plain worktree has no numbered item and is named
+        // by hand on its form. A bare number is the least surprising answer.
+        WorkMode::Worktree => (&String::new(), &String::new()),
     };
     let filled = fill_pattern(pattern, Some(number), &title_slug(title));
     // A pattern that fills to nothing would name every item alike.

@@ -9,9 +9,9 @@
 use crate::app::{App, Direction, HitTarget, ModalClick};
 use crate::fuzzy::{self, Searchable};
 use crate::modal::{
-    AddRepositoryModal, AddWorktreeModal, ClaudeIntegrationModal, ConfirmModal, CustomButtonsModal,
-    EDITORS, EditButtonModal, Modal, PromptTemplatesModal, RenameSessionModal, SPINNER,
-    SettingsModal, StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal,
+    AddRepositoryModal, ClaudeIntegrationModal, ConfirmModal, CustomButtonsModal, EDITORS,
+    EditButtonModal, Modal, PromptTemplatesModal, RenameSessionModal, SPINNER, SettingsModal,
+    StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal, WorktreeForm,
 };
 use crate::models::Scope;
 use crate::picker::SearchPicker;
@@ -76,7 +76,6 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) -> Hits {
     let mut hits = Hits::new();
     match modal {
         Modal::AddRepository(m) => add_repository(frame, m, area, &mut hits),
-        Modal::AddWorktree(m) => add_worktree(frame, m, area, &mut hits),
         Modal::StartWork(m) => start_work(frame, m, area, &mut hits),
         Modal::StartWorkConfirm(m) => start_work_confirm(frame, m, area, &mut hits),
         Modal::Settings(m) => settings(frame, m, area, &mut hits),
@@ -428,122 +427,6 @@ fn add_repository(frame: &mut Frame, modal: &AddRepositoryModal, area: Rect, hit
     );
 }
 
-// ------------------------------------------------------------- Add worktree
-
-fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &mut Hits) {
-    // The dropdown only exists in existing-branch mode: a count line plus rows.
-    let dropdown = if modal.new_branch {
-        0
-    } else {
-        modal.picker.match_count().min(DROPDOWN_ROWS) + 1
-    };
-    // Repo, label, input, preview, label, toggle, input, error, gap, buttons.
-    let rect = widgets::centered_rect(WIDTH, CHROME + 18 + dropdown as u16, area);
-    let mut column = dialog(frame, rect, "Add Worktree", theme::title());
-
-    column.text(frame, format!("to {}", modal.repo_name), theme::secondary());
-    column.line(frame, widgets::section("Worktree Name"));
-    column.input(
-        frame,
-        hits,
-        &modal.name,
-        modal.focus,
-        AddWorktreeModal::FOCUS_NAME,
-    );
-
-    let preview = modal
-        .path_preview()
-        .map(|path| format!(" {}", path.display()))
-        .unwrap_or_default();
-    column.text(frame, preview, theme::muted());
-
-    column.line(frame, widgets::section("Branch"));
-    // Left/Right switch modes here, so the arrows are literal: they light up
-    // only while the toggle holds the focus. Each option *selects* itself
-    // rather than toggling the row — Left is "New Branch" and Right is
-    // "Existing" whichever is current, so clicking the option that is already
-    // active does nothing instead of switching away from it.
-    let mode = AddWorktreeModal::FOCUS_MODE;
-    let toggle_focused = modal.focus == mode;
-    column.controls(
-        frame,
-        hits,
-        vec![
-            arrow('◂', Direction::Previous, toggle_focused, mode),
-            option("New Branch", modal.new_branch, mode, Direction::Previous),
-            option("Existing", !modal.new_branch, mode, Direction::Next),
-            arrow('▸', Direction::Next, toggle_focused, mode),
-        ],
-        false,
-    );
-
-    // One input slot either way; only which TextInput fills it depends on
-    // the mode.
-    let branch_input = if modal.new_branch {
-        &modal.branch
-    } else {
-        modal.picker.query()
-    };
-    column.input(
-        frame,
-        hits,
-        branch_input,
-        modal.focus,
-        AddWorktreeModal::FOCUS_BRANCH,
-    );
-    if !modal.new_branch {
-        column.text(
-            frame,
-            count_line(&modal.picker, Noun::new("branch", "branches")),
-            theme::muted(),
-        );
-
-        // Leave room for the error line, the gap and the buttons below the list.
-        let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
-        picker_results(
-            frame,
-            &mut column,
-            hits,
-            &modal.picker,
-            DROPDOWN_ROWS.min(space),
-            ListFocus::of(AddWorktreeModal::FOCUS_RESULTS, modal.focus),
-            ModalClick::Row,
-            |branch, query, style| branch_line(branch.search_text(), query, style),
-        );
-    }
-
-    column.text(frame, modal.error.clone(), theme::destructive());
-    column.gap();
-
-    // Create and Cancel close the ring, so their indices follow the mode.
-    let create = modal.create_index();
-    let cancel = modal.cancel_index();
-    let create_control = if modal.can_create() {
-        control(
-            "Create Worktree",
-            modal.focus == create,
-            theme::Variant::Primary,
-            create,
-        )
-    } else {
-        disabled("Create Worktree", create)
-    };
-    column.controls(
-        frame,
-        hits,
-        vec![
-            create_control,
-            control(
-                "Cancel",
-                modal.focus == cancel,
-                theme::Variant::Normal,
-                cancel,
-            ),
-        ],
-        true,
-    );
-}
-
 /// A list's place in its dialog's focus ring. The list is one focus stop, so
 /// every row carries the same `index`.
 #[derive(Clone, Copy)]
@@ -670,7 +553,166 @@ fn start_work(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut 
         StartWorkStep::Item => start_work_item(frame, modal, area, hits),
         StartWorkStep::Describe => start_work_describe(frame, modal, area, hits),
         StartWorkStep::Clash => start_work_clash(frame, modal, area, hits),
+        StartWorkStep::Worktree => start_work_worktree(frame, modal, area, hits),
     }
+}
+
+/// The `worktree` mode's step: the form once the branches have loaded, a
+/// loading line with Back and Cancel until then.
+fn start_work_worktree(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
+    let title = format!("Start Work: {}", WorkMode::Worktree.label());
+    let Some(form) = modal.worktree.as_deref() else {
+        // Repo, gap, loading, gap, buttons.
+        let rect = widgets::centered_rect(WIDTH, CHROME + 4 + BUTTON_HEIGHT, area);
+        let mut column = dialog(frame, rect, &title, theme::title());
+        column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
+        column.gap();
+        column.text(frame, " Loading branches...", theme::muted());
+        column.gap();
+        column.controls(frame, hits, back_and_cancel(modal).to_vec(), true);
+        return;
+    };
+    worktree_form(frame, form, &title, area, hits);
+}
+
+fn worktree_form(
+    frame: &mut Frame,
+    modal: &WorktreeForm,
+    title: &str,
+    area: Rect,
+    hits: &mut Hits,
+) {
+    // The dropdown only exists in existing-branch mode: a count line plus rows.
+    let dropdown = if modal.new_branch {
+        0
+    } else {
+        modal.picker.match_count().min(DROPDOWN_ROWS) + 1
+    };
+    // Repo, label, input, preview, label, toggle, input, error, gap, buttons.
+    let rect = widgets::centered_rect(WIDTH, CHROME + 18 + dropdown as u16, area);
+    let mut column = dialog(frame, rect, title, theme::title());
+
+    column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
+    column.line(frame, widgets::section("Worktree Name"));
+    column.input(
+        frame,
+        hits,
+        &modal.name,
+        modal.focus,
+        WorktreeForm::FOCUS_NAME,
+    );
+
+    let preview = modal
+        .path_preview()
+        .map(|path| format!(" {}", path.display()))
+        .unwrap_or_default();
+    column.text(frame, preview, theme::muted());
+
+    column.line(frame, widgets::section("Branch"));
+    // Left/Right switch modes here, so the arrows are literal: they light up
+    // only while the toggle holds the focus. Each option *selects* itself
+    // rather than toggling the row — Left is "New Branch" and Right is
+    // "Existing" whichever is current, so clicking the option that is already
+    // active does nothing instead of switching away from it.
+    let mode = WorktreeForm::FOCUS_MODE;
+    let toggle_focused = modal.focus == mode;
+    column.controls(
+        frame,
+        hits,
+        vec![
+            arrow('◂', Direction::Previous, toggle_focused, mode),
+            option("New Branch", modal.new_branch, mode, Direction::Previous),
+            option("Existing", !modal.new_branch, mode, Direction::Next),
+            arrow('▸', Direction::Next, toggle_focused, mode),
+        ],
+        false,
+    );
+
+    // One input slot either way; only which TextInput fills it depends on
+    // the mode.
+    let branch_input = if modal.new_branch {
+        &modal.branch
+    } else {
+        modal.picker.query()
+    };
+    column.input(
+        frame,
+        hits,
+        branch_input,
+        modal.focus,
+        WorktreeForm::FOCUS_BRANCH,
+    );
+    if !modal.new_branch {
+        column.text(
+            frame,
+            count_line(&modal.picker, Noun::new("branch", "branches")),
+            theme::muted(),
+        );
+
+        // Leave room for the error line, the gap and the buttons below the list.
+        let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
+        picker_results(
+            frame,
+            &mut column,
+            hits,
+            &modal.picker,
+            DROPDOWN_ROWS.min(space),
+            ListFocus::of(WorktreeForm::FOCUS_RESULTS, modal.focus),
+            ModalClick::Row,
+            |branch, query, style| branch_line(branch.search_text(), query, style),
+        );
+    }
+
+    column.text(frame, modal.error.clone(), theme::destructive());
+    column.gap();
+
+    // Create, Back and Cancel close the ring, so their indices follow the mode.
+    let create = modal.create_index();
+    let back = modal.back_index();
+    let cancel = modal.cancel_index();
+    let create_control = if modal.can_create() {
+        control(
+            "Create Worktree",
+            modal.focus == create,
+            theme::Variant::Primary,
+            create,
+        )
+    } else {
+        disabled("Create Worktree", create)
+    };
+    column.controls(
+        frame,
+        hits,
+        vec![
+            create_control,
+            control("Back", modal.focus == back, theme::Variant::Normal, back),
+            control(
+                "Cancel",
+                modal.focus == cancel,
+                theme::Variant::Normal,
+                cancel,
+            ),
+        ],
+        true,
+    );
+}
+
+/// The Back and Cancel that close every Start work step after the first.
+fn back_and_cancel(modal: &StartWorkModal) -> [Control; 2] {
+    [
+        control(
+            "Back",
+            modal.focus == StartWorkModal::FOCUS_BACK,
+            theme::Variant::Normal,
+            StartWorkModal::FOCUS_BACK,
+        ),
+        control(
+            "Cancel",
+            modal.focus == StartWorkModal::FOCUS_CANCEL,
+            theme::Variant::Normal,
+            StartWorkModal::FOCUS_CANCEL,
+        ),
+    ]
 }
 
 fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
@@ -737,7 +779,8 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
     let (section, loading, empty, noun) = match modal.mode {
-        WorkMode::Issue => (
+        // `worktree` has a form, not an item list, so never lands here.
+        WorkMode::Issue | WorkMode::Worktree => (
             "Issue",
             " Loading issues...",
             "No open non-feature issues",
@@ -859,20 +902,7 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
             StartWorkModal::FOCUS_SCOPE,
         ));
     }
-    controls.extend([
-        control(
-            "Back",
-            modal.focus == StartWorkModal::FOCUS_BACK,
-            theme::Variant::Normal,
-            StartWorkModal::FOCUS_BACK,
-        ),
-        control(
-            "Cancel",
-            modal.focus == StartWorkModal::FOCUS_CANCEL,
-            theme::Variant::Normal,
-            StartWorkModal::FOCUS_CANCEL,
-        ),
-    ]);
+    controls.extend(back_and_cancel(modal));
     column.controls(frame, hits, controls, true);
 }
 
@@ -906,25 +936,7 @@ fn start_work_describe(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hi
     );
     column.gap();
     column.text(frame, "Enter continues · Esc goes back", theme::muted());
-    column.controls(
-        frame,
-        hits,
-        vec![
-            control(
-                "Back",
-                modal.focus == StartWorkModal::FOCUS_BACK,
-                theme::Variant::Normal,
-                StartWorkModal::FOCUS_BACK,
-            ),
-            control(
-                "Cancel",
-                modal.focus == StartWorkModal::FOCUS_CANCEL,
-                theme::Variant::Normal,
-                StartWorkModal::FOCUS_CANCEL,
-            ),
-        ],
-        true,
-    );
+    column.controls(frame, hits, back_and_cancel(modal).to_vec(), true);
 }
 
 fn start_work_clash(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
@@ -1035,7 +1047,7 @@ fn start_work_confirm(
         WorkItem::Issue { number, title } => {
             let kind = match modal.mode {
                 WorkMode::Feature => "Feature",
-                WorkMode::Issue | WorkMode::PrReview => "Issue",
+                WorkMode::Issue | WorkMode::PrReview | WorkMode::Worktree => "Issue",
             };
             (format!("Start Work: {kind} #{number}"), title.to_string())
         }

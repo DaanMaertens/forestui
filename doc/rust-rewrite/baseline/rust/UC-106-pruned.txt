@@ -6,9 +6,9 @@
 ▼ beta                            │  Branch:     main
 ├─ feat-try-a-quick-spike-on-cachi│  Commit:     <sha> (<rel>)
 └─ feat-77-dark-mode-for-the-dashb│
-▼ gamma                           │  ┌────────────┐ ┌────────────────────────┐ ┌──────────────┐
-└─ gamma-imported [feat/imported] │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Add Worktree │
-                                  │  └────────────┘ └────────────────────────┘ └──────────────┘
+▼ gamma                           │  ┌────────────┐ ┌────────────────────────┐
+└─ gamma-imported [feat/imported] │  │ Start work │ │ ↓ Git Pull (No remote) │
+                                  │  └────────────┘ └────────────────────────┘
                                   │
                                   │  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                   │
@@ -40,5 +40,5 @@
                                   │                                            Pruning 1 worktree…
                                   │  MY OPEN GITHUB ISSUES ↻  [ ] show blocked Pruned 'pr-45-retry-uploads-with-backoff'.
                                   │
- a Add Repo  q Quit  s Start  w Add WT  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
+ a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>
