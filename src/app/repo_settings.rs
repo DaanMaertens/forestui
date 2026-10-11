@@ -1,9 +1,9 @@
 //! Repository settings as the app holds them: the GitHub repository each
 //! checkout resolves to, and the overrides read from its settings directory.
 //!
-//! The key comes from `gh`, so it is learned in the background — on the
-//! first selection of a repository and on every Start work open — and folded
-//! in here. The overrides are a small local file, re-read on selection, on
+//! The key comes from `gh`, so it is learned in the background — on
+//! selecting a repository that has none yet, and on every Start work open —
+//! and folded in here. The overrides are a small local file, re-read on selection, on
 //! Start work and on focus return, so an edit made in the editor counts the
 //! next time any of those happens.
 
@@ -86,7 +86,11 @@ impl App {
         self.repo_probes.remove(&path);
         let before = self.start_work_for(&path);
         let lookup = self.repos.entry(path.clone()).or_default();
-        if lookup.key != repo {
+        // `gh` answers no for a failure too — offline, logged out, rate
+        // limited — and a remote is far less likely to have gone than `gh`
+        // to have failed, so a no never drops a key already known: the
+        // repository keeps its own settings.
+        if lookup.key != repo && !(lookup.key.is_some() && repo.is_none()) {
             *lookup = RepoLookup {
                 key: repo.clone(),
                 ..RepoLookup::default()
@@ -105,18 +109,28 @@ impl App {
         // Only a GitHub repository has PRs to ask for, and only for the
         // scope now known to be in effect. Fetched on every open: a review
         // requested a minute ago belongs in the list.
-        let flow_open = self
+        if for_start_work && repo.is_some() {
+            self.fetch_pull_requests(&path);
+        }
+    }
+
+    /// Fetch `pr-review`'s list for an open Start work, for the scope in
+    /// effect.
+    fn fetch_pull_requests(&mut self, path: &str) {
+        let open = self
             .modals
             .iter()
             .any(|m| matches!(m, Modal::StartWork(flow) if flow.repo_path == path));
-        if for_start_work && repo.is_some() && flow_open {
-            let tx = self.tx.clone();
-            let scope = self.start_work_for(&path).scope;
-            tokio::spawn(async move {
-                let (prs, viewer) = github::list_pull_requests(&path, scope).await;
-                tx.send(AppEvent::PullRequests { path, prs, viewer });
-            });
+        if !open {
+            return;
         }
+        let tx = self.tx.clone();
+        let scope = self.start_work_for(path).scope;
+        let path = path.to_string();
+        tokio::spawn(async move {
+            let (prs, viewer) = github::list_pull_requests(&path, scope).await;
+            tx.send(AppEvent::PullRequests { path, prs, viewer });
+        });
     }
 
     /// Re-read a checkout's repository settings, and follow whatever that
@@ -175,8 +189,10 @@ impl App {
         if shown {
             self.load_issues(path);
         }
+        // The flow dropped both lists, fetched for the old scope.
         if flow_open {
             self.fetch_issues_for(path.to_string());
+            self.fetch_pull_requests(path);
         }
     }
 

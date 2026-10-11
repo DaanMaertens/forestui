@@ -853,9 +853,11 @@ impl App {
 
         if is_repository {
             // Read before the issues, whose scope they may set.
-            if self.repo_key(&path).is_some() {
-                self.reread_repository_settings(&path);
-            } else {
+            self.reread_repository_settings(&path);
+            // A key, once known, stands until Start work asks again; "no
+            // GitHub repository" is asked again on every selection, since a
+            // remote may have been added since.
+            if !matches!(self.repo_key(&path), Some(Some(_))) {
                 self.probe_github(path.clone(), false);
             }
             self.load_issues(&path);
@@ -1478,7 +1480,6 @@ impl App {
                 // The editor may have just saved this repository's settings.
                 if self.state.selection.is_repository()
                     && let Some(path) = self.state.selected_path()
-                    && self.repo_key(&path).is_some()
                 {
                     self.reread_repository_settings(&path);
                 }

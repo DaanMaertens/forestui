@@ -1775,7 +1775,8 @@ impl PromptTemplatesModal {
     }
 
     pub fn selected(&self) -> ConfigFile {
-        self.rows()[self.index]
+        let rows = self.rows();
+        rows.get(self.index).copied().unwrap_or(rows[0])
     }
 
     pub fn select(&mut self, index: usize) {

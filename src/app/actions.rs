@@ -790,9 +790,7 @@ impl App {
         let path = repo.source_path.clone();
         // The settings as last known, re-read so an edit since counts; the
         // probe below corrects them if the repository turns out different.
-        if self.repo_key(&path).is_some() {
-            self.reread_repository_settings(&path);
-        }
+        self.reread_repository_settings(&path);
         let Some(repo) = self.state.selected_repository() else {
             return;
         };
@@ -814,29 +812,14 @@ impl App {
     }
 
     /// Open the selected repository's settings chooser: its settings file or
-    /// one of its templates. Without a key there is nothing to open — the
-    /// pane says why, and draws the control disabled.
+    /// one of its templates. Without a key there is nothing to open; the
+    /// control is drawn disabled then, and the pane says why.
     pub(super) fn action_repository_settings(&mut self) {
-        let Some(path) = self
-            .state
-            .selected_repository()
-            .map(|r| r.source_path.clone())
-        else {
-            return;
-        };
-        match self.repo_key(&path) {
-            Some(Some(key)) => {
-                let picker = PromptTemplatesModal::for_repository(key.clone());
-                self.modals.push(Modal::PromptTemplates(picker));
-            }
-            Some(None) => self.notify(
-                "No GitHub repository: the global settings apply",
-                Severity::Information,
-            ),
-            None => self.notify(
-                "Still asking gh about this repository",
-                Severity::Information,
-            ),
+        if let Some(repo) = self.state.selected_repository()
+            && let Some(Some(key)) = self.repo_key(&repo.source_path)
+        {
+            let picker = PromptTemplatesModal::for_repository(key.clone());
+            self.modals.push(Modal::PromptTemplates(picker));
         }
     }
 
@@ -1077,14 +1060,11 @@ impl App {
                 if let Some(repo_id) = self.state.selection.repository_id
                     && let Some(issue) = self.issues.as_ref().and_then(|i| i.get(index)).cloned()
                 {
-                    let path = self
+                    let labels = self
                         .state
                         .find_repository(repo_id)
-                        .map(|r| r.source_path.clone());
-                    let labels = self
-                        .start_work_for(path.as_deref().unwrap_or_default())
-                        .feature_labels;
-                    let mode = work::mode_for(&issue, &labels);
+                        .map(|repo| self.start_work_for(&repo.source_path).feature_labels);
+                    let mode = work::mode_for(&issue, &labels.unwrap_or_default());
                     self.start_work_on_issue(repo_id, issue, mode);
                 }
             }

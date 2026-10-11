@@ -4331,3 +4331,38 @@ async fn the_issue_card_follows_the_repositorys_feature_labels() {
 
     assert_eq!(confirm_screen(&app).mode, crate::work::WorkMode::Feature);
 }
+
+/// `gh` answers no when it fails, too; a key already known is kept, and the
+/// repository keeps its own settings.
+#[tokio::test]
+async fn a_failed_probe_keeps_the_known_repository_settings() {
+    let repos = ReposDir::new();
+    repos.write(
+        "settings.json",
+        r#"{"start_work": {"feature_labels": ["kind/feature"]}}"#,
+    );
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    on_github(&mut app, &path);
+
+    no_github(&mut app, &path);
+
+    assert_eq!(app.repo_key(&path), Some(Some(&test_key())));
+    assert_eq!(
+        app.start_work_for(&path).feature_labels,
+        vec!["kind/feature".to_string()]
+    );
+}
+
+/// "No GitHub repository" is asked again on the next selection: a remote
+/// may have been added since. A known key is not.
+#[tokio::test]
+async fn selecting_a_repository_asks_again_only_without_a_key() {
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    no_github(&mut app, &path);
+    app.reload_detail();
+    assert!(app.repo_probes.contains(&path));
+
+    on_github(&mut app, &path);
+    app.reload_detail();
+    assert!(!app.repo_probes.contains(&path));
+}
