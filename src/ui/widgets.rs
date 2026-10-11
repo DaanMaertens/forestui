@@ -7,6 +7,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use std::cell::Cell;
+use unicode_width::UnicodeWidthChar;
 
 /// Whether a key press is the bare character, and so may fire a letter
 /// shortcut.
@@ -42,6 +44,12 @@ pub struct TextInput {
     value: String,
     /// Cursor position as a character index.
     cursor: usize,
+    /// The first character drawn, once the value is wider than the field.
+    /// Remembered between frames so the caret moves within the view and the
+    /// text only scrolls at its edges; derived afresh, every Left from the end
+    /// would slide the text under a caret pinned to the right border.
+    /// A `Cell` because rendering takes `&self`.
+    scroll: Cell<usize>,
     pub placeholder: String,
     pub max_length: Option<usize>,
 }
@@ -53,6 +61,7 @@ impl TextInput {
         Self {
             value,
             cursor,
+            scroll: Cell::new(0),
             placeholder: String::new(),
             max_length: None,
         }
@@ -213,18 +222,67 @@ impl TextInput {
         // The placeholder stays visible while the field is focused and empty,
         // the way Textual's Input behaved — it is the only hint of what the
         // field wants.
-        let line = if self.value.is_empty() {
-            Line::from(Span::styled(self.placeholder.clone(), theme::muted()))
-        } else {
-            Line::from(Span::styled(self.value.clone(), theme::primary()))
-        };
+        if self.value.is_empty() {
+            let line = Line::from(Span::styled(self.placeholder.clone(), theme::muted()));
+            frame.render_widget(Paragraph::new(line), inner);
+            if focused && inner.width > 0 {
+                frame.set_cursor_position((inner.x, inner.y));
+            }
+            return;
+        }
+
+        let chars: Vec<char> = self.value.chars().collect();
+        let widths: Vec<usize> = chars.iter().map(|c| c.width().unwrap_or(0)).collect();
+        let room = usize::from(inner.width);
+        let start = scroll_start(&widths, self.cursor, self.scroll.get(), room);
+        self.scroll.set(start);
+
+        // Cut by display width rather than handing the whole tail to the
+        // paragraph: a wide character straddling the border would otherwise
+        // be clipped to half a glyph.
+        let mut used = 0;
+        let shown: String = chars[start..]
+            .iter()
+            .zip(&widths[start..])
+            .take_while(|(_, w)| {
+                used += **w;
+                used <= room
+            })
+            .map(|(c, _)| c)
+            .collect();
+        let line = Line::from(Span::styled(shown, theme::primary()));
         frame.render_widget(Paragraph::new(line), inner);
 
-        if focused && inner.width > 0 {
-            let offset = (self.cursor as u16).min(inner.width.saturating_sub(1));
+        if focused && room > 0 {
+            let column: usize = widths[start..self.cursor.min(chars.len())].iter().sum();
+            let offset = u16::try_from(column)
+                .unwrap_or(u16::MAX)
+                .min(inner.width - 1);
             frame.set_cursor_position((inner.x + offset, inner.y));
         }
     }
+}
+
+/// The first character to draw so the caret stays inside a field `room`
+/// cells wide, moving the previous `scroll` as little as possible.
+///
+/// `widths` are each character's display width. The caret takes the cell of
+/// the character it sits on, or one cell past the end. Once the caret is in
+/// view, the start is pulled back for as long as the rest of the value still
+/// fits, so a value that shrank does not leave the field half empty.
+fn scroll_start(widths: &[usize], cursor: usize, scroll: usize, room: usize) -> usize {
+    let cursor = cursor.min(widths.len());
+    let caret = widths.get(cursor).copied().unwrap_or(1).max(1);
+    let mut start = scroll.min(cursor);
+    while start < cursor && widths[start..cursor].iter().sum::<usize>() + caret > room {
+        start += 1;
+    }
+    // The cell past the end stays reserved even with the caret elsewhere, or
+    // the first Left from the end would slide the whole text by one.
+    while start > 0 && widths[start - 1..].iter().sum::<usize>() < room {
+        start -= 1;
+    }
+    start
 }
 
 /// Render a label/value line with a section-header style label.
