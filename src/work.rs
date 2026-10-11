@@ -2,7 +2,9 @@
 //! worktree and branch, and the entry a work item is searched by.
 
 use crate::fuzzy::Searchable;
-use crate::models::{GitHubIssue, GitHubPullRequest, StartWorkSettings, WorkItemLink, Worktree};
+use crate::models::{
+    GitHubIssue, GitHubPullRequest, ItemState, StartWorkSettings, WorkItemLink, Worktree,
+};
 use crate::prompt::Template;
 
 /// The longest slug a title contributes to a name, so a long title cannot
@@ -310,6 +312,43 @@ impl WorkItem {
             WorkItem::PullRequest { review, .. } => review.template(),
             WorkItem::FreeText { .. } => Template::FreeFeature,
         }
+    }
+}
+
+/// What a finished check saw of a worktree's work item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Observed {
+    /// GitHub's state for an issue or pull request.
+    State(ItemState),
+    /// A free-text feature's branch, against the remote default branch.
+    Branch {
+        /// The branch tip is contained in the default branch.
+        merged: bool,
+        /// The branch has commits beyond the one it was created from.
+        has_commits: bool,
+    },
+}
+
+/// Whether a worktree's work item is done: an issue closed, a pull request
+/// merged or closed, a free-text feature's branch merged. `None` when the
+/// observation is not about this kind of link and so decides nothing.
+///
+/// A free-text branch needs commits of its own: one just created from the
+/// default branch is already contained in it, and that is a worktree whose
+/// work has not started, not one whose work is done.
+pub fn is_finished(link: &WorkItemLink, observed: Observed) -> Option<bool> {
+    match (link, observed) {
+        (WorkItemLink::Issue { .. } | WorkItemLink::PullRequest { .. }, Observed::State(state)) => {
+            Some(state != ItemState::Open)
+        }
+        (
+            WorkItemLink::FreeText { .. },
+            Observed::Branch {
+                merged,
+                has_commits,
+            },
+        ) => Some(merged && has_commits),
+        _ => None,
     }
 }
 

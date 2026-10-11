@@ -544,3 +544,84 @@ fn the_blocked_marker_names_the_open_blockers() {
         Some("blocked by #1, #2, #3 +2")
     );
 }
+
+fn issue(number: i64) -> WorkItemLink {
+    WorkItemLink::Issue { number }
+}
+
+fn pr(number: i64) -> WorkItemLink {
+    WorkItemLink::PullRequest { number }
+}
+
+fn free_text() -> WorkItemLink {
+    WorkItemLink::FreeText {
+        description: "try a thing".to_string(),
+    }
+}
+
+#[test]
+fn an_issue_is_finished_once_closed() {
+    assert_eq!(
+        is_finished(&issue(1), Observed::State(ItemState::Open)),
+        Some(false)
+    );
+    assert_eq!(
+        is_finished(&issue(1), Observed::State(ItemState::Closed)),
+        Some(true)
+    );
+}
+
+#[test]
+fn a_pull_request_is_finished_once_merged_or_closed() {
+    assert_eq!(
+        is_finished(&pr(2), Observed::State(ItemState::Open)),
+        Some(false)
+    );
+    assert_eq!(
+        is_finished(&pr(2), Observed::State(ItemState::Merged)),
+        Some(true)
+    );
+    assert_eq!(
+        is_finished(&pr(2), Observed::State(ItemState::Closed)),
+        Some(true)
+    );
+}
+
+#[test]
+fn a_free_text_feature_is_finished_once_its_own_commits_are_merged() {
+    let merged = Observed::Branch {
+        merged: true,
+        has_commits: true,
+    };
+    assert_eq!(is_finished(&free_text(), merged), Some(true));
+    let unmerged = Observed::Branch {
+        merged: false,
+        has_commits: true,
+    };
+    assert_eq!(is_finished(&free_text(), unmerged), Some(false));
+}
+
+/// A branch fresh off the default branch is trivially "merged" into it —
+/// it has nothing of its own yet, which is the opposite of finished.
+#[test]
+fn a_free_text_branch_with_no_commits_of_its_own_is_not_finished() {
+    let fresh = Observed::Branch {
+        merged: true,
+        has_commits: false,
+    };
+    assert_eq!(is_finished(&free_text(), fresh), Some(false));
+}
+
+#[test]
+fn an_observation_of_the_wrong_kind_decides_nothing() {
+    let branch = Observed::Branch {
+        merged: true,
+        has_commits: true,
+    };
+    assert_eq!(is_finished(&issue(1), branch), None);
+    assert_eq!(is_finished(&pr(2), branch), None);
+    assert_eq!(
+        is_finished(&free_text(), Observed::State(ItemState::Closed)),
+        None
+    );
+}

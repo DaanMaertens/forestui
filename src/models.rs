@@ -585,6 +585,16 @@ pub struct GitHubUser {
     pub login: String,
 }
 
+/// Where an issue or pull request stands on GitHub, as `gh … view --json
+/// state` reports it. An issue is never `Merged`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum ItemState {
+    Open,
+    Closed,
+    Merged,
+}
+
 /// An open pull request as returned by `gh pr list --json ...`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1735,6 +1735,22 @@ marked, the review kind is wrong or switchable, the confirm screen asks for a
 base branch, the worktree is on any branch but the PR's, or the link is
 missing.
 
+### UC-105 — Finished worktrees are marked
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** after UC-104, PR #45 merges on GitHub (the sweep's `gh` stub
+starts answering `MERGED` for it). Click alpha's sidebar row, then beta's.
+**Expected:** within the next finished check — the selection change once ten
+seconds have passed since beta's last one, or the 30-second sweep — beta's
+`pr-45-retry-uploads-with-backoff` row reads `├─ ✓ pr-45-…`, dimmed, with the
+✓ in the success colour. `feat-77-…` stays unmarked (#77 is still open), as
+does `feat-try-…` (beta has no remote, so its free-text branch has no default
+branch to be merged into). Nothing is written to the config. The rule per link
+type, what each `gh` answer means, keeping a mark through a check that could
+not tell, and discarding results for a removed repository or another
+repository's worktree are unit-tested.
+**Fails if:** the ✓ never appears, an open item's worktree is marked, the
+mark is not dimmed, or a `finished` key reaches `.forestui-config.json`.
+
 ---
 
 ## Known visual divergences (accepted, not defects)

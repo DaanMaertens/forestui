@@ -7,6 +7,7 @@ use ratatui::crossterm::event::KeyCode;
 use std::path::PathBuf;
 
 mod blocked_issues;
+mod finished_worktrees;
 mod free_text;
 mod linked_worktrees;
 mod mouse;

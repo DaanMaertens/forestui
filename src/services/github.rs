@@ -1,6 +1,6 @@
 //! GitHub integration via the `gh` CLI.
 
-use crate::models::{GitHubIssue, GitHubPullRequest, Scope};
+use crate::models::{GitHubIssue, GitHubPullRequest, ItemState, Scope};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::Path;
@@ -407,6 +407,44 @@ pub async fn checkout_pull_request(worktree: &str, number: i64) -> Result<(), St
     } else {
         Err(stderr)
     }
+}
+
+/// The state of issue `number`, or `None` when `gh` could not say.
+pub async fn issue_state(path: &str, number: i64) -> Option<ItemState> {
+    item_state(path, "issue", number).await
+}
+
+/// The state of pull request `number`, or `None` when `gh` could not say.
+pub async fn pull_request_state(path: &str, number: i64) -> Option<ItemState> {
+    item_state(path, "pr", number).await
+}
+
+/// Not cached: the finished check that asks runs on the worktree sweep, and
+/// the answer it wants is whether something changed since the last one.
+async fn item_state(path: &str, kind: &str, number: i64) -> Option<ItemState> {
+    let number = number.to_string();
+    let (code, stdout, _) = run_gh(
+        &[kind, "view", &number, "--json", "state"],
+        Some(Path::new(path)),
+    )
+    .await;
+    if code != 0 {
+        return None;
+    }
+    parse_item_state(&stdout)
+}
+
+/// The `state` of a `gh … view --json state` answer. Anything else is
+/// unknown rather than open, so a garbled answer never unmarks a finished
+/// worktree.
+fn parse_item_state(json: &str) -> Option<ItemState> {
+    #[derive(serde::Deserialize)]
+    struct Answer {
+        state: ItemState,
+    }
+    serde_json::from_str::<Answer>(json)
+        .ok()
+        .map(|answer| answer.state)
 }
 
 /// Drop the cached issues for one repository path; see
