@@ -494,6 +494,52 @@ pub async fn remote_default_branch(path: &str, remotes: &[String]) -> Option<Str
     None
 }
 
+/// How far a branch has come relative to the default branch it will be
+/// merged into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BranchProgress {
+    /// The branch tip is contained in `target`.
+    pub merged: bool,
+    /// The branch has commits beyond `created_from`.
+    pub has_commits: bool,
+}
+
+/// Where `branch` stands against `target` (e.g. `origin/main`), counting
+/// its own commits from `created_from`. `None` when git cannot answer — a
+/// branch deleted under the worktree, say — which must not read as unmerged.
+///
+/// Only local refs are read: no fetch, so `target` is as fresh as the
+/// user's last fetch or pull.
+pub async fn branch_progress(
+    path: &str,
+    branch: &str,
+    target: &str,
+    created_from: &str,
+) -> Option<BranchProgress> {
+    let dir = expand(path);
+    let (code, _, _) = run_git(&["merge-base", "--is-ancestor", branch, target], Some(&dir))
+        .await
+        .ok()?;
+    // 1 is "not an ancestor"; anything else is git failing to answer.
+    let merged = match code {
+        0 => true,
+        1 => false,
+        _ => return None,
+    };
+    let range = format!("{created_from}..{branch}");
+    let (code, stdout, _) = run_git(&["rev-list", "--count", &range], Some(&dir))
+        .await
+        .ok()?;
+    if code != 0 {
+        return None;
+    }
+    let count: u64 = stdout.trim().parse().ok()?;
+    Some(BranchProgress {
+        merged,
+        has_commits: count > 0,
+    })
+}
+
 /// Short commit hash for a ref, or `None` when the ref cannot be resolved.
 pub async fn get_ref(path: &str, reference: &str) -> Option<String> {
     let dir = expand(path);

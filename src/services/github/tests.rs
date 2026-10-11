@@ -220,3 +220,31 @@ fn only_an_unknown_blocked_by_field_asks_for_the_older_fields() {
         "the fallback differs from the full list by blockedBy alone"
     );
 }
+
+/// Captured from `gh issue view <n> --json state` and
+/// `gh pr view <n> --json state`.
+#[test]
+fn item_state_parses_what_gh_prints() {
+    assert_eq!(
+        parse_item_state(r#"{"state":"OPEN"}"#),
+        Some(ItemState::Open)
+    );
+    assert_eq!(
+        parse_item_state(r#"{"state":"CLOSED"}"#),
+        Some(ItemState::Closed)
+    );
+    assert_eq!(
+        parse_item_state(r#"{"state":"MERGED"}"#),
+        Some(ItemState::Merged)
+    );
+}
+
+/// An answer that is not one of the three states says nothing — never
+/// "open", which would unmark a finished worktree over a parse failure.
+#[test]
+fn an_unreadable_item_state_is_unknown() {
+    assert_eq!(parse_item_state(""), None);
+    assert_eq!(parse_item_state("not json"), None);
+    assert_eq!(parse_item_state(r#"{"state":"DRAFT"}"#), None);
+    assert_eq!(parse_item_state(r#"{"number":4}"#), None);
+}

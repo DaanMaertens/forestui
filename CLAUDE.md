@@ -213,6 +213,14 @@ with the listing says whether to ignore it (stale, or a create running on that
 repository), keep state (git could not list), or reconcile it while leaving
 the worktrees with a change in flight alone.
 
+**Finished worktrees ride on the same scans.** Each scan also kicks a
+check (throttled per repository, `app/finished.rs`) that asks `gh` for each
+linked issue's or PR's state and git whether a free-text branch is merged into
+the remote default branch; `work::is_finished` is the rule. The marks are
+derived and never saved. A worktree the check could not answer for (`gh`
+signed out, no remote default branch) keeps its previous mark — "could not
+tell" must not unmark it.
+
 **Every worktree-mutating flow goes through `WorktreeSync`.** Starting the
 change returns a change ticket — or nothing, if the worktree already has a
 change running, since a worktree takes one change at a time — the task carries
@@ -629,7 +637,7 @@ proactively, not only when asked.
 scenarios with exact keystrokes and expected output. The P0 cases are the
 regression suite — run the relevant ones after any behavioural change.
 
-UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–104,
+UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–105,
 and the guards UC-90/96 are automated —
 frames plus on-disk assertions (`ASSERTIONS.txt`). Capture a build and compare
 two builds with:

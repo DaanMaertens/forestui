@@ -174,6 +174,17 @@ JSON
       *) echo "[]" ;;
     esac
     exit 0 ;;
+  # The finished check (UC-105) asks each linked item's state. Everything
+  # is open until the sweep raises the flag that merges #45, so no frame
+  # before UC-105 shows a finished worktree.
+  "issue view") echo '{"state":"OPEN"}'; exit 0 ;;
+  "pr view")
+    if [ "$3" = 45 ] && [ -f "$HOME/../pr-45-merged" ]; then
+      echo '{"state":"MERGED"}'
+    else
+      echo '{"state":"OPEN"}'
+    fi
+    exit 0 ;;
   # What `gh pr checkout` leaves behind: the PR's head branch, checked out
   # in the directory it ran in.
   "pr checkout")
@@ -930,6 +941,29 @@ if [ "$LABEL" = "rust" ]; then
   assert UC-104 flow-closed "no" "$(screen_has 'Start Work')"
   assert UC-104 nothing-created "$worktrees_before" \
     "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
+fi
+
+# --- UC-105: finished worktrees -----------------------------------------------
+#
+# Rust only, after UC-104. #45 merges on GitHub (the stub's flag); the next
+# finished check — a selection change, past the per-repository throttle, or
+# the 30-second sweep — marks pr-45's row with a ✓ and dims it. The issue and
+# free-text worktrees beside it stay unmarked: #77 is still open, and beta has
+# no remote whose default branch the free-text branch could be merged into.
+if [ "$LABEL" = "rust" ]; then
+  touch "$ROOT/pr-45-merged"
+  focus_app
+  tu mouse click --name "$SESS" --on-regex '[▼▶] alpha' >/dev/null 2>&1
+  await "Repository: alpha"
+  tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
+  await "Repository: beta"
+  await "✓ pr-45" 45000; sleep 0.5
+  capture UC-105 finished-marked
+  assert UC-105 merged-pr-marked "yes" "$(screen_has '[├└]─ ✓ pr-45')"
+  assert UC-105 open-issue-unmarked "no" "$(screen_has '✓ feat-77')"
+  assert UC-105 free-text-unmarked "no" "$(screen_has '✓ feat-try')"
+  assert UC-105 mark-not-saved "False" \
+    "$(cfg "any('finished' in w for r in d['repositories'] for w in r['worktrees'])")"
 fi
 
 # --- UC-72: delete a worktree, clean and dirty ---------------------------------

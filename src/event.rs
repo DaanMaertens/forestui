@@ -5,6 +5,7 @@
 //! Everything lands in one `mpsc::UnboundedReceiver<AppEvent>`, so the main loop
 //! stays a plain `while let Some(event) = rx.recv().await`.
 
+use crate::app::finished::FinishedTicket;
 use crate::app::worktree_sync::{ChangeTicket, CreateTicket, ScanTicket};
 use crate::models::{ClaudeSession, GitHubIssue, Worktree};
 use crate::services::github::AuthStatus;
@@ -182,6 +183,16 @@ pub enum AppEvent {
     WorktreesScanned {
         scan: ScanTicket,
         listed: Option<Vec<crate::services::git::WorktreeInfo>>,
+    },
+    /// Which of a repository's linked worktrees are finished: `true`
+    /// finished, `false` not, absent when the check could not tell.
+    ///
+    /// `ticket` goes back to
+    /// [`FinishedWorktrees`](crate::app::finished::FinishedWorktrees), which
+    /// keeps the marks — derived state, never saved.
+    WorktreesFinished {
+        ticket: FinishedTicket,
+        verdicts: std::collections::HashMap<Uuid, bool>,
     },
     /// A rename task ended without renaming (the target existed, or the move
     /// itself failed). Exists so the fold can release the rename's

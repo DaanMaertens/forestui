@@ -239,15 +239,24 @@ fn row_line(row: &SidebarRow) -> Line<'static> {
             name,
             branch,
             is_last,
+            finished,
             ..
         } => {
             let connector = if *is_last { "└─" } else { "├─" };
-            let mut spans = vec![Span::styled(
-                format!("{connector} {name}"),
-                theme::primary(),
-            )];
+            // The badge leads the name: a long name is clipped at the divider,
+            // and a trailing ✓ would be the first thing to go.
+            let (name_style, branch_style) = if *finished {
+                (theme::finished(), theme::finished())
+            } else {
+                (theme::primary(), theme::accent())
+            };
+            let mut spans = vec![Span::styled(format!("{connector} "), theme::primary())];
+            if *finished {
+                spans.push(Span::styled("✓ ", theme::finished_badge()));
+            }
+            spans.push(Span::styled(name.clone(), name_style));
             if let Some(branch) = branch {
-                spans.push(Span::styled(format!(" [{branch}]"), theme::accent()));
+                spans.push(Span::styled(format!(" [{branch}]"), branch_style));
             }
             Line::from(spans)
         }

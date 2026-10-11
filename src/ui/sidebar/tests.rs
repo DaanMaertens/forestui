@@ -9,6 +9,7 @@ fn worktree_rows_show_a_branch_that_differs() {
         name: "wt-two".into(),
         branch: Some("release-2".into()),
         is_last: true,
+        finished: false,
     };
     let rendered = format!("{:?}", row_to_item(&row, false));
     // The Textual build lost this to console-markup parsing; assert it survives.
@@ -26,8 +27,22 @@ fn worktree_rows_omit_a_branch_that_only_repeats_the_name() {
         name: "wt-two".into(),
         branch: None,
         is_last: true,
+        finished: false,
     };
-    let rendered = format!("{:?}", row_to_item(&row, false));
+    let rendered = row_line(&row).to_string();
     assert!(rendered.contains("wt-two"));
     assert!(!rendered.contains('['));
+}
+
+#[test]
+fn a_finished_worktree_row_leads_with_a_badge() {
+    let row = SidebarRow::Worktree {
+        repo_id: Uuid::new_v4(),
+        id: Uuid::new_v4(),
+        name: "wt-two".into(),
+        branch: Some("release-2".into()),
+        is_last: true,
+        finished: true,
+    };
+    assert_eq!(row_line(&row).to_string(), "└─ ✓ wt-two [release-2]");
 }

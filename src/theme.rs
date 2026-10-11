@@ -235,6 +235,17 @@ pub fn warning() -> Style {
     Style::default().fg(active().warning)
 }
 
+/// A finished worktree's sidebar name: dimmed, since its work is done and
+/// it is waiting to be pruned, not worked in.
+pub fn finished() -> Style {
+    Style::default().fg(active().text_muted)
+}
+
+/// The ✓ beside a finished worktree.
+pub fn finished_badge() -> Style {
+    Style::default().fg(active().success)
+}
+
 pub fn destructive() -> Style {
     Style::default().fg(active().destructive)
 }

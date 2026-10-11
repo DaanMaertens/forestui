@@ -256,3 +256,63 @@ async fn list_branches_keeps_remote_branches_but_not_remote_names() {
     assert!(!all.contains(&"origin".to_string()));
     assert!(!all.iter().any(|b| b.ends_with("/HEAD")));
 }
+
+/// A free-text feature's branch, from creation to merged upstream.
+#[tokio::test]
+async fn branch_progress_follows_a_branch_into_the_default_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let upstream = dir.path().join("upstream");
+    init_repo(&upstream);
+    let clone = dir.path().join("clone");
+    git_in(
+        dir.path(),
+        &["clone", "-q", &upstream.to_string_lossy(), "clone"],
+    );
+    git_in(&clone, &["config", "user.email", "t@example.com"]);
+    git_in(&clone, &["config", "user.name", "t"]);
+    let clone_str = clone.to_string_lossy().to_string();
+    let base = get_ref(&clone_str, "origin/main").await.unwrap();
+
+    git_in(&clone, &["branch", "feat/thing", "origin/main"]);
+    let fresh = branch_progress(&clone_str, "feat/thing", "origin/main", &base).await;
+    assert_eq!(
+        fresh,
+        Some(BranchProgress {
+            merged: true,
+            has_commits: false
+        })
+    );
+
+    git_in(&clone, &["switch", "-q", "feat/thing"]);
+    git_in(&clone, &["commit", "-q", "--allow-empty", "-m", "work"]);
+    let working = branch_progress(&clone_str, "feat/thing", "origin/main", &base).await;
+    assert_eq!(
+        working,
+        Some(BranchProgress {
+            merged: false,
+            has_commits: true
+        })
+    );
+
+    git_in(&clone, &["push", "-q", "origin", "feat/thing"]);
+    git_in(&upstream, &["merge", "-q", "--ff-only", "feat/thing"]);
+    git_in(&clone, &["fetch", "-q", "origin"]);
+    let merged = branch_progress(&clone_str, "feat/thing", "origin/main", &base).await;
+    assert_eq!(
+        merged,
+        Some(BranchProgress {
+            merged: true,
+            has_commits: true
+        })
+    );
+}
+
+/// A branch git cannot resolve is unknown, not "unmerged".
+#[tokio::test]
+async fn branch_progress_of_a_missing_branch_is_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let repo = dir.path().to_string_lossy().to_string();
+    let head = get_ref(&repo, "HEAD").await.unwrap();
+    assert_eq!(branch_progress(&repo, "gone", "main", &head).await, None);
+}

@@ -8,6 +8,7 @@
 
 mod actions;
 pub mod detail;
+pub mod finished;
 mod keys;
 mod mouse;
 mod repo_settings;
@@ -86,6 +87,8 @@ pub enum SidebarRow {
         /// is what gets truncated, leaving every row ending in `[feat/doc-impro`.
         branch: Option<String>,
         is_last: bool,
+        /// Its work item is done; see [`finished`].
+        finished: bool,
     },
     ArchivedHeader,
     ArchivedWorktree {
@@ -156,6 +159,8 @@ pub struct App {
     /// Worktree scans and the changes they must not undo; see
     /// [`worktree_sync`].
     worktree_sync: worktree_sync::WorktreeSync,
+    /// Which worktrees are finished, from the check that rides on the scans.
+    finished: finished::FinishedWorktrees,
     /// When the last periodic worktree sweep started.
     last_worktree_scan: Instant,
     /// When the last periodic session refresh started.
@@ -293,6 +298,7 @@ impl App {
             repo_probes: std::collections::HashSet::new(),
             sessions_in_flight: std::collections::HashSet::new(),
             worktree_sync: worktree_sync::WorktreeSync::default(),
+            finished: finished::FinishedWorktrees::default(),
             last_worktree_scan: Instant::now(),
             last_session_refresh: Instant::now(),
             sessions_refreshing: std::collections::HashSet::new(),
@@ -621,6 +627,26 @@ impl App {
             let listed = git::list_worktrees(&source).await.ok();
             tx.send(AppEvent::WorktreesScanned { scan, listed });
         });
+        self.check_finished(repo_id);
+    }
+
+    /// Kick a background check of which of a repository's linked worktrees
+    /// are finished. Rides on every worktree scan, throttled per repository
+    /// by [`finished::MIN_INTERVAL`] since a selection change rescans too.
+    fn check_finished(&mut self, repo_id: Uuid) {
+        let Some(repo) = self.state.find_repository(repo_id) else {
+            return;
+        };
+        let Some(ticket) = self.finished.start(repo_id, Instant::now()) else {
+            return;
+        };
+        let source = repo.source_path.clone();
+        let linked = finished::linked(repo);
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let verdicts = finished::check(&source, &linked).await;
+            tx.send(AppEvent::WorktreesFinished { ticket, verdicts });
+        });
     }
 
     /// Keep the binary current, the way the Python build did on every launch.
@@ -687,6 +713,7 @@ impl App {
                         &self.settings.branch_prefix,
                     ),
                     is_last: index == last_index,
+                    finished: self.finished.contains(worktree.id),
                 });
             }
         }
@@ -1049,6 +1076,7 @@ impl App {
                 event,
                 AppEvent::Tick
                     | AppEvent::WorktreesScanned { .. }
+                    | AppEvent::WorktreesFinished { .. }
                     | AppEvent::Sessions { .. }
                     | AppEvent::LiveSessions { .. }
             )
@@ -1304,6 +1332,19 @@ impl App {
                             Severity::Error,
                         );
                     }
+                }
+            }
+            AppEvent::WorktreesFinished { ticket, verdicts } => {
+                // Only the worktrees the repository has now: one removed
+                // while the check ran, or another repository's, is not
+                // this result's to mark.
+                let current = self
+                    .state
+                    .find_repository(ticket.repo_id())
+                    .map(|repo| repo.worktrees.iter().map(|w| w.id).collect());
+                if self.finished.fold(ticket, &verdicts, current.as_ref()) {
+                    self.redraw = true;
+                    self.rebuild_rows();
                 }
             }
             AppEvent::WorktreesScanned { scan, listed } => {
