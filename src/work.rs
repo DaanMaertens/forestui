@@ -2,15 +2,12 @@
 //! worktree and branch, and the entry a work item is searched by.
 
 use crate::fuzzy::Searchable;
-use crate::models::{GitHubIssue, GitHubPullRequest, WorkItemLink, Worktree};
+use crate::models::{GitHubIssue, GitHubPullRequest, StartWorkSettings, WorkItemLink, Worktree};
 use crate::prompt;
 
 /// The longest slug a title contributes to a name, so a long title cannot
 /// produce a directory or branch name nobody wants to type.
 const SLUG_LIMIT: usize = 40;
-
-/// The labels that make an issue a feature, until they become a setting.
-pub const DEFAULT_FEATURE_LABELS: &[&str] = &["enhancement"];
 
 /// The kind of work about to start, which decides what the item list holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,11 +88,11 @@ pub fn review_kind(author: &str, viewer: Option<&str>) -> ReviewKind {
 
 /// Whether an issue carries one of the feature labels. GitHub treats label
 /// names case-insensitively, so `Enhancement` counts as `enhancement`.
-pub fn is_feature(issue: &GitHubIssue, feature_labels: &[&str]) -> bool {
+pub fn is_feature(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> bool {
     issue.labels.iter().any(|label| {
         feature_labels
             .iter()
-            .any(|wanted| label.name.eq_ignore_ascii_case(wanted))
+            .any(|wanted| label.name.eq_ignore_ascii_case(wanted.as_ref()))
     })
 }
 
@@ -103,7 +100,7 @@ pub fn is_feature(issue: &GitHubIssue, feature_labels: &[&str]) -> bool {
 /// which wins over anything else it carries, so a `bug` + `enhancement`
 /// issue is a feature — and `issue` otherwise. An issue card starts in it
 /// directly, and [`issues_for`] lists by it, so the two never disagree.
-pub fn mode_for(issue: &GitHubIssue, feature_labels: &[&str]) -> WorkMode {
+pub fn mode_for(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> WorkMode {
     if is_feature(issue, feature_labels) {
         WorkMode::Feature
     } else {
@@ -116,7 +113,7 @@ pub fn mode_for(issue: &GitHubIssue, feature_labels: &[&str]) -> WorkMode {
 pub fn issues_for(
     mode: WorkMode,
     issues: &[GitHubIssue],
-    feature_labels: &[&str],
+    feature_labels: &[impl AsRef<str>],
 ) -> Vec<GitHubIssue> {
     issues
         .iter()
@@ -132,28 +129,60 @@ pub struct WorktreeNames {
     pub branch: String,
 }
 
-/// Name the worktree and branch for a numbered work item.
+/// Name the worktree and branch for a numbered work item, by the naming
+/// `settings` give its mode.
 ///
-/// The worktree carries the mode, the number and a slug of the title, so the
-/// sidebar shows what kind of work it holds; the branch is the worktree name
-/// under the mode's conventional prefix. A `pr-review` worktree checks out
-/// the PR's own branch, so only its worktree name is used.
-pub fn names(mode: WorkMode, number: i64, title: &str) -> WorktreeNames {
-    let (prefix, branch_prefix) = match mode {
-        WorkMode::Issue => ("issue", "fix/"),
-        WorkMode::Feature => ("feat", "feat/"),
-        WorkMode::PrReview => ("pr", ""),
+/// By default the worktree carries the mode, the number and a slug of the
+/// title, so the sidebar shows what kind of work it holds, and the branch is
+/// the worktree name under the mode's conventional prefix. A `pr-review`
+/// worktree checks out the PR's own branch, so only its worktree name is
+/// used.
+pub fn names(
+    settings: &StartWorkSettings,
+    mode: WorkMode,
+    number: i64,
+    title: &str,
+) -> WorktreeNames {
+    let (branch_prefix, pattern) = match mode {
+        WorkMode::Issue => (&settings.issue.branch_prefix, &settings.issue.name_pattern),
+        WorkMode::Feature => (
+            &settings.feature.branch_prefix,
+            &settings.feature.name_pattern,
+        ),
+        WorkMode::PrReview => (&String::new(), &settings.pr_review.name_pattern),
     };
-    let slug = title_slug(title);
-    let worktree = if slug.is_empty() {
-        format!("{prefix}-{number}")
+    let filled = fill_pattern(pattern, Some(number), &title_slug(title));
+    // A pattern that fills to nothing would name every item alike.
+    let worktree = if filled.is_empty() {
+        number.to_string()
     } else {
-        format!("{prefix}-{number}-{slug}")
+        filled
     };
     WorktreeNames {
         branch: format!("{branch_prefix}{worktree}"),
         worktree,
     }
+}
+
+/// A name pattern with `{number}` and `{slug}` filled in, kept to what a
+/// worktree directory may be called: letters, digits, `-` and `_`. A
+/// placeholder that fills to nothing leaves no doubled or dangling `-`
+/// behind, so `issue-{number}-{slug}` on an empty slug is `issue-<n>`.
+fn fill_pattern(pattern: &str, number: Option<i64>, slug: &str) -> String {
+    let number = number.map(|n| n.to_string()).unwrap_or_default();
+    let filled = pattern.replace("{number}", &number).replace("{slug}", slug);
+    let mut out = String::with_capacity(filled.len());
+    for ch in filled.chars() {
+        let ch = if ch.is_ascii_alphanumeric() || ch == '_' {
+            ch
+        } else {
+            '-'
+        };
+        if !(ch == '-' && (out.is_empty() || out.ends_with('-'))) {
+            out.push(ch);
+        }
+    }
+    out.trim_end_matches('-').to_string()
 }
 
 /// A title as a name fragment: lowercase ASCII letters and digits, every other
@@ -169,10 +198,13 @@ pub fn title_slug(title: &str) -> String {
 /// all of it would be cut off mid-word by the cap anyway.
 const FREE_TEXT_WORDS: usize = 6;
 
-/// Name the worktree and branch for a free-text feature: `feat-<slug>` on
-/// `feat/`, from the description's first words. `None` when they hold nothing
-/// a name can be made of, so two such descriptions never share a bare `feat-`.
-pub fn free_text_names(description: &str) -> Option<WorktreeNames> {
+/// Name the worktree and branch for a free-text feature, by the
+/// `free_feature` naming — `feat-<slug>` on `feat/` by default — from the
+/// description's first words. `None` when they hold nothing a name can be
+/// made of, or the pattern fills to nothing: a bare prefix would be shared
+/// by every such description. A pattern without `{slug}` names them all
+/// alike too; the clash question is what catches that.
+pub fn free_text_names(settings: &StartWorkSettings, description: &str) -> Option<WorktreeNames> {
     let first_words: Vec<&str> = description
         .split_whitespace()
         .take(FREE_TEXT_WORDS)
@@ -181,9 +213,13 @@ pub fn free_text_names(description: &str) -> Option<WorktreeNames> {
     if slug.is_empty() {
         return None;
     }
-    let worktree = format!("feat-{slug}");
+    let naming = &settings.free_feature;
+    let worktree = fill_pattern(&naming.name_pattern, None, &slug);
+    if worktree.is_empty() {
+        return None;
+    }
     Some(WorktreeNames {
-        branch: format!("feat/{worktree}"),
+        branch: format!("{}{worktree}", naming.branch_prefix),
         worktree,
     })
 }
@@ -355,7 +391,7 @@ impl Searchable for PullRequestEntry {
 pub fn item_entries(
     mode: WorkMode,
     issues: &[GitHubIssue],
-    feature_labels: &[&str],
+    feature_labels: &[impl AsRef<str>],
     linked: impl Fn(i64) -> Option<String>,
 ) -> Vec<ItemEntry> {
     let free_text = (mode == WorkMode::Feature).then_some(ItemEntry::FreeText);

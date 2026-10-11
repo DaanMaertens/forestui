@@ -296,6 +296,25 @@ fn settings_cycles_selects_and_saves() {
     }
 }
 
+/// The dialog does not edit Start work, so it must hand back exactly what
+/// it was opened with — or saving the theme would reset a hand-edited
+/// scope, labels and naming to the defaults.
+#[test]
+fn saving_settings_keeps_the_start_work_section() {
+    let mut settings = Settings::default();
+    settings.start_work.scope = crate::models::Scope::All;
+    settings.start_work.feature_labels = vec!["feature".into()];
+    settings.start_work.issue.branch_prefix = "bug/".into();
+    let mut modal = SettingsModal::new(&settings);
+    modal.focus = SettingsModal::FOCUS_SAVE;
+    let ModalOutcome::Submit(ModalResult::SettingsSaved(saved)) =
+        modal.handle_key(key(KeyCode::Enter))
+    else {
+        panic!("Save must submit the settings");
+    };
+    assert_eq!(saved.start_work, settings.start_work);
+}
+
 /// The Remote Control checkbox opens showing the stored value, toggles on
 /// Space and on Enter (a click sends Enter, and must not save and close),
 /// and Save carries whatever it shows.

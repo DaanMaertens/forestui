@@ -9,8 +9,9 @@ use crate::event::BranchList;
 use crate::fuzzy::{self, BranchEntry, Searchable};
 use crate::models::{
     CustomClaudeButton, GitHubIssue, GitHubPullRequest, MAX_BUTTON_LABEL_LENGTH,
-    MAX_BUTTON_PREFIX_LENGTH, MAX_CLAUDE_COMMAND_LENGTH, Repository, Settings, WorkItemLink,
-    derive_prefix, validate_button_label, validate_button_prefix, validate_claude_command,
+    MAX_BUTTON_PREFIX_LENGTH, MAX_CLAUDE_COMMAND_LENGTH, Repository, Settings, StartWorkSettings,
+    WorkItemLink, derive_prefix, validate_button_label, validate_button_prefix,
+    validate_claude_command,
 };
 use crate::picker::SearchPicker;
 use crate::prompt;
@@ -730,6 +731,9 @@ pub struct StartWorkModal {
     /// Work item → the worktree already started for it, as the flow opened.
     /// Only marks the list: picking an item checks the live state.
     linked: HashMap<WorkItemLink, String>,
+    /// The settings in effect as the flow opened: which issues are
+    /// features, and how a free-text feature is named.
+    pub start_work: StartWorkSettings,
     /// One of the `FOCUS_*` constants; see [`StartWorkModal::ring`].
     pub focus: usize,
 }
@@ -747,7 +751,11 @@ impl StartWorkModal {
     pub const FOCUS_COPY: usize = 4;
     pub const FOCUS_EDIT: usize = 5;
 
-    pub fn new(repo: &Repository, issues: Option<Vec<GitHubIssue>>) -> Self {
+    pub fn new(
+        repo: &Repository,
+        issues: Option<Vec<GitHubIssue>>,
+        start_work: StartWorkSettings,
+    ) -> Self {
         let mut modal = Self {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
@@ -766,6 +774,7 @@ impl StartWorkModal {
                 .iter()
                 .filter_map(|w| Some((w.work_item.clone()?, w.name.clone())))
                 .collect(),
+            start_work,
             focus: Self::FOCUS_LIST,
         };
         if let Some(issues) = issues {
@@ -875,9 +884,12 @@ impl StartWorkModal {
                 (true, Some(issues)) => issues,
                 (true, None) => return,
             };
-            work::item_entries(self.mode, issues, work::DEFAULT_FEATURE_LABELS, |number| {
-                self.linked.get(&WorkItemLink::Issue { number }).cloned()
-            })
+            work::item_entries(
+                self.mode,
+                issues,
+                &self.start_work.feature_labels,
+                |number| self.linked.get(&WorkItemLink::Issue { number }).cloned(),
+            )
         };
         self.picker = Some(SearchPicker::new(
             entries,
@@ -1035,7 +1047,7 @@ impl StartWorkModal {
                         // Words with nothing to name a worktree after go
                         // nowhere; the field stays up to say so by not moving.
                         let description = self.typed_description();
-                        if work::free_text_names(&description).is_none() {
+                        if work::free_text_names(&self.start_work, &description).is_none() {
                             return ModalOutcome::None;
                         }
                         return ModalOutcome::Effect(ModalEffect::ConfirmFreeText {
@@ -1424,6 +1436,8 @@ pub struct SettingsModal {
     pub custom_buttons: Vec<CustomClaudeButton>,
     /// Start Claude sessions with `--remote-control`.
     pub remote_control: bool,
+    /// Not edited here; carried through so saving the dialog keeps it.
+    start_work: StartWorkSettings,
     /// Snapshot, not a live read. The renderer runs on every frame, and asking
     /// on each one meant three file reads and three digests per repaint — I/O
     /// in a draw path, which stutters visibly on a slow or networked home.
@@ -1462,6 +1476,7 @@ impl SettingsModal {
             branch_prefix: TextInput::new(settings.branch_prefix.clone()).with_placeholder("feat/"),
             custom_buttons: settings.custom_buttons.clone(),
             remote_control: settings.remote_control,
+            start_work: settings.start_work.clone(),
             integration_status: crate::services::claude_plugin::status(),
             focus: Self::FOCUS_EDITOR,
         }
@@ -1482,6 +1497,7 @@ impl SettingsModal {
             theme_name: self.theme_slug.to_string(),
             custom_buttons: self.custom_buttons.clone(),
             remote_control: self.remote_control,
+            start_work: self.start_work.clone(),
         }
     }
 

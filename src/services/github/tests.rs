@@ -39,7 +39,7 @@ fn signal_killed_process_is_a_plain_failure() {
 #[test]
 fn peek_reports_freshness_without_io() {
     let mut cache = IssueCache::default();
-    assert!(cache.peek("/nowhere/never-seen").is_none());
+    assert!(cache.peek("/nowhere/never-seen", Scope::Mine).is_none());
 
     let issue: GitHubIssue = serde_json::from_str(
         r#"{"number":1,"title":"T","state":"OPEN","url":"https://x/1",
@@ -51,10 +51,11 @@ fn peek_reports_freshness_without_io() {
     cache.store_if_current(
         cache.generation,
         "/repo/fresh",
+        Scope::Mine,
         std::slice::from_ref(&issue),
         true,
     );
-    let (issues, fresh) = cache.peek("/repo/fresh").expect("cached");
+    let (issues, fresh) = cache.peek("/repo/fresh", Scope::Mine).expect("cached");
     assert_eq!(issues.len(), 1);
     assert!(fresh);
 
@@ -63,15 +64,19 @@ fn peek_reports_freshness_without_io() {
         "/repo/stale".into(),
         Cached {
             issues: vec![issue],
+            scope: Scope::Mine,
             fetched_at: old,
         },
     );
-    let (_, fresh) = cache.peek("/repo/stale").expect("cached");
+    let (_, fresh) = cache.peek("/repo/stale", Scope::Mine).expect("cached");
     assert!(!fresh, "an expired entry must read as stale");
 
     cache.invalidate("/repo/fresh");
-    assert!(cache.peek("/repo/fresh").is_none());
-    assert!(cache.peek("/repo/stale").is_some(), "targeted invalidation");
+    assert!(cache.peek("/repo/fresh", Scope::Mine).is_none());
+    assert!(
+        cache.peek("/repo/stale", Scope::Mine).is_some(),
+        "targeted invalidation"
+    );
 }
 
 /// A fetch that started before an invalidation must not store afterwards:
@@ -82,15 +87,15 @@ fn an_invalidation_fences_out_older_fetches() {
     let mut cache = IssueCache::default();
     let before = cache.generation;
     cache.invalidate("/repo/fenced");
-    cache.store_if_current(before, "/repo/fenced", &[], true);
+    cache.store_if_current(before, "/repo/fenced", Scope::Mine, &[], true);
     assert!(
-        cache.peek("/repo/fenced").is_none(),
+        cache.peek("/repo/fenced", Scope::Mine).is_none(),
         "a pre-invalidation fetch must not repopulate the cache"
     );
 
     // A fetch that started after the invalidation stores normally.
-    cache.store_if_current(cache.generation, "/repo/fenced", &[], true);
-    assert!(cache.peek("/repo/fenced").is_some());
+    cache.store_if_current(cache.generation, "/repo/fenced", Scope::Mine, &[], true);
+    assert!(cache.peek("/repo/fenced", Scope::Mine).is_some());
 }
 
 /// Negative answers render instantly but re-check on the next visit — a
@@ -98,8 +103,8 @@ fn an_invalidation_fences_out_older_fetches() {
 #[test]
 fn empty_answers_are_cached_as_already_stale() {
     let mut cache = IssueCache::default();
-    cache.store_if_current(cache.generation, "/repo/negative", &[], false);
-    let (issues, fresh) = cache.peek("/repo/negative").expect("cached");
+    cache.store_if_current(cache.generation, "/repo/negative", Scope::Mine, &[], false);
+    let (issues, fresh) = cache.peek("/repo/negative", Scope::Mine).expect("cached");
     assert!(issues.is_empty());
     assert!(!fresh, "a negative answer must not count as fresh");
 }
@@ -164,4 +169,38 @@ fn an_unreadable_pull_request_list_is_skipped() {
       "headRefName":"b","isDraft":false,"number":3,"title":"T"}]"#;
     let prs = merge_pull_requests(&["", "not json", ok]);
     assert_eq!(prs.len(), 1);
+}
+
+/// A list fetched for one scope is never served for the other: switching
+/// to `all` must not show the `mine` list as though it were everything.
+#[test]
+fn the_cache_answers_only_for_the_scope_it_was_fetched_for() {
+    let mut cache = IssueCache::default();
+    cache.store_if_current(cache.generation, "/repo/scoped", Scope::Mine, &[], true);
+    assert!(cache.peek("/repo/scoped", Scope::Mine).is_some());
+    assert!(cache.peek("/repo/scoped", Scope::All).is_none());
+
+    cache.store_if_current(cache.generation, "/repo/scoped", Scope::All, &[], true);
+    assert!(cache.peek("/repo/scoped", Scope::All).is_some());
+    assert!(cache.peek("/repo/scoped", Scope::Mine).is_none());
+}
+
+/// `mine` keeps the two lists it always asked for; `all` asks once, with no
+/// filter, for every open item.
+#[test]
+fn the_scope_decides_the_gh_filters() {
+    assert_eq!(
+        issue_filters(Scope::Mine),
+        &[&["--assignee", "@me"][..], &["--author", "@me"][..]]
+    );
+    assert_eq!(
+        pull_request_filters(Scope::Mine),
+        &[
+            &["--search", "review-requested:@me"][..],
+            &["--author", "@me"][..]
+        ]
+    );
+    let unfiltered: &[&[&str]] = &[&[]];
+    assert_eq!(issue_filters(Scope::All), unfiltered);
+    assert_eq!(pull_request_filters(Scope::All), unfiltered);
 }

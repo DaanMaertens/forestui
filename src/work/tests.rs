@@ -1,9 +1,18 @@
 use super::*;
+use crate::models::{Naming, StartWorkSettings};
+
+fn defaults() -> StartWorkSettings {
+    StartWorkSettings::default()
+}
+
+fn default_labels() -> Vec<String> {
+    defaults().feature_labels
+}
 
 #[test]
 fn an_issue_is_named_issue_number_slug_on_a_fix_branch() {
     assert_eq!(
-        names(WorkMode::Issue, 42, "Fix login bug!"),
+        names(&defaults(), WorkMode::Issue, 42, "Fix login bug!"),
         WorktreeNames {
             worktree: "issue-42-fix-login-bug".into(),
             branch: "fix/issue-42-fix-login-bug".into(),
@@ -14,7 +23,7 @@ fn an_issue_is_named_issue_number_slug_on_a_fix_branch() {
 #[test]
 fn a_feature_issue_is_named_feat_on_a_feat_branch() {
     assert_eq!(
-        names(WorkMode::Feature, 7, "Dark mode"),
+        names(&defaults(), WorkMode::Feature, 7, "Dark mode"),
         WorktreeNames {
             worktree: "feat-7-dark-mode".into(),
             branch: "feat/feat-7-dark-mode".into(),
@@ -24,8 +33,14 @@ fn a_feature_issue_is_named_feat_on_a_feat_branch() {
 
 #[test]
 fn a_title_with_nothing_sluggable_names_by_number_alone() {
-    assert_eq!(names(WorkMode::Issue, 5, "!!! ???").worktree, "issue-5");
-    assert_eq!(names(WorkMode::Issue, 5, "").branch, "fix/issue-5");
+    assert_eq!(
+        names(&defaults(), WorkMode::Issue, 5, "!!! ???").worktree,
+        "issue-5"
+    );
+    assert_eq!(
+        names(&defaults(), WorkMode::Issue, 5, "").branch,
+        "fix/issue-5"
+    );
 }
 
 /// The cap applies to the slug, and a cut that lands on a separator does
@@ -67,6 +82,7 @@ fn an_unknown_viewer_reviews_without_changing_code() {
 fn a_pull_request_is_named_pr_number_slug() {
     assert_eq!(
         names(
+            &defaults(),
             WorkMode::PrReview,
             31,
             "Give the cache tests their own cache"
@@ -100,7 +116,7 @@ fn feature_labelled_issues_split_from_the_rest() {
         labelled(4, &["bug", "enhancement"]),
         labelled(5, &["Enhancement"]),
     ];
-    let labels = DEFAULT_FEATURE_LABELS;
+    let labels = &default_labels();
     assert_eq!(
         numbers(&issues_for(WorkMode::Issue, &issues, labels)),
         vec![1, 3]
@@ -138,22 +154,16 @@ fn every_issue_is_in_exactly_one_list() {
 fn an_issue_starts_in_the_mode_that_lists_it() {
     let issues = vec![labelled(1, &["bug"]), labelled(2, &["bug", "Enhancement"])];
     for issue in &issues {
-        let mode = mode_for(issue, DEFAULT_FEATURE_LABELS);
-        let listed = issues_for(mode, &issues, DEFAULT_FEATURE_LABELS);
+        let mode = mode_for(issue, &default_labels());
+        let listed = issues_for(mode, &issues, &default_labels());
         assert!(
             numbers(&listed).contains(&issue.number),
             "#{}",
             issue.number
         );
     }
-    assert_eq!(
-        mode_for(&issues[0], DEFAULT_FEATURE_LABELS),
-        WorkMode::Issue
-    );
-    assert_eq!(
-        mode_for(&issues[1], DEFAULT_FEATURE_LABELS),
-        WorkMode::Feature
-    );
+    assert_eq!(mode_for(&issues[0], &default_labels()), WorkMode::Issue);
+    assert_eq!(mode_for(&issues[1], &default_labels()), WorkMode::Feature);
 }
 
 fn pull_request(review: ReviewKind) -> WorkItem {
@@ -211,14 +221,17 @@ fn an_issue_entry_is_searched_by_number_and_title() {
 #[test]
 fn a_free_text_feature_is_named_from_its_first_words() {
     assert_eq!(
-        free_text_names("Try a dark theme for the sidebar and every modal"),
+        free_text_names(
+            &defaults(),
+            "Try a dark theme for the sidebar and every modal"
+        ),
         Some(WorktreeNames {
             worktree: "feat-try-a-dark-theme-for-the".into(),
             branch: "feat/feat-try-a-dark-theme-for-the".into(),
         })
     );
     assert_eq!(
-        free_text_names("  Spike:   GraphQL?  ").map(|n| n.worktree),
+        free_text_names(&defaults(), "  Spike:   GraphQL?  ").map(|n| n.worktree),
         Some("feat-spike-graphql".into())
     );
 }
@@ -227,20 +240,20 @@ fn a_free_text_feature_is_named_from_its_first_words() {
 /// `feat-` that every such description would share.
 #[test]
 fn a_description_with_nothing_sluggable_has_no_names() {
-    assert_eq!(free_text_names(""), None);
-    assert_eq!(free_text_names("!!! ???"), None);
+    assert_eq!(free_text_names(&defaults(), ""), None);
+    assert_eq!(free_text_names(&defaults(), "!!! ???"), None);
 }
 
 #[test]
 fn long_first_words_are_still_capped() {
-    let names = free_text_names(&"abcdefghij ".repeat(6)).unwrap();
+    let names = free_text_names(&defaults(), &"abcdefghij ".repeat(6)).unwrap();
     assert!(names.worktree.len() <= "feat-".len() + 40, "{names:?}");
     assert!(!names.worktree.ends_with('-'), "{names:?}");
 }
 
 #[test]
 fn a_copy_takes_the_first_free_suffix_from_two() {
-    let names = free_text_names("Dark mode").unwrap();
+    let names = free_text_names(&defaults(), "Dark mode").unwrap();
     let copy = first_free_copy(&names, |_| false);
     assert_eq!(copy.worktree, "feat-dark-mode-2");
     assert_eq!(copy.branch, "feat/feat-dark-mode-2");
@@ -258,7 +271,7 @@ fn worktree(name: &str, branch: &str) -> crate::models::Worktree {
 /// would make git refuse the create.
 #[test]
 fn names_clash_on_the_worktree_name_or_the_branch() {
-    let names = free_text_names("Dark mode").unwrap();
+    let names = free_text_names(&defaults(), "Dark mode").unwrap();
     let by_name = [worktree("feat-dark-mode", "elsewhere")];
     let by_branch = [worktree("renamed", "feat/feat-dark-mode")];
     let neither = [worktree("feat-dark-mode-2", "feat/feat-dark-mode-2")];
@@ -347,7 +360,7 @@ fn the_pr_review_list_holds_the_pull_requests() {
 #[test]
 fn the_feature_list_leads_with_free_text() {
     let issues = vec![labelled(2, &["enhancement"]), labelled(3, &["enhancement"])];
-    let entries = item_entries(WorkMode::Feature, &issues, DEFAULT_FEATURE_LABELS, |_| None);
+    let entries = item_entries(WorkMode::Feature, &issues, &default_labels(), |_| None);
     assert!(matches!(entries[0], ItemEntry::FreeText));
     let numbers: Vec<_> = entries
         .iter()
@@ -358,6 +371,93 @@ fn the_feature_list_leads_with_free_text() {
         .collect();
     assert_eq!(numbers, vec![2, 3]);
 
-    let entries = item_entries(WorkMode::Issue, &issues, DEFAULT_FEATURE_LABELS, |_| None);
+    let entries = item_entries(WorkMode::Issue, &issues, &default_labels(), |_| None);
     assert!(entries.is_empty(), "no free text outside `feature`");
+}
+
+/// The configured prefix and pattern name the worktree and branch, per mode.
+#[test]
+fn naming_follows_the_configured_prefix_and_pattern() {
+    let mut settings = defaults();
+    settings.issue = Naming {
+        branch_prefix: "bug/".into(),
+        name_pattern: "{number}_{slug}".into(),
+    };
+    settings.feature.name_pattern = "feature-{slug}-{number}".into();
+    settings.pr_review.name_pattern = "review-{number}".into();
+    assert_eq!(
+        names(&settings, WorkMode::Issue, 42, "Fix login bug"),
+        WorktreeNames {
+            worktree: "42_fix-login-bug".into(),
+            branch: "bug/42_fix-login-bug".into(),
+        }
+    );
+    assert_eq!(
+        names(&settings, WorkMode::Feature, 7, "Dark mode"),
+        WorktreeNames {
+            worktree: "feature-dark-mode-7".into(),
+            branch: "feat/feature-dark-mode-7".into(),
+        }
+    );
+    assert_eq!(
+        names(&settings, WorkMode::PrReview, 31, "Anything").worktree,
+        "review-31"
+    );
+}
+
+/// A free-text feature has its own naming, and no number to fill in.
+#[test]
+fn a_free_text_feature_follows_its_own_naming() {
+    let mut settings = defaults();
+    settings.free_feature = Naming {
+        branch_prefix: "spike/".into(),
+        name_pattern: "try-{slug}".into(),
+    };
+    assert_eq!(
+        free_text_names(&settings, "Dark mode"),
+        Some(WorktreeNames {
+            worktree: "try-dark-mode".into(),
+            branch: "spike/try-dark-mode".into(),
+        })
+    );
+    settings.free_feature.name_pattern = "idea-{number}-{slug}".into();
+    assert_eq!(
+        free_text_names(&settings, "Dark mode").map(|n| n.worktree),
+        Some("idea-dark-mode".into())
+    );
+}
+
+/// A pattern whose fill leaves a separator dangling, or holds something a
+/// directory name should not, still produces a clean name.
+#[test]
+fn a_pattern_fills_to_a_clean_name() {
+    let mut settings = defaults();
+    settings.issue.name_pattern = "{slug}--{number} / x?".into();
+    assert_eq!(names(&settings, WorkMode::Issue, 5, "").worktree, "5-x");
+    // A pattern with nothing to fill still names the worktree by number.
+    settings.issue.name_pattern = "???".into();
+    assert_eq!(names(&settings, WorkMode::Issue, 5, "Title").worktree, "5");
+}
+
+/// Changing the feature labels changes which list an issue lands in, and
+/// the labels still match case-insensitively.
+#[test]
+fn the_configured_feature_labels_decide_the_split() {
+    let issues = vec![
+        labelled(1, &["enhancement"]),
+        labelled(2, &["Feature"]),
+        labelled(3, &["type: feature", "bug"]),
+        labelled(4, &[]),
+    ];
+    let labels = vec!["feature".to_string(), "type: feature".to_string()];
+    assert_eq!(
+        numbers(&issues_for(WorkMode::Feature, &issues, &labels)),
+        vec![2, 3]
+    );
+    assert_eq!(
+        numbers(&issues_for(WorkMode::Issue, &issues, &labels)),
+        vec![1, 4]
+    );
+    let none: Vec<String> = Vec::new();
+    assert!(issues_for(WorkMode::Feature, &issues, &none).is_empty());
 }

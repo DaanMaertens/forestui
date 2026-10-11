@@ -95,7 +95,7 @@ fn issue() -> GitHubIssue {
 }
 
 fn start_work_modal(step: StartWorkStep) -> Modal {
-    let mut modal = StartWorkModal::new(&repo(), Some(vec![issue()]));
+    let mut modal = StartWorkModal::new(&repo(), Some(vec![issue()]), Default::default());
     modal.step = step;
     Modal::StartWork(Box::new(modal))
 }
@@ -112,7 +112,12 @@ fn confirm_modal() -> Modal {
         &repo(),
         WorkMode::Issue,
         crate::work::WorkItem::from_issue(&issue),
-        crate::work::names(WorkMode::Issue, issue.number, &issue.title),
+        crate::work::names(
+            &Default::default(),
+            WorkMode::Issue,
+            issue.number,
+            &issue.title,
+        ),
         branches,
         PathBuf::from("/forest"),
         true,

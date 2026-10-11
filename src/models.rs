@@ -337,6 +337,145 @@ pub struct Settings {
     /// off.
     #[serde(default = "default_true")]
     pub remote_control: bool,
+    /// How Start work lists and names work. A hand-edited section that does
+    /// not parse loads as the defaults rather than taking the whole file —
+    /// and the user's theme and buttons — down with it.
+    #[serde(default, deserialize_with = "lenient_start_work")]
+    pub start_work: StartWorkSettings,
+}
+
+fn lenient_start_work<'de, D>(deserializer: D) -> Result<StartWorkSettings, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+/// Whose issues and PRs Start work lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Scope {
+    /// Issues assigned to or opened by me; PRs with a review requested from
+    /// me or opened by me.
+    Mine,
+    /// Every open issue or PR.
+    All,
+}
+
+/// How one work mode names its worktree and branch.
+///
+/// `name_pattern` is the worktree name, with `{number}` and `{slug}` (the
+/// title's, or a free-text description's first words) filled in; the branch
+/// is `branch_prefix` followed by that name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Naming {
+    pub branch_prefix: String,
+    pub name_pattern: String,
+}
+
+impl Naming {
+    fn new(branch_prefix: &str, name_pattern: &str) -> Self {
+        Self {
+            branch_prefix: branch_prefix.into(),
+            name_pattern: name_pattern.into(),
+        }
+    }
+
+    /// `self` with whatever `partial` sets laid over it, so a mode written
+    /// with only a prefix keeps its default pattern, and the other way round.
+    fn overlaid(self, partial: PartialNaming) -> Self {
+        Self {
+            branch_prefix: partial.branch_prefix.unwrap_or(self.branch_prefix),
+            name_pattern: partial.name_pattern.unwrap_or(self.name_pattern),
+        }
+    }
+}
+
+/// A `pr-review` worktree checks out the PR's own branch, so the mode names
+/// only the worktree and has no branch prefix to set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PrReviewNaming {
+    pub name_pattern: String,
+}
+
+/// Start work's global settings. Every field is defaulted to the behaviour
+/// that shipped before it was a setting, so a file without them changes
+/// nothing.
+///
+/// Read through [`PartialStartWork`], so the defaults live in one place —
+/// the `Default` impl — and a key the file leaves out, down to one half of
+/// a mode's naming, keeps its default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "PartialStartWork")]
+pub struct StartWorkSettings {
+    pub scope: Scope,
+    /// An issue carrying any of these is a `feature`; every other open issue
+    /// is an `issue`. Matched case-insensitively, as GitHub does.
+    pub feature_labels: Vec<String>,
+    pub issue: Naming,
+    pub feature: Naming,
+    pub free_feature: Naming,
+    pub pr_review: PrReviewNaming,
+}
+
+impl Default for StartWorkSettings {
+    fn default() -> Self {
+        Self {
+            scope: Scope::Mine,
+            feature_labels: vec!["enhancement".into()],
+            issue: Naming::new("fix/", "issue-{number}-{slug}"),
+            feature: Naming::new("feat/", "feat-{number}-{slug}"),
+            free_feature: Naming::new("feat/", "feat-{slug}"),
+            pr_review: PrReviewNaming {
+                name_pattern: "pr-{number}-{slug}".into(),
+            },
+        }
+    }
+}
+
+/// The `start_work` section as a file holds it: any key may be missing.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct PartialStartWork {
+    scope: Option<Scope>,
+    feature_labels: Option<Vec<String>>,
+    issue: PartialNaming,
+    feature: PartialNaming,
+    free_feature: PartialNaming,
+    pr_review: PartialPrReviewNaming,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct PartialNaming {
+    branch_prefix: Option<String>,
+    name_pattern: Option<String>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct PartialPrReviewNaming {
+    name_pattern: Option<String>,
+}
+
+impl From<PartialStartWork> for StartWorkSettings {
+    fn from(partial: PartialStartWork) -> Self {
+        let base = Self::default();
+        Self {
+            scope: partial.scope.unwrap_or(base.scope),
+            feature_labels: partial.feature_labels.unwrap_or(base.feature_labels),
+            issue: base.issue.overlaid(partial.issue),
+            feature: base.feature.overlaid(partial.feature),
+            free_feature: base.free_feature.overlaid(partial.free_feature),
+            pr_review: PrReviewNaming {
+                name_pattern: partial
+                    .pr_review
+                    .name_pattern
+                    .unwrap_or(base.pr_review.name_pattern),
+            },
+        }
+    }
 }
 
 impl Default for Settings {
@@ -347,6 +486,7 @@ impl Default for Settings {
             theme_name: default_theme_name(),
             custom_buttons: Vec::new(),
             remote_control: true,
+            start_work: StartWorkSettings::default(),
         }
     }
 }

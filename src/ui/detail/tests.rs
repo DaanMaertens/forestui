@@ -130,6 +130,23 @@ fn buffer_text(buffer: &Buffer) -> String {
         .join("\n")
 }
 
+/// Under scope `all` the list is everyone's, and the header stops calling
+/// it mine.
+#[tokio::test]
+async fn the_issues_header_says_whose_issues_they_are() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = test_app(&dir);
+    with_repository(&mut app);
+    app.sessions = Some(vec![]);
+    app.issues = Some(vec![]);
+    assert!(render(&mut app).contains("MY OPEN GITHUB ISSUES"));
+
+    app.settings.start_work.scope = crate::models::Scope::All;
+    let screen = render(&mut app);
+    assert!(screen.contains("OPEN GITHUB ISSUES"), "{screen}");
+    assert!(!screen.contains("MY OPEN GITHUB ISSUES"), "{screen}");
+}
+
 /// Textual put a `Rule()` between the major sections, and the pane read as
 /// one flat list without them.
 #[tokio::test]

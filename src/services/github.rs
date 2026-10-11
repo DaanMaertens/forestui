@@ -1,6 +1,6 @@
 //! GitHub integration via the `gh` CLI.
 
-use crate::models::{GitHubIssue, GitHubPullRequest};
+use crate::models::{GitHubIssue, GitHubPullRequest, Scope};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,6 +33,9 @@ impl AuthStatus {
 
 struct Cached {
     issues: Vec<GitHubIssue>,
+    /// Whose issues these are. A list fetched for the other scope answers a
+    /// different question, so it is never served as this one.
+    scope: Scope,
     fetched_at: DateTime<Utc>,
 }
 
@@ -56,8 +59,8 @@ struct IssueCache {
 
 impl IssueCache {
     /// `Some((issues, fresh))` when a fetch has completed, `None` otherwise.
-    fn peek(&self, path: &str) -> Option<(Vec<GitHubIssue>, bool)> {
-        let cached = self.entries.get(path)?;
+    fn peek(&self, path: &str, scope: Scope) -> Option<(Vec<GitHubIssue>, bool)> {
+        let cached = self.entries.get(path).filter(|c| c.scope == scope)?;
         let fresh = (Utc::now() - cached.fetched_at).num_seconds() < CACHE_TTL_SECONDS;
         Some((cached.issues.clone(), fresh))
     }
@@ -69,6 +72,7 @@ impl IssueCache {
         &mut self,
         generation: u64,
         path: &str,
+        scope: Scope,
         issues: &[GitHubIssue],
         fresh: bool,
     ) {
@@ -84,6 +88,7 @@ impl IssueCache {
             path.to_string(),
             Cached {
                 issues: issues.to_vec(),
+                scope,
                 fetched_at,
             },
         );
@@ -194,15 +199,16 @@ pub async fn get_repo_info(path: &str) -> Option<(String, String)> {
 /// fetch has completed this run, `None` when nothing is cached. Safe to call
 /// from the render thread — the lock is only ever held for map operations,
 /// never across an await.
-pub fn peek_issues(path: &str) -> Option<(Vec<GitHubIssue>, bool)> {
-    state().lock().ok()?.issues.peek(path)
+pub fn peek_issues(path: &str, scope: Scope) -> Option<(Vec<GitHubIssue>, bool)> {
+    state().lock().ok()?.issues.peek(path, scope)
 }
 
-/// Open issues assigned to or authored by the current user, newest first.
-pub async fn list_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
+/// Open issues in `scope` — assigned to or opened by the current user, or
+/// every one — newest first.
+pub async fn list_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue> {
     // The cache answers before any subprocess runs; a warm hit costs nothing.
     // Freshness has exactly one definition, and it lives in `peek_issues`.
-    if let Some((issues, true)) = peek_issues(path) {
+    if let Some((issues, true)) = peek_issues(path, scope) {
         return issues;
     }
     let generation = state()
@@ -218,17 +224,17 @@ pub async fn list_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
     // masquerades as a confident 300-second "No issues found".
     let (auth, _) = get_auth_status().await;
     if auth != AuthStatus::Authenticated {
-        return store_if_current(generation, path, Vec::new(), false);
+        return store_if_current(generation, path, scope, Vec::new(), false);
     }
 
     // Only the gate cares about owner/repo: a path that is not a GitHub
     // repository has no issues to list.
     if get_repo_info(path).await.is_none() {
-        return store_if_current(generation, path, Vec::new(), false);
+        return store_if_current(generation, path, scope, Vec::new(), false);
     }
 
-    let issues = fetch_issues(path, limit).await;
-    store_if_current(generation, path, issues, true)
+    let issues = fetch_issues(path, limit, scope).await;
+    store_if_current(generation, path, scope, issues, true)
 }
 
 /// [`IssueCache::store_if_current`] on the shared cache, handing the issues
@@ -236,13 +242,14 @@ pub async fn list_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
 fn store_if_current(
     generation: u64,
     path: &str,
+    scope: Scope,
     issues: Vec<GitHubIssue>,
     fresh: bool,
 ) -> Vec<GitHubIssue> {
     if let Ok(mut guard) = state().lock() {
         guard
             .issues
-            .store_if_current(generation, path, &issues, fresh);
+            .store_if_current(generation, path, scope, &issues, fresh);
     }
     issues
 }
@@ -250,39 +257,61 @@ fn store_if_current(
 /// Seed the shared cache directly, for App tests that must not shell out to
 /// `gh`. Tests of the cache itself use their own [`IssueCache`] instead.
 #[cfg(test)]
-pub fn seed_cache_for_test(path: &str, issues: Vec<GitHubIssue>, fetched_at: DateTime<Utc>) {
+pub fn seed_cache_for_test(
+    path: &str,
+    scope: Scope,
+    issues: Vec<GitHubIssue>,
+    fetched_at: DateTime<Utc>,
+) {
     if let Ok(mut guard) = state().lock() {
-        guard
-            .issues
-            .entries
-            .insert(path.to_string(), Cached { issues, fetched_at });
+        guard.issues.entries.insert(
+            path.to_string(),
+            Cached {
+                issues,
+                scope,
+                fetched_at,
+            },
+        );
     }
 }
 
-async fn fetch_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
+/// The `gh issue list` filters that make up `scope`, one call each: mine is
+/// assigned to me plus opened by me, and all is one unfiltered call.
+fn issue_filters(scope: Scope) -> &'static [&'static [&'static str]] {
+    match scope {
+        Scope::Mine => &[&["--assignee", "@me"], &["--author", "@me"]],
+        Scope::All => &[&[]],
+    }
+}
+
+/// The `gh pr list` filters that make up `scope`, as [`issue_filters`]:
+/// mine is a review requested from me plus opened by me.
+fn pull_request_filters(scope: Scope) -> &'static [&'static [&'static str]] {
+    match scope {
+        Scope::Mine => &[&["--search", "review-requested:@me"], &["--author", "@me"]],
+        Scope::All => &[&[]],
+    }
+}
+
+async fn fetch_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue> {
     const JSON_FIELDS: &str = "number,title,state,url,createdAt,updatedAt,author,assignees,labels";
     let limit_str = limit.to_string();
 
     let mut issues: Vec<GitHubIssue> = Vec::new();
     let mut seen: Vec<i64> = Vec::new();
 
-    for filter in ["--assignee", "--author"] {
-        let (code, stdout, _) = run_gh(
-            &[
-                "issue",
-                "list",
-                filter,
-                "@me",
-                "--state",
-                "open",
-                "--limit",
-                &limit_str,
-                "--json",
-                JSON_FIELDS,
-            ],
-            Some(Path::new(path)),
-        )
-        .await;
+    for filter in issue_filters(scope) {
+        let mut args = vec!["issue", "list"];
+        args.extend_from_slice(filter);
+        args.extend_from_slice(&[
+            "--state",
+            "open",
+            "--limit",
+            &limit_str,
+            "--json",
+            JSON_FIELDS,
+        ]);
+        let (code, stdout, _) = run_gh(&args, Some(Path::new(path))).await;
         if code != 0 || stdout.is_empty() {
             continue;
         }
@@ -300,33 +329,27 @@ async fn fetch_issues(path: &str, limit: usize) -> Vec<GitHubIssue> {
     issues
 }
 
-/// The open pull requests that are "mine" — a review requested from me, or
-/// opened by me — newest first, with the login `gh` is authenticated as.
+/// The open pull requests in `scope` — a review requested from me or opened
+/// by me, or every one — newest first, with the login `gh` is
+/// authenticated as.
 ///
 /// Not cached: only Start work's `pr-review` list reads it, once per open,
 /// and a review request that arrived a minute ago should be in that list.
-pub async fn list_pull_requests(path: &str) -> (Vec<GitHubPullRequest>, Option<String>) {
+pub async fn list_pull_requests(
+    path: &str,
+    scope: Scope,
+) -> (Vec<GitHubPullRequest>, Option<String>) {
     let (auth, viewer) = get_auth_status().await;
     if auth != AuthStatus::Authenticated {
         return (Vec::new(), None);
     }
     const JSON_FIELDS: &str = "number,title,author,isDraft,headRefName,isCrossRepository,createdAt";
     let mut outputs = Vec::new();
-    for filter in [["--search", "review-requested:@me"], ["--author", "@me"]] {
-        let (code, stdout, _) = run_gh(
-            &[
-                "pr",
-                "list",
-                filter[0],
-                filter[1],
-                "--state",
-                "open",
-                "--json",
-                JSON_FIELDS,
-            ],
-            Some(Path::new(path)),
-        )
-        .await;
+    for filter in pull_request_filters(scope) {
+        let mut args = vec!["pr", "list"];
+        args.extend_from_slice(filter);
+        args.extend_from_slice(&["--state", "open", "--json", JSON_FIELDS]);
+        let (code, stdout, _) = run_gh(&args, Some(Path::new(path))).await;
         if code == 0 {
             outputs.push(stdout);
         }
@@ -378,6 +401,7 @@ impl Clone for Cached {
     fn clone(&self) -> Self {
         Self {
             issues: self.issues.clone(),
+            scope: self.scope,
             fetched_at: self.fetched_at,
         }
     }

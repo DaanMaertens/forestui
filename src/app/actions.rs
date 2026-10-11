@@ -561,7 +561,7 @@ impl App {
         }
         self.pending_start = Some(PendingStart {
             mode,
-            names: work::names(mode, issue.number, &issue.title),
+            names: work::names(&self.settings.start_work, mode, issue.number, &issue.title),
             item: WorkItem::from_issue(&issue),
         });
         self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
@@ -603,7 +603,7 @@ impl App {
         }
         let names = work::WorktreeNames {
             branch: head_branch.clone(),
-            ..work::names(WorkMode::PrReview, number, title)
+            ..work::names(&self.settings.start_work, WorkMode::PrReview, number, title)
         };
         let start = PendingStart {
             mode: WorkMode::PrReview,
@@ -622,7 +622,7 @@ impl App {
         let Some(repo) = self.state.find_repository(repo_id) else {
             return;
         };
-        let Some(names) = work::free_text_names(&description) else {
+        let Some(names) = work::free_text_names(&self.settings.start_work, &description) else {
             return;
         };
         let worktrees = &repo.worktrees;
@@ -744,23 +744,29 @@ impl App {
     /// Open Start work for the selected repository — from its own row or from
     /// one of its worktrees.
     ///
-    /// The issues are the "mine" list the repository pane loads. With a warm
-    /// cache the picker is ready at once; otherwise it fills when the fetch
-    /// folds in, so the mode step never waits on `gh`.
+    /// The issues are the list the repository pane loads, for the scope the
+    /// settings choose. With a warm cache the picker is ready at once;
+    /// otherwise it fills when the fetch folds in, so the mode step never
+    /// waits on `gh`.
     pub(super) fn action_start_work(&mut self) {
         let Some(repo) = self.state.selected_repository() else {
             self.notify("Select a repository first", Severity::Warning);
             return;
         };
         let path = repo.source_path.clone();
-        let cached = github::peek_issues(&path);
-        let modal = StartWorkModal::new(repo, cached.as_ref().map(|(issues, _)| issues.clone()));
+        let cached = github::peek_issues(&path, self.settings.start_work.scope);
+        let modal = StartWorkModal::new(
+            repo,
+            cached.as_ref().map(|(issues, _)| issues.clone()),
+            self.settings.start_work.clone(),
+        );
         self.modals.push(Modal::StartWork(Box::new(modal)));
         // Asked on every open rather than cached: a remote can be added or
         // `gh repo set-default` run between two opens, and nobody waits on
         // the answer — the modes stay usable until it says otherwise.
         let tx = self.tx.clone();
         let probe_path = path.clone();
+        let scope = self.settings.start_work.scope;
         tokio::spawn(async move {
             let is_github = github::get_repo_info(&probe_path).await.is_some();
             tx.send(AppEvent::GitHubChecked {
@@ -771,7 +777,7 @@ impl App {
             // open, like the probe: a review requested a minute ago belongs
             // in the list.
             if is_github {
-                let (prs, viewer) = github::list_pull_requests(&probe_path).await;
+                let (prs, viewer) = github::list_pull_requests(&probe_path, scope).await;
                 tx.send(AppEvent::PullRequests {
                     path: probe_path,
                     prs,
@@ -1017,7 +1023,7 @@ impl App {
                 if let Some(repo_id) = self.state.selection.repository_id
                     && let Some(issue) = self.issues.as_ref().and_then(|i| i.get(index)).cloned()
                 {
-                    let mode = work::mode_for(&issue, work::DEFAULT_FEATURE_LABELS);
+                    let mode = work::mode_for(&issue, &self.settings.start_work.feature_labels);
                     self.start_work_on_issue(repo_id, issue, mode);
                 }
             }
