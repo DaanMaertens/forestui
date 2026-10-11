@@ -598,7 +598,16 @@ Unit tests live in a sibling file, not inline: `foo.rs` ends with
 `bar/tests.rs`). As a child module they still reach private items through
 `use super::*`. Keep new tests there rather than growing the source file; note
 that an `include_str!` in a test file resolves one directory deeper than in its
-parent. They run with `make test`. Async code uses `#[tokio::test]`. Rendering is tested against
+parent.
+
+The App tests are the one exception: there are too many for one file, so they
+are split by feature under `src/app/tests/` — `navigation.rs`, `worktrees.rs`,
+`sessions.rs`, `mouse.rs`, `start_work.rs`, `repository_settings.rs` and so
+on. A new App test goes in the file for its feature, or in a new one declared
+in `src/app/tests/mod.rs`. Each file starts with `use super::*;`, and a helper
+used by more than one file lives in `mod.rs`.
+
+They run with `make test`. Async code uses `#[tokio::test]`. Rendering is tested against
 `ratatui::backend::TestBackend`, which renders into an in-memory buffer you can
 assert on.
 
