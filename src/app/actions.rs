@@ -16,6 +16,7 @@ use crate::modal::{IntegrationAction, ModalOutcome};
 use crate::models::{CustomClaudeButton, GitHubIssue, Repository, WorkItemLink, Worktree};
 use crate::services::live::LivePlace;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
+use crate::util::Noun;
 use crate::work::{self, WorkItem, WorkMode};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -546,11 +547,10 @@ impl App {
             }
             return;
         };
-        let count = jobs.len();
         self.notify(
             format!(
-                "Pruning {count} worktree{}…",
-                if count == 1 { "" } else { "s" }
+                "Pruning {}…",
+                Noun::new("worktree", "worktrees").count(jobs.len())
             ),
             Severity::Information,
         );
@@ -1219,11 +1219,10 @@ impl App {
             return;
         }
         let title = crate::util::truncate(&session.title, 40);
-        let count = session.message_count;
-        let msgs = if count == 1 { "message" } else { "messages" };
+        let msgs = Noun::new("message", "messages").count(session.message_count);
         self.modals.push(Modal::Confirm(ConfirmModal::new(
             "Delete Session",
-            format!("Permanently delete '{title}' ({count} {msgs})?\nThere is no undo."),
+            format!("Permanently delete '{title}' ({msgs})?\nThere is no undo."),
             ConfirmAction::DeleteClaudeSession {
                 path: path.to_string(),
                 session_id: session.id.clone(),

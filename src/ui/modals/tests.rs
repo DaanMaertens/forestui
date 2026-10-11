@@ -499,3 +499,29 @@ fn the_template_picker_lists_every_template_by_file_and_clicks_select_it() {
         "the hint fits whole:\n{screen}"
     );
 }
+
+#[test]
+fn the_count_line_agrees_with_its_count() {
+    let issue = Noun::new("issue", "issues");
+    let unfiltered = |shown, total| count_text(false, shown, total, issue);
+    assert_eq!(unfiltered(0, 0), "0 issues");
+    assert_eq!(unfiltered(1, 1), "1 issue");
+    assert_eq!(unfiltered(2, 2), "2 issues");
+    // "N of M" agrees with M, the number the noun sits beside.
+    assert_eq!(unfiltered(0, 1), "0 of 1 issue");
+    assert_eq!(unfiltered(1, 2), "1 of 2 issues");
+    let filtered = |shown| count_text(true, shown, 5, issue);
+    assert_eq!(filtered(0), "No matches");
+    assert_eq!(filtered(1), "1 match");
+    assert_eq!(filtered(2), "2 matches");
+}
+
+#[test]
+fn a_single_branch_is_counted_in_the_singular() {
+    let Modal::AddWorktree(mut modal) = worktree_modal(false) else {
+        panic!("wrong modal");
+    };
+    modal.picker = SearchPicker::new(modal.picker.entries().take(1).cloned().collect(), "");
+    let screen = render(&Modal::AddWorktree(modal), 100, 40);
+    assert!(screen.contains("1 branch "), "{screen}");
+}

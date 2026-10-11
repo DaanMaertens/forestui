@@ -17,7 +17,7 @@ use crate::models::Scope;
 use crate::picker::SearchPicker;
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
-use crate::util;
+use crate::util::{self, Noun};
 use crate::work::{self, ItemEntry, WorkItem, WorkMode};
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
@@ -492,7 +492,11 @@ fn add_worktree(frame: &mut Frame, modal: &AddWorktreeModal, area: Rect, hits: &
         AddWorktreeModal::FOCUS_BRANCH,
     );
     if !modal.new_branch {
-        column.text(frame, count_line(&modal.picker, "branches"), theme::muted());
+        column.text(
+            frame,
+            count_line(&modal.picker, Noun::new("branch", "branches")),
+            theme::muted(),
+        );
 
         // Leave room for the error line, the gap and the buttons below the list.
         let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
@@ -593,27 +597,34 @@ fn picker_results<T: Searchable>(
     }
 }
 
-/// A picker's count line, worded exactly as `branch_search.py` worded it.
-fn count_line<T: Searchable>(picker: &SearchPicker<T>, noun: &str) -> String {
-    count_text(picker, picker.match_count(), picker.entry_count(), noun)
+/// A picker's count line, worded as `branch_search.py` worded it except that
+/// the noun agrees with the count, where Python said "1 branches".
+fn count_line<T: Searchable>(picker: &SearchPicker<T>, noun: Noun) -> String {
+    count_text(
+        is_filtered(picker),
+        picker.match_count(),
+        picker.entry_count(),
+        noun,
+    )
 }
 
 /// [`count_line`] for Start work's item list, counting the work items only:
 /// the free-text entry is always there and is not one of them.
-fn item_count_line(picker: &SearchPicker<ItemEntry>, noun: &str) -> String {
+fn item_count_line(picker: &SearchPicker<ItemEntry>, noun: Noun) -> String {
     let is_item = |e: &&ItemEntry| e.is_item();
     let shown = picker.matches().filter(is_item).count();
     let total = picker.entries().filter(is_item).count();
-    count_text(picker, shown, total, noun)
+    count_text(is_filtered(picker), shown, total, noun)
 }
 
-fn count_text<T: Searchable>(
-    picker: &SearchPicker<T>,
-    shown: usize,
-    total: usize,
-    noun: &str,
-) -> String {
-    if picker.query().value().trim().is_empty() {
+fn is_filtered<T: Searchable>(picker: &SearchPicker<T>) -> bool {
+    !picker.query().value().trim().is_empty()
+}
+
+fn count_text(filtered: bool, shown: usize, total: usize, noun: Noun) -> String {
+    if !filtered {
+        // "N of M" reads as a count of M, so the noun agrees with M.
+        let noun = noun.of(total);
         if shown < total {
             format!("{shown} of {total} {noun}")
         } else {
@@ -621,10 +632,8 @@ fn count_text<T: Searchable>(
         }
     } else if shown == 0 {
         "No matches".to_string()
-    } else if shown == 1 {
-        "1 match".to_string()
     } else {
-        format!("{shown} matches")
+        Noun::new("match", "matches").count(shown)
     }
 }
 
@@ -732,19 +741,19 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
             "Issue",
             " Loading issues...",
             "No open non-feature issues",
-            "issues",
+            Noun::new("issue", "issues"),
         ),
         WorkMode::Feature => (
             "Issue",
             " Loading issues...",
             "No open feature issues",
-            "features",
+            Noun::new("feature", "features"),
         ),
         WorkMode::PrReview => (
             "Pull Request",
             " Loading pull requests...",
             "No open PRs",
-            "PRs",
+            Noun::new("PR", "PRs"),
         ),
     };
     // The empty line names the scope it searched, so "nothing for me" is

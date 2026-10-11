@@ -67,7 +67,10 @@ impl Status {
             Status::Outdated { installed } => {
                 format!("Installed at version {installed}, this build ships {SHIPPED_VERSION}")
             }
-            Status::Drifted(files) => format!("Installed, {} file(s) modified", files.len()),
+            Status::Drifted(files) => format!(
+                "Installed, {} modified",
+                util::Noun::new("file", "files").count(files.len())
+            ),
         }
     }
 }

@@ -1653,8 +1653,10 @@ impl SettingsModal {
     pub fn buttons_summary(&self) -> String {
         match self.custom_buttons.len() {
             0 => "No custom buttons configured".into(),
-            1 => "1 custom button configured".into(),
-            n => format!("{n} custom buttons configured"),
+            n => format!(
+                "{} configured",
+                util::Noun::new("custom button", "custom buttons").count(n)
+            ),
         }
     }
 
