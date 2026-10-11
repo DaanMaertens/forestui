@@ -134,6 +134,31 @@ fn round_half_even(value: u64, unit: u64) -> u64 {
     }
 }
 
+/// A noun in both numbers, so a count of one reads "1 issue" rather than
+/// "1 issues". Both forms are spelled out because English plurals are not
+/// regular enough to derive ("branch" → "branches").
+#[derive(Clone, Copy)]
+pub struct Noun {
+    one: &'static str,
+    many: &'static str,
+}
+
+impl Noun {
+    pub const fn new(one: &'static str, many: &'static str) -> Self {
+        Self { one, many }
+    }
+
+    /// The form that agrees with `count`; zero takes the plural.
+    pub fn of(self, count: usize) -> &'static str {
+        if count == 1 { self.one } else { self.many }
+    }
+
+    /// `count` followed by the agreeing form: "1 issue", "3 issues".
+    pub fn count(self, count: usize) -> String {
+        format!("{count} {}", self.of(count))
+    }
+}
+
 /// Truncate to `max` characters, appending `...` when the text was longer.
 pub fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() > max {

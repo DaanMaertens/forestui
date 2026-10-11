@@ -121,3 +121,14 @@ fn truncate_appends_ellipsis() {
     assert_eq!(truncate("abcdef", 3), "abc...");
     assert_eq!(truncate("ab", 3), "ab");
 }
+
+#[test]
+fn a_noun_agrees_with_its_count() {
+    let issue = Noun::new("issue", "issues");
+    assert_eq!(issue.of(0), "issues");
+    assert_eq!(issue.of(1), "issue");
+    assert_eq!(issue.of(2), "issues");
+    assert_eq!(issue.count(0), "0 issues");
+    assert_eq!(issue.count(1), "1 issue");
+    assert_eq!(issue.count(2), "2 issues");
+}

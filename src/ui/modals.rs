@@ -17,7 +17,7 @@ use crate::models::Scope;
 use crate::picker::SearchPicker;
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
-use crate::util;
+use crate::util::{self, Noun};
 use crate::work::{self, ItemEntry, WorkItem, WorkMode};
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
@@ -597,23 +597,6 @@ fn picker_results<T: Searchable>(
     }
 }
 
-/// A counted noun, so a list of one reads "1 issue" rather than "1 issues".
-#[derive(Clone, Copy)]
-struct Noun {
-    one: &'static str,
-    many: &'static str,
-}
-
-impl Noun {
-    const fn new(one: &'static str, many: &'static str) -> Self {
-        Self { one, many }
-    }
-
-    fn of(self, count: usize) -> &'static str {
-        if count == 1 { self.one } else { self.many }
-    }
-}
-
 /// A picker's count line, worded as `branch_search.py` worded it except that
 /// the noun agrees with the count, where Python said "1 branches".
 fn count_line<T: Searchable>(picker: &SearchPicker<T>, noun: Noun) -> String {
@@ -649,10 +632,8 @@ fn count_text(filtered: bool, shown: usize, total: usize, noun: Noun) -> String 
         }
     } else if shown == 0 {
         "No matches".to_string()
-    } else if shown == 1 {
-        "1 match".to_string()
     } else {
-        format!("{shown} matches")
+        Noun::new("match", "matches").count(shown)
     }
 }
 

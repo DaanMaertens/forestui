@@ -13,6 +13,7 @@
 use super::App;
 use crate::models::Speaker;
 use crate::theme;
+use crate::util::Noun;
 use crate::work;
 use ratatui::style::Style;
 
@@ -592,15 +593,14 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
         // A card being re-read says so on its meta line. Without it a
         // conversation that moved on while forestui was in the background just
         // sits at its old turn count and then changes with no explanation.
-        let count = session.message_count;
-        let msgs = if count == 1 { "msg" } else { "msgs" };
+        let msgs = Noun::new("msg", "msgs").count(session.message_count);
         let mut meta = if app.sessions_refreshing.contains(&session.id) {
             format!(
-                "{} refreshing • {count} {msgs}",
+                "{} refreshing • {msgs}",
                 SPINNER[app.spinner_index % SPINNER.len()],
             )
         } else {
-            format!("{} • {count} {msgs}", session.relative_time())
+            format!("{} • {msgs}", session.relative_time())
         };
         // The spend rides the meta line, next to the message count it
         // explains. Old minimal transcripts carry no usage and add nothing.
