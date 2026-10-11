@@ -131,6 +131,11 @@ fn prune_parses_with_and_without_a_forest() {
     let args = Args::try_parse_from(["forestui", "prune"]).unwrap();
     assert_eq!(args.command, Some(Command::Prune { forest_path: None }));
 
+    assert!(
+        Args::try_parse_from(["forestui", "/tmp/work", "prune"]).is_err(),
+        "the outer forest path is the app's; prune would ignore it and prune ~/forest"
+    );
+
     let args = Args::try_parse_from(["forestui", "/tmp/work"]).unwrap();
     assert_eq!(args.command, None);
     assert_eq!(args.forest_path.as_deref(), Some("/tmp/work"));

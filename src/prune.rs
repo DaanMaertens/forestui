@@ -1,10 +1,12 @@
 //! Prune: remove a finished worktree together with its local branch,
 //! unless that would lose work.
 //!
-//! The routine knows nothing about the App, so the repository pane's
+//! [`prune_worktree`] knows nothing about the App, so the repository pane's
 //! **Prune finished** and `forestui prune` run the same steps and word their
-//! outcome the same way. Which worktrees are finished is not decided by
-//! [`prune_worktree`] — the caller passes the ones it judged finished.
+//! outcome the same way. It does not decide which worktrees are finished —
+//! the caller passes the ones it judged finished. The rest of the module is
+//! the command line's side: [`prune_forest`] judges them with the same check
+//! the App's sidebar marks come from.
 
 use crate::event::Severity;
 use crate::services::git;
@@ -164,8 +166,12 @@ fn sentence(message: &str) -> String {
 
 /// Prune tracked worktrees one after another, without the App: each one git
 /// removed leaves `state`, which persists it with the atomic writer. The
-/// App does not use this — its removals go through `WorktreeSync`, and
-/// `forestui prune` has no other change in flight to race.
+/// App does not use this — its removals go through `WorktreeSync`.
+///
+/// A forestui running on the same forest is a second writer of the state
+/// file, which this cannot coordinate with. That is tolerable rather than
+/// safe: the App's next save puts the pruned entries back, and its next
+/// worktree scan drops them again, because their directories are gone.
 pub async fn prune_tracked(state: &mut AppState, worktree_ids: &[Uuid]) -> Vec<(String, Outcome)> {
     let mut outcomes = Vec::with_capacity(worktree_ids.len());
     for &worktree_id in worktree_ids {
@@ -229,6 +235,25 @@ pub async fn prune_forest(state: &mut AppState) -> Vec<RepositoryPrune> {
         results.push(RepositoryPrune { name, outcomes });
     }
     results
+}
+
+/// Whether worktrees linked to an issue or pull request went unchecked
+/// because `gh` is missing or signed out. Without saying so, the command
+/// line would report "No finished worktrees." about a check that never ran.
+pub async fn links_unchecked(state: &AppState) -> bool {
+    use crate::models::WorkItemLink;
+    let has_gh_links = state.repositories().iter().any(|repo| {
+        repo.worktrees.iter().any(|worktree| {
+            matches!(
+                worktree.work_item,
+                Some(WorkItemLink::Issue { .. } | WorkItemLink::PullRequest { .. })
+            )
+        })
+    });
+    // The status is cached, so this asks `gh` no second time.
+    has_gh_links
+        && crate::services::github::get_auth_status().await.0
+            != crate::services::github::AuthStatus::Authenticated
 }
 
 /// What `forestui prune` prints, and whether it exits non-zero.

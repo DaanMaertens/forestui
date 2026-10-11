@@ -231,7 +231,9 @@ through `WorktreeSync` like a Delete, and one task hands every ticket back in
 The CLI has no `WorktreeSync`: `prune::prune_forest` reconciles each
 repository against git, runs the same finished check, and prunes through
 `prune_tracked`. It is a one-shot dispatched in `main` before `ensure_tmux`,
-so it never starts tmux.
+so it never starts tmux. It is also the one writer of `.forestui-config.json`
+outside the main loop, tolerated because a running App heals: its next save
+restores the pruned entries and its next scan drops them, directories gone.
 
 **Every worktree-mutating flow goes through `WorktreeSync`.** Starting the
 change returns a change ticket — or nothing, if the worktree already has a

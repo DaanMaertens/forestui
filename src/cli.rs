@@ -18,7 +18,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
     about = "forestui - Git Worktree Manager",
     long_about = "forestui - Git Worktree Manager\n\n\
                   A terminal UI for managing Git worktrees, inspired by forest for macOS.\n\n\
-                  FOREST_PATH: Optional path to forest directory (default: ~/forest)"
+                  FOREST_PATH: Optional path to forest directory (default: ~/forest)",
+    // `forestui ~/work prune` would otherwise fill the app's forest path,
+    // which `prune` does not read, and prune ~/forest instead.
+    args_conflicts_with_subcommands = true
 )]
 pub struct Args {
     /// Path to the forest directory (default: ~/forest)

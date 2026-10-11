@@ -145,8 +145,16 @@ fn run_prune(forest_path: Option<&str>) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let results = runtime.block_on(prune::prune_forest(&mut state));
+    let (results, unchecked) = runtime.block_on(async {
+        let results = prune::prune_forest(&mut state).await;
+        (results, prune::links_unchecked(&state).await)
+    });
     let summary = prune::summary(&results);
+    if unchecked {
+        eprintln!(
+            "Warning: gh is not signed in, so worktrees linked to issues or pull requests were not checked."
+        );
+    }
 
     let mut out = summary.lines.join("\n");
     out.push('\n');
