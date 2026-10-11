@@ -8,7 +8,7 @@
 //! screen *is* item N in the handler by construction; the recorded cells are
 //! what a click resolves against.
 
-use crate::app::detail::{ControlSpec, DetailNode, Field, ISSUES_HEADER};
+use crate::app::detail::{ControlSpec, DetailNode, Field};
 use crate::app::{App, Focus, HitTarget, ScrollbarGeom};
 use crate::theme;
 use crate::ui::widgets::{TextInput, centered_rect};
@@ -181,17 +181,17 @@ fn render_node(pane: &mut Pane, app: &App, node: DetailNode) {
             };
             rename_field(pane, label, input);
         }
-        DetailNode::IssuesHeader { glyph } => issues_header(pane, glyph),
+        DetailNode::IssuesHeader { title, glyph } => issues_header(pane, title, glyph),
     }
 }
 
 /// The issues header with its inline refresh control.
-fn issues_header(pane: &mut Pane, glyph: char) {
+fn issues_header(pane: &mut Pane, title: &'static str, glyph: char) {
     // `.refresh-btn { min-width: 3; width: 3 }` — the glyph is narrower than
     // the control, and it is the control that takes the click.
-    let (focused, hovered) = pane.claim(as_u16(ISSUES_HEADER.chars().count() + 1), 3, 1);
+    let (focused, hovered) = pane.claim(as_u16(title.chars().count() + 1), 3, 1);
     pane.row(vec![
-        Span::styled(ISSUES_HEADER, theme::section_header()),
+        Span::styled(title, theme::section_header()),
         Span::raw(" "),
         Span::styled(
             glyph.to_string(),

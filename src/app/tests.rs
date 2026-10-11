@@ -308,7 +308,12 @@ async fn a_warm_cache_renders_issues_without_a_loading_flash() {
                 "author":{"login":"me"},"assignees":[],"labels":[]}"#,
     )
     .expect("issue json");
-    crate::services::github::seed_cache_for_test(&path, vec![issue], chrono::Utc::now());
+    crate::services::github::seed_cache_for_test(
+        &path,
+        crate::models::Scope::Mine,
+        vec![issue],
+        chrono::Utc::now(),
+    );
 
     // Leave the repository and come back: the second visit must render
     // from cache synchronously, not drop to the Loading state (#29).
@@ -2180,7 +2185,12 @@ fn open_issue(number: i64, title: &str) -> crate::models::GitHubIssue {
 fn app_with_issues(issues: Vec<crate::models::GitHubIssue>) -> (tempfile::TempDir, App, String) {
     let (dir, app) = app_with_fixture();
     let path = app.state.repositories()[0].source_path.clone();
-    github::seed_cache_for_test(&path, issues, chrono::Utc::now());
+    github::seed_cache_for_test(
+        &path,
+        crate::models::Scope::Mine,
+        issues,
+        chrono::Utc::now(),
+    );
     (dir, app, path)
 }
 
@@ -2656,6 +2666,107 @@ async fn issue_and_feature_list_disjoint_issues() {
     app.handle_key(key(KeyCode::Up));
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(listed(&app), vec![1, 4]);
+}
+
+/// The fixture's repository with `issues` cached for `scope`, run with
+/// `settings`.
+fn app_with_settings_and_issues(
+    settings: crate::models::Settings,
+    scope: crate::models::Scope,
+    issues: Vec<crate::models::GitHubIssue>,
+) -> (tempfile::TempDir, App, String) {
+    let (dir, app) = test_support::app_with_settings(settings);
+    let path = app.state.repositories()[0].source_path.clone();
+    github::seed_cache_for_test(&path, scope, issues, chrono::Utc::now());
+    (dir, app, path)
+}
+
+fn with_scope(scope: crate::models::Scope) -> crate::models::Settings {
+    let mut settings = crate::models::Settings::default();
+    settings.start_work.scope = scope;
+    settings
+}
+
+/// Under `all`, a list fetched for `mine` is not everything: Start work
+/// waits for the `all` list rather than showing the short one as complete.
+#[tokio::test]
+async fn scope_all_does_not_list_the_mine_issues() {
+    use crate::models::Scope;
+    let (_dir, mut app, path) = app_with_settings_and_issues(
+        with_scope(Scope::All),
+        Scope::Mine,
+        vec![open_issue(1, "Assigned to me")],
+    );
+    app.handle_key(key(KeyCode::Char('s')));
+    assert!(
+        start_work(&app).picker.is_none(),
+        "the mine list stood in for all"
+    );
+    assert!(
+        app.issues_in_flight.contains(&path),
+        "all was never asked for"
+    );
+}
+
+/// The list fetched for the configured scope is the one Start work shows,
+/// for `all` as for `mine`.
+#[tokio::test]
+async fn start_work_lists_the_configured_scope() {
+    use crate::models::Scope;
+    for scope in [Scope::Mine, Scope::All] {
+        let (_dir, mut app, _) = app_with_settings_and_issues(
+            with_scope(scope),
+            scope,
+            vec![open_issue(1, "One"), open_issue(2, "Two")],
+        );
+        app.handle_key(key(KeyCode::Char('s')));
+        assert_eq!(listed(&app), vec![1, 2], "{scope:?}");
+    }
+}
+
+/// The configured feature labels decide which list an issue is in.
+#[tokio::test]
+async fn the_feature_labels_setting_splits_the_lists() {
+    let mut settings = crate::models::Settings::default();
+    settings.start_work.feature_labels = vec!["feature".into()];
+    let (_dir, mut app, _) = app_with_settings_and_issues(
+        settings,
+        crate::models::Scope::Mine,
+        vec![
+            labelled_issue(1, "Dark mode", &["enhancement"]),
+            labelled_issue(2, "Export", &["Feature"]),
+        ],
+    );
+    app.handle_key(key(KeyCode::Char('s')));
+    assert_eq!(listed(&app), vec![1], "enhancement is no longer a feature");
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(listed(&app), vec![2]);
+}
+
+/// The confirm screen names the worktree and branch by the configured
+/// prefix and pattern.
+#[tokio::test]
+async fn the_confirm_screen_uses_the_configured_naming() {
+    let mut settings = crate::models::Settings::default();
+    settings.start_work.issue = crate::models::Naming {
+        branch_prefix: "bug/".into(),
+        name_pattern: "{number}-{slug}".into(),
+    };
+    let (_dir, mut app, _) = app_with_settings_and_issues(
+        settings,
+        crate::models::Scope::Mine,
+        vec![labelled_issue(42, "Fix login bug", &["bug"])],
+    );
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Enter));
+    let loaded = branches_loaded(&app);
+    app.handle_event(loaded);
+
+    let confirm = confirm_screen(&app);
+    assert_eq!(confirm.name.value(), "42-fix-login-bug");
+    assert_eq!(confirm.branch.value(), "bug/42-fix-login-bug");
 }
 
 /// A feature is named `feat-<n>-<slug>` on `feat/...` and started with the

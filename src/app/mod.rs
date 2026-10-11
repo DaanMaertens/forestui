@@ -845,7 +845,7 @@ impl App {
         self.scan_live_sessions();
 
         if is_repository {
-            match github::peek_issues(&path) {
+            match github::peek_issues(&path, self.settings.start_work.scope) {
                 // Fresh enough to stand on its own; the 300s tick refreshes.
                 Some((issues, true)) => self.issues = Some(issues),
                 // Stale content beats a spinner: render it and refresh behind.
@@ -874,8 +874,9 @@ impl App {
             return;
         }
         let tx = self.tx.clone();
+        let scope = self.settings.start_work.scope;
         tokio::spawn(async move {
-            let issues = github::list_issues(&path, ISSUE_LIMIT).await;
+            let issues = github::list_issues(&path, ISSUE_LIMIT, scope).await;
             tx.send(AppEvent::Issues { path, issues });
         });
     }

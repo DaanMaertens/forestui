@@ -337,6 +337,156 @@ pub struct Settings {
     /// off.
     #[serde(default = "default_true")]
     pub remote_control: bool,
+    /// How Start work lists and names work. A hand-edited section that does
+    /// not parse loads as the defaults rather than taking the whole file —
+    /// and the user's theme and buttons — down with it.
+    #[serde(default, deserialize_with = "lenient_start_work")]
+    pub start_work: StartWorkSettings,
+}
+
+fn lenient_start_work<'de, D>(deserializer: D) -> Result<StartWorkSettings, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+/// Whose issues and PRs Start work lists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Scope {
+    /// Issues assigned to or opened by me; PRs with a review requested from
+    /// me or opened by me.
+    #[default]
+    Mine,
+    /// Every open issue or PR.
+    All,
+}
+
+/// How one work mode names its worktree and branch.
+///
+/// `name_pattern` is the worktree name, with `{number}` and `{slug}` (the
+/// title's, or a free-text description's first words) filled in; the branch
+/// is `branch_prefix` followed by that name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Naming {
+    pub branch_prefix: String,
+    pub name_pattern: String,
+}
+
+impl Naming {
+    fn new(branch_prefix: &str, name_pattern: &str) -> Self {
+        Self {
+            branch_prefix: branch_prefix.into(),
+            name_pattern: name_pattern.into(),
+        }
+    }
+
+    /// `self` with whatever `partial` sets laid over it, so a mode written
+    /// with only a prefix keeps its default pattern, and the other way round.
+    fn overlaid(self, partial: PartialNaming) -> Self {
+        Self {
+            branch_prefix: partial.branch_prefix.unwrap_or(self.branch_prefix),
+            name_pattern: partial.name_pattern.unwrap_or(self.name_pattern),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct PartialNaming {
+    #[serde(default)]
+    branch_prefix: Option<String>,
+    #[serde(default)]
+    name_pattern: Option<String>,
+}
+
+fn issue_naming() -> Naming {
+    Naming::new("fix/", "issue-{number}-{slug}")
+}
+
+fn feature_naming() -> Naming {
+    Naming::new("feat/", "feat-{number}-{slug}")
+}
+
+fn free_feature_naming() -> Naming {
+    Naming::new("feat/", "feat-{slug}")
+}
+
+fn partial_issue_naming<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Naming, D::Error> {
+    Ok(issue_naming().overlaid(PartialNaming::deserialize(d)?))
+}
+
+fn partial_feature_naming<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Naming, D::Error> {
+    Ok(feature_naming().overlaid(PartialNaming::deserialize(d)?))
+}
+
+fn partial_free_feature_naming<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Naming, D::Error> {
+    Ok(free_feature_naming().overlaid(PartialNaming::deserialize(d)?))
+}
+
+/// A `pr-review` worktree checks out the PR's own branch, so the mode names
+/// only the worktree and has no branch prefix to set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrReviewNaming {
+    #[serde(default = "default_pr_review_pattern")]
+    pub name_pattern: String,
+}
+
+fn default_pr_review_pattern() -> String {
+    "pr-{number}-{slug}".into()
+}
+
+impl Default for PrReviewNaming {
+    fn default() -> Self {
+        Self {
+            name_pattern: default_pr_review_pattern(),
+        }
+    }
+}
+
+fn default_feature_labels() -> Vec<String> {
+    vec!["enhancement".into()]
+}
+
+/// Start work's global settings. Every field is defaulted to the behaviour
+/// that shipped before it was a setting, so a file without them changes
+/// nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartWorkSettings {
+    #[serde(default)]
+    pub scope: Scope,
+    /// An issue carrying any of these is a `feature`; every other open issue
+    /// is an `issue`. Matched case-insensitively, as GitHub does.
+    #[serde(default = "default_feature_labels")]
+    pub feature_labels: Vec<String>,
+    #[serde(default = "issue_naming", deserialize_with = "partial_issue_naming")]
+    pub issue: Naming,
+    #[serde(
+        default = "feature_naming",
+        deserialize_with = "partial_feature_naming"
+    )]
+    pub feature: Naming,
+    #[serde(
+        default = "free_feature_naming",
+        deserialize_with = "partial_free_feature_naming"
+    )]
+    pub free_feature: Naming,
+    #[serde(default)]
+    pub pr_review: PrReviewNaming,
+}
+
+impl Default for StartWorkSettings {
+    fn default() -> Self {
+        Self {
+            scope: Scope::default(),
+            feature_labels: default_feature_labels(),
+            issue: issue_naming(),
+            feature: feature_naming(),
+            free_feature: free_feature_naming(),
+            pr_review: PrReviewNaming::default(),
+        }
+    }
 }
 
 impl Default for Settings {
@@ -347,6 +497,7 @@ impl Default for Settings {
             theme_name: default_theme_name(),
             custom_buttons: Vec::new(),
             remote_control: true,
+            start_work: StartWorkSettings::default(),
         }
     }
 }

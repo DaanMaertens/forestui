@@ -848,7 +848,7 @@ fn start_work_describe(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hi
     );
     // What Enter would create, so the names are no surprise on the confirm
     // screen — and why Enter does nothing while there are none.
-    let names = match work::free_text_names(modal.description.value()) {
+    let names = match work::free_text_names(&modal.start_work, modal.description.value()) {
         Some(names) => format!("Worktree: {}", names.worktree),
         None => "Type a few words to name the worktree after".to_string(),
     };

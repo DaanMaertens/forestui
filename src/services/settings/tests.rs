@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::{Scope, StartWorkSettings};
 
 #[test]
 fn missing_file_yields_defaults() {
@@ -76,4 +77,85 @@ fn roundtrip_keeps_field_names() {
     assert!(raw.contains("\"branch_prefix\""));
     assert!(raw.contains("\"custom_buttons\""));
     assert_eq!(load_settings_from(&p).default_editor, "hx");
+}
+
+/// A file written before Start work had settings loads with the behaviour
+/// that shipped: my items, `enhancement` as the feature label, and the
+/// names Start work has always made.
+#[test]
+fn a_file_without_start_work_loads_todays_behaviour() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    std::fs::write(&p, r#"{"default_editor": "nvim", "custom_buttons": []}"#).unwrap();
+    let s = load_settings_from(&p);
+    let start = &s.start_work;
+    assert_eq!(start.scope, Scope::Mine);
+    assert_eq!(start.feature_labels, vec!["enhancement".to_string()]);
+    assert_eq!(start.issue.branch_prefix, "fix/");
+    assert_eq!(start.issue.name_pattern, "issue-{number}-{slug}");
+    assert_eq!(start.feature.branch_prefix, "feat/");
+    assert_eq!(start.feature.name_pattern, "feat-{number}-{slug}");
+    assert_eq!(start.free_feature.branch_prefix, "feat/");
+    assert_eq!(start.free_feature.name_pattern, "feat-{slug}");
+    assert_eq!(start.pr_review.name_pattern, "pr-{number}-{slug}");
+    assert_eq!(*start, StartWorkSettings::default());
+}
+
+/// Each key that is there is taken, and each one that is not keeps its
+/// default — down to one half of a mode's naming.
+#[test]
+fn a_partial_start_work_section_fills_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    std::fs::write(
+        &p,
+        r#"{"start_work": {
+            "scope": "all",
+            "issue": {"branch_prefix": "bug/"},
+            "feature": {"name_pattern": "f{number}"}
+        }}"#,
+    )
+    .unwrap();
+    let start = load_settings_from(&p).start_work;
+    assert_eq!(start.scope, Scope::All);
+    assert_eq!(start.feature_labels, vec!["enhancement".to_string()]);
+    assert_eq!(start.issue.branch_prefix, "bug/");
+    assert_eq!(start.issue.name_pattern, "issue-{number}-{slug}");
+    assert_eq!(start.feature.branch_prefix, "feat/");
+    assert_eq!(start.feature.name_pattern, "f{number}");
+    assert_eq!(
+        start.free_feature,
+        StartWorkSettings::default().free_feature
+    );
+}
+
+/// A hand-edit that does not parse costs the Start work section, not the
+/// whole file: the theme and the rest still load.
+#[test]
+fn a_malformed_start_work_section_loads_as_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    std::fs::write(
+        &p,
+        r#"{"theme_name": "nord", "start_work": {"scope": "everyone", "feature_labels": "feature"}}"#,
+    )
+    .unwrap();
+    let s = load_settings_from(&p);
+    assert_eq!(s.theme_name, "nord");
+    assert_eq!(s.start_work, StartWorkSettings::default());
+}
+
+#[test]
+fn start_work_roundtrips() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    let mut s = Settings::default();
+    s.start_work.scope = Scope::All;
+    s.start_work.feature_labels = vec!["feature".into(), "type: feature".into()];
+    s.start_work.issue.branch_prefix = "bug/".into();
+    s.start_work.pr_review.name_pattern = "review-{number}".into();
+    save_settings_to(&p, &s).unwrap();
+    let raw = std::fs::read_to_string(&p).unwrap();
+    assert!(raw.contains("\"scope\": \"all\""), "{raw}");
+    assert_eq!(load_settings_from(&p).start_work, s.start_work);
 }

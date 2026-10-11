@@ -89,8 +89,14 @@ impl ControlSpec {
     }
 }
 
-/// The header line the issues section shares with its refresh control.
-pub const ISSUES_HEADER: &str = "MY OPEN GITHUB ISSUES";
+/// The header line the issues section shares with its refresh control,
+/// which says whose issues the list holds.
+pub fn issues_header(scope: crate::models::Scope) -> &'static str {
+    match scope {
+        crate::models::Scope::Mine => "MY OPEN GITHUB ISSUES",
+        crate::models::Scope::All => "OPEN GITHUB ISSUES",
+    }
+}
 
 /// One piece of the pane, in rendering order.
 #[derive(Debug, Clone)]
@@ -137,6 +143,7 @@ pub enum DetailNode {
     /// The issues header with its inline refresh control, whose glyph doubles
     /// as the loading spinner.
     IssuesHeader {
+        title: &'static str,
         glyph: char,
     },
 }
@@ -622,6 +629,7 @@ fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
     // spinner — Textual's `.refresh-btn` was flat, `height: 1; border: none`.
     nodes.push(DetailNode::Blank);
     nodes.push(DetailNode::IssuesHeader {
+        title: issues_header(app.settings.start_work.scope),
         glyph: match app.issues {
             Some(_) => '↻',
             None => SPINNER[app.spinner_index % SPINNER.len()],

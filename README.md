@@ -257,11 +257,32 @@ Settings are stored in `~/.config/forestui/settings.json`:
       "command": "claude --model opus"
     }
   ],
-  "remote_control": true
+  "remote_control": true,
+  "start_work": {
+    "scope": "mine",
+    "feature_labels": ["enhancement"],
+    "issue": { "branch_prefix": "fix/", "name_pattern": "issue-{number}-{slug}" },
+    "feature": { "branch_prefix": "feat/", "name_pattern": "feat-{number}-{slug}" },
+    "free_feature": { "branch_prefix": "feat/", "name_pattern": "feat-{slug}" },
+    "pr_review": { "name_pattern": "pr-{number}-{slug}" }
+  }
 }
 ```
 
 Press `S` in the app to open the settings modal.
+
+`start_work` configures Start work (`s`) and is edited in the file:
+
+- `scope` — `mine` lists issues assigned to or opened by you and PRs with a
+  review requested from you or opened by you; `all` lists every open one.
+- `feature_labels` — an issue carrying any of these (case-insensitive) is a
+  `feature`; every other open issue is an `issue`.
+- Per work mode, the worktree is named by `name_pattern` with `{number}` and
+  `{slug}` (from the title, or a free-text feature's first words) filled in,
+  and the branch is `branch_prefix` followed by that name. A `pr-review`
+  worktree checks out the PR's own branch, so it has no prefix.
+
+Every key is optional; a missing one keeps the default shown above.
 
 Custom Claude buttons add extra entries to the CLAUDE section of the detail
 pane. Each one opens a tmux window named `<prefix>:<worktree>` running its
