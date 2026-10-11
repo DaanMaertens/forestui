@@ -115,12 +115,14 @@ pub enum AppEvent {
     },
     /// Start work's `pr-review` list finished loading: the open PRs in
     /// `scope`, and the login `gh` is authenticated as, which decides each
-    /// one's review kind.
+    /// one's review kind — or why there is no list.
     PullRequests {
         path: String,
         scope: crate::models::Scope,
-        prs: Vec<crate::models::GitHubPullRequest>,
-        viewer: Option<String>,
+        result: Result<
+            crate::services::github::PullRequests,
+            crate::services::github::PullRequestsError,
+        >,
     },
     /// `gh` was asked which GitHub repository a checkout resolves to:
     /// `repo` keys its repository settings, and without one only a

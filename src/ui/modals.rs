@@ -806,7 +806,14 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         (Scope::Mine, WorkMode::PrReview) => " awaiting your review or opened by you",
         (Scope::Mine, _) => " assigned to or opened by you",
     };
-    let empty = format!("{empty}{mine}");
+    // A list that could not be fetched is not an empty one: it says why
+    // instead, so a failure never reads as "you have no PRs".
+    let (empty, empty_style) = match modal.pull_requests_error() {
+        Some(error) if modal.mode == WorkMode::PrReview => {
+            (error.message().to_string(), theme::warning())
+        }
+        _ => (format!("{empty}{mine}"), theme::muted()),
+    };
     column.line(frame, widgets::section(section));
     match &modal.picker {
         None => {
@@ -825,17 +832,17 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
             // The free-text entry is not a work item: an empty list still
             // says so above it, and the count is of the items alone.
             let items = picker.entries().filter(|e| e.is_item()).count();
-            let mut count = if items == 0 {
-                empty
+            let (mut count, count_style) = if items == 0 {
+                (empty, empty_style)
             } else {
-                item_count_line(picker, noun)
+                (item_count_line(picker, noun), theme::muted())
             };
             // Said beside the count, so an issue the list leaves out is
             // accounted for rather than missing.
             if let Some(hidden) = work::hidden_blocked_text(modal.hidden_blocked()) {
                 count.push_str(&format!(" · {hidden}"));
             }
-            column.text(frame, count, theme::muted());
+            column.text(frame, count, count_style);
             // Leave room for the gap, the hint and the buttons below the list.
             let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
             picker_results(

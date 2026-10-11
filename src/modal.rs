@@ -16,6 +16,7 @@ use crate::models::{
 use crate::picker::SearchPicker;
 use crate::prompt::{self, Template};
 use crate::repo_settings::{ConfigFile, RepoKey};
+use crate::services::github::{PullRequests, PullRequestsError};
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
 use crate::util;
 use crate::work::{self, ItemEntry, WorkItem, WorkMode, WorktreeNames};
@@ -750,8 +751,9 @@ pub struct StartWorkModal {
     pub github: Option<bool>,
     /// Every loaded issue; the picker holds the ones `mode` lists.
     issues: Option<Vec<GitHubIssue>>,
-    /// The PRs `pr-review` lists, once `gh` has answered.
-    pull_requests: Option<Vec<GitHubPullRequest>>,
+    /// The PRs `pr-review` lists, once `gh` has answered — or why it
+    /// could not.
+    pull_requests: Option<Result<Vec<GitHubPullRequest>, PullRequestsError>>,
     /// The login `gh` is authenticated as, which a PR's author is compared
     /// with to settle its review kind.
     viewer: Option<String>,
@@ -940,19 +942,30 @@ impl StartWorkModal {
     }
 
     /// Fill `pr-review`'s list once the PRs for `scope` have loaded; kept,
-    /// like the issues, once there.
+    /// like the issues, once there. Whether the answer was taken.
     pub fn set_pull_requests(
         &mut self,
         scope: Scope,
-        prs: Vec<GitHubPullRequest>,
-        viewer: Option<String>,
-    ) {
-        if scope == self.scope && self.pull_requests.is_none() {
-            self.pull_requests = Some(prs);
-            self.viewer = viewer;
-            if self.mode == WorkMode::PrReview {
-                self.fill_picker();
-            }
+        result: Result<PullRequests, PullRequestsError>,
+    ) -> bool {
+        if scope != self.scope || self.pull_requests.is_some() {
+            return false;
+        }
+        self.pull_requests = Some(result.map(|answer| {
+            self.viewer = answer.viewer;
+            answer.prs
+        }));
+        if self.mode == WorkMode::PrReview {
+            self.fill_picker();
+        }
+        true
+    }
+
+    /// Why `pr-review`'s list could not be loaded, once that is known.
+    pub fn pull_requests_error(&self) -> Option<PullRequestsError> {
+        match &self.pull_requests {
+            Some(Err(error)) => Some(*error),
+            _ => None,
         }
     }
 
@@ -974,8 +987,11 @@ impl StartWorkModal {
             return;
         }
         let entries = if self.mode == WorkMode::PrReview {
-            let Some(prs) = self.pull_requests.as_deref() else {
-                return;
+            // A failed fetch lists nothing; the list says why.
+            let prs = match &self.pull_requests {
+                None => return,
+                Some(Ok(prs)) => prs.as_slice(),
+                Some(Err(_)) => &[],
             };
             work::pull_request_entries(prs, |number| {
                 self.linked

@@ -355,40 +355,96 @@ async fn fetch_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue
 pub async fn list_pull_requests(
     path: &str,
     scope: Scope,
-) -> (Vec<GitHubPullRequest>, Option<String>) {
+) -> Result<PullRequests, PullRequestsError> {
     let (auth, viewer) = get_auth_status().await;
-    if auth != AuthStatus::Authenticated {
-        return (Vec::new(), None);
+    if let Some(error) = PullRequestsError::from_auth(auth) {
+        return Err(error);
     }
     const JSON_FIELDS: &str = "number,title,author,isDraft,headRefName,isCrossRepository,createdAt";
-    let mut outputs = Vec::new();
+    let mut answers = Vec::new();
     for filter in pull_request_filters(scope) {
         let mut args = vec!["pr", "list"];
         args.extend_from_slice(filter);
         args.extend_from_slice(&["--state", "open", "--json", JSON_FIELDS]);
         let (code, stdout, _) = run_gh(&args, Some(Path::new(path))).await;
-        if code == 0 {
-            outputs.push(stdout);
+        answers.push((code == 0).then_some(stdout));
+    }
+    let answers: Vec<Option<&str>> = answers.iter().map(Option::as_deref).collect();
+    let mut prs = merge_pull_requests(&answers)?;
+    prs.viewer = viewer;
+    Ok(prs)
+}
+
+/// `pr-review`'s list as `gh` answered it.
+#[derive(Debug, Clone, Default)]
+pub struct PullRequests {
+    pub prs: Vec<GitHubPullRequest>,
+    /// The login `gh` is authenticated as.
+    pub viewer: Option<String>,
+    /// One of the queries the scope is made of failed: the PRs are the
+    /// ones the others returned, and there may be more.
+    pub incomplete: bool,
+}
+
+/// Why `pr-review` has no list at all. Kept apart from an empty list, so
+/// a failure never reads as "you have no PRs".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestsError {
+    NotInstalled,
+    NotAuthenticated,
+    /// Every query failed: a network error, a rate limit, a killed `gh`.
+    Failed,
+}
+
+impl PullRequestsError {
+    /// The error a `gh` in this state gives, if it cannot be asked at all.
+    pub fn from_auth(auth: AuthStatus) -> Option<Self> {
+        match auth {
+            AuthStatus::Authenticated => None,
+            AuthStatus::NotAuthenticated => Some(Self::NotAuthenticated),
+            AuthStatus::NotInstalled => Some(Self::NotInstalled),
         }
     }
-    let outputs: Vec<&str> = outputs.iter().map(String::as_str).collect();
-    (merge_pull_requests(&outputs), viewer)
+
+    /// What the list says in place of its PRs.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::NotInstalled => "gh is not installed",
+            Self::NotAuthenticated => "gh is not logged in",
+            Self::Failed => "Could not load the PRs from GitHub",
+        }
+    }
 }
 
 /// The PRs of several `gh pr list` answers, each listed once, newest first.
-/// An answer that does not parse contributes nothing.
-fn merge_pull_requests(outputs: &[&str]) -> Vec<GitHubPullRequest> {
+/// `None` is a query that exited non-zero; an answer that does not parse
+/// failed as surely. Some failing marks the list incomplete; all failing
+/// is an error.
+fn merge_pull_requests(answers: &[Option<&str>]) -> Result<PullRequests, PullRequestsError> {
     let mut prs: Vec<GitHubPullRequest> = Vec::new();
-    for output in outputs {
-        let parsed: Vec<GitHubPullRequest> = serde_json::from_str(output).unwrap_or_default();
+    let mut failed = 0;
+    for answer in answers {
+        let parsed =
+            answer.and_then(|output| serde_json::from_str::<Vec<GitHubPullRequest>>(output).ok());
+        let Some(parsed) = parsed else {
+            failed += 1;
+            continue;
+        };
         for pr in parsed {
             if !prs.iter().any(|seen| seen.number == pr.number) {
                 prs.push(pr);
             }
         }
     }
+    if failed == answers.len() {
+        return Err(PullRequestsError::Failed);
+    }
     prs.sort_by_key(|pr| std::cmp::Reverse(pr.created_at));
-    prs
+    Ok(PullRequests {
+        prs,
+        viewer: None,
+        incomplete: failed > 0,
+    })
 }
 
 /// Check out PR `number` in the worktree at `worktree`, on the PR's own
