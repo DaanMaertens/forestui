@@ -74,6 +74,9 @@ pub enum ModalEffect {
     /// Open the confirm screen's prompt in an editor; the text comes back as
     /// [`crate::event::AppEvent::PromptEdited`].
     EditPrompt(String),
+    /// Start work's "Show blocked" was toggled: remember the choice, which
+    /// the issue cards share. The picker has already re-listed itself.
+    ShowBlockedIssues(bool),
 }
 
 /// What the integration dialog can do, given what is currently on disk.
@@ -734,6 +737,9 @@ pub struct StartWorkModal {
     /// The settings in effect as the flow opened: which issues are
     /// features, and how a free-text feature is named.
     pub start_work: StartWorkSettings,
+    /// Whether blocked issues are listed. Starts from the shared setting and
+    /// is toggled here; the app persists every toggle.
+    pub show_blocked: bool,
     /// One of the `FOCUS_*` constants; see [`StartWorkModal::ring`].
     pub focus: usize,
 }
@@ -750,11 +756,15 @@ impl StartWorkModal {
     pub const FOCUS_OPEN: usize = 3;
     pub const FOCUS_COPY: usize = 4;
     pub const FOCUS_EDIT: usize = 5;
+    /// The item step's "Show blocked" checkbox, in the modes that list issues.
+    /// Not a letter key: the query field takes every typed character.
+    pub const FOCUS_BLOCKED: usize = 6;
 
     pub fn new(
         repo: &Repository,
         issues: Option<Vec<GitHubIssue>>,
         start_work: StartWorkSettings,
+        show_blocked: bool,
     ) -> Self {
         let mut modal = Self {
             repo_id: repo.id,
@@ -775,6 +785,7 @@ impl StartWorkModal {
                 .filter_map(|w| Some((w.work_item.clone()?, w.name.clone())))
                 .collect(),
             start_work,
+            show_blocked,
             focus: Self::FOCUS_LIST,
         };
         if let Some(issues) = issues {
@@ -888,6 +899,7 @@ impl StartWorkModal {
                 self.mode,
                 issues,
                 &self.start_work.feature_labels,
+                self.show_blocked,
                 |number| self.linked.get(&WorkItemLink::Issue { number }).cloned(),
             )
         };
@@ -897,10 +909,49 @@ impl StartWorkModal {
         ));
     }
 
+    /// Whether the item step offers "Show blocked": only the modes that list
+    /// issues, and only with GitHub to list them from.
+    pub fn offers_blocked_toggle(&self) -> bool {
+        self.mode != WorkMode::PrReview && self.has_github()
+    }
+
+    /// How many blocked issues the current list leaves out.
+    pub fn hidden_blocked(&self) -> usize {
+        match (self.offers_blocked_toggle(), self.issues.as_deref()) {
+            (true, Some(issues)) => work::hidden_blocked(
+                &work::issues_for(self.mode, issues, &self.start_work.feature_labels),
+                self.show_blocked,
+            ),
+            _ => 0,
+        }
+    }
+
+    /// Flip "Show blocked" and re-list, keeping whatever was typed: the
+    /// query is the user's, the rows under it are only a view.
+    fn toggle_blocked(&mut self) -> ModalOutcome {
+        self.show_blocked = !self.show_blocked;
+        let query = self
+            .picker
+            .as_ref()
+            .map(|picker| picker.query().value().to_string());
+        self.picker = None;
+        self.fill_picker();
+        if let (Some(picker), Some(query)) = (self.picker.as_mut(), query) {
+            picker.set_query(&query);
+        }
+        ModalOutcome::Effect(ModalEffect::ShowBlockedIssues(self.show_blocked))
+    }
+
     /// The focus stops on the current step, in Tab order.
     pub fn ring(&self) -> &'static [usize] {
         match self.step {
             StartWorkStep::Mode => &[Self::FOCUS_LIST, Self::FOCUS_CANCEL],
+            StartWorkStep::Item if self.offers_blocked_toggle() => &[
+                Self::FOCUS_LIST,
+                Self::FOCUS_BLOCKED,
+                Self::FOCUS_BACK,
+                Self::FOCUS_CANCEL,
+            ],
             StartWorkStep::Item | StartWorkStep::Describe => {
                 &[Self::FOCUS_LIST, Self::FOCUS_BACK, Self::FOCUS_CANCEL]
             }
@@ -1065,6 +1116,11 @@ impl StartWorkModal {
         }
 
         match (self.focus, key.code) {
+            (Self::FOCUS_BLOCKED, KeyCode::Enter | KeyCode::Char(' '))
+                if self.ring().contains(&Self::FOCUS_BLOCKED) =>
+            {
+                self.toggle_blocked()
+            }
             (Self::FOCUS_BACK, KeyCode::Enter) | (Self::FOCUS_EDIT, KeyCode::Enter) => {
                 self.go_back();
                 ModalOutcome::None
@@ -1438,6 +1494,8 @@ pub struct SettingsModal {
     pub remote_control: bool,
     /// Not edited here; carried through so saving the dialog keeps it.
     start_work: StartWorkSettings,
+    /// Not edited here either: the toggle lives where the issues are listed.
+    show_blocked_issues: bool,
     /// Snapshot, not a live read. The renderer runs on every frame, and asking
     /// on each one meant three file reads and three digests per repaint — I/O
     /// in a draw path, which stutters visibly on a slow or networked home.
@@ -1477,6 +1535,7 @@ impl SettingsModal {
             custom_buttons: settings.custom_buttons.clone(),
             remote_control: settings.remote_control,
             start_work: settings.start_work.clone(),
+            show_blocked_issues: settings.show_blocked_issues,
             integration_status: crate::services::claude_plugin::status(),
             focus: Self::FOCUS_EDITOR,
         }
@@ -1498,6 +1557,7 @@ impl SettingsModal {
             custom_buttons: self.custom_buttons.clone(),
             remote_control: self.remote_control,
             start_work: self.start_work.clone(),
+            show_blocked_issues: self.show_blocked_issues,
         }
     }
 

@@ -360,7 +360,9 @@ fn the_pr_review_list_holds_the_pull_requests() {
 #[test]
 fn the_feature_list_leads_with_free_text() {
     let issues = vec![labelled(2, &["enhancement"]), labelled(3, &["enhancement"])];
-    let entries = item_entries(WorkMode::Feature, &issues, &default_labels(), |_| None);
+    let entries = item_entries(WorkMode::Feature, &issues, &default_labels(), false, |_| {
+        None
+    });
     assert!(matches!(entries[0], ItemEntry::FreeText));
     let numbers: Vec<_> = entries
         .iter()
@@ -371,7 +373,7 @@ fn the_feature_list_leads_with_free_text() {
         .collect();
     assert_eq!(numbers, vec![2, 3]);
 
-    let entries = item_entries(WorkMode::Issue, &issues, &default_labels(), |_| None);
+    let entries = item_entries(WorkMode::Issue, &issues, &default_labels(), false, |_| None);
     assert!(entries.is_empty(), "no free text outside `feature`");
 }
 
@@ -460,4 +462,88 @@ fn the_configured_feature_labels_decide_the_split() {
     );
     let none: Vec<String> = Vec::new();
     assert!(issues_for(WorkMode::Feature, &issues, &none).is_empty());
+}
+
+/// `labelled`, blocked by an open #`by` — and by a closed #99, which does
+/// not count.
+fn blocked(number: i64, labels: &[&str], by: &[i64]) -> GitHubIssue {
+    let mut issue = labelled(number, labels);
+    let mut nodes: Vec<_> = by
+        .iter()
+        .map(|n| serde_json::json!({"number": n, "state": "OPEN"}))
+        .collect();
+    nodes.push(serde_json::json!({"number": 99, "state": "CLOSED"}));
+    issue.blocked_by = serde_json::from_value(serde_json::json!({ "nodes": nodes })).unwrap();
+    issue
+}
+
+fn entry_numbers(entries: &[ItemEntry]) -> Vec<i64> {
+    entries
+        .iter()
+        .filter_map(|e| match e {
+            ItemEntry::Issue(entry) => Some(entry.issue.number),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn blocked_issues_are_listed_only_when_shown() {
+    let issues = vec![
+        labelled(1, &[]),
+        blocked(2, &[], &[9]),
+        blocked(3, &["enhancement"], &[9]),
+        blocked(4, &[], &[]),
+    ];
+    let labels = &default_labels();
+    let hidden = item_entries(WorkMode::Issue, &issues, labels, false, |_| None);
+    assert_eq!(
+        entry_numbers(&hidden),
+        vec![1, 4],
+        "a closed blocker blocks nothing"
+    );
+    let shown = item_entries(WorkMode::Issue, &issues, labels, true, |_| None);
+    assert_eq!(entry_numbers(&shown), vec![1, 2, 4]);
+
+    // The split sees every issue, blocked or not: a blocked feature is a
+    // feature, hidden from `feature`, never moved into `issue`.
+    let features = item_entries(WorkMode::Feature, &issues, labels, false, |_| None);
+    assert_eq!(entry_numbers(&features), Vec::<i64>::new());
+    let features = item_entries(WorkMode::Feature, &issues, labels, true, |_| None);
+    assert_eq!(entry_numbers(&features), vec![3]);
+}
+
+#[test]
+fn the_hidden_count_is_of_the_blocked_issues_a_list_leaves_out() {
+    let issues = vec![
+        labelled(1, &[]),
+        blocked(2, &[], &[9]),
+        blocked(3, &[], &[9, 10]),
+        blocked(4, &["enhancement"], &[9]),
+    ];
+    let labels = &default_labels();
+    let in_issue = issues_for(WorkMode::Issue, &issues, labels);
+    assert_eq!(hidden_blocked(&in_issue, false), 2);
+    assert_eq!(
+        hidden_blocked(&in_issue, true),
+        0,
+        "nothing is hidden while shown"
+    );
+    assert_eq!(hidden_blocked_text(2).as_deref(), Some("2 blocked hidden"));
+    assert_eq!(hidden_blocked_text(0), None);
+}
+
+#[test]
+fn the_blocked_marker_names_the_open_blockers() {
+    assert_eq!(
+        blocked_marker(&blocked(2, &[], &[9, 10])).as_deref(),
+        Some("blocked by #9, #10")
+    );
+    assert_eq!(blocked_marker(&blocked(2, &[], &[])), None);
+    assert_eq!(blocked_marker(&labelled(2, &[])), None);
+    // A long list stays short enough to sit beside the worktree marker.
+    assert_eq!(
+        blocked_marker(&blocked(2, &[], &[1, 2, 3, 4, 5])).as_deref(),
+        Some("blocked by #1, #2, #3 +2")
+    );
 }

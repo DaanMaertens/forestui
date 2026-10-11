@@ -161,6 +161,20 @@ impl App {
         }
     }
 
+    /// Show or hide blocked issues, in Start work and on the issue cards
+    /// alike, and remember the choice. Saved here because the main loop is
+    /// the one writer of the settings file; only a failure is worth a toast,
+    /// since the lists changing is the confirmation.
+    fn set_show_blocked_issues(&mut self, show: bool) {
+        if self.settings.show_blocked_issues == show {
+            return;
+        }
+        self.settings.show_blocked_issues = show;
+        if let Err(error) = settings_service::save_settings(&self.settings) {
+            self.notify(format!("Could not save settings: {error}"), Severity::Error);
+        }
+    }
+
     fn run_modal_effect(&mut self, effect: ModalEffect) {
         match effect {
             ModalEffect::ClaudePlugin(action) => self.run_claude_plugin_action(action),
@@ -217,6 +231,7 @@ impl App {
                     });
                 });
             }
+            ModalEffect::ShowBlockedIssues(show) => self.set_show_blocked_issues(show),
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
                 let tx = self.tx.clone();
@@ -759,6 +774,7 @@ impl App {
             repo,
             cached.as_ref().map(|(issues, _)| issues.clone()),
             self.settings.start_work.clone(),
+            self.settings.show_blocked_issues,
         );
         self.modals.push(Modal::StartWork(Box::new(modal)));
         // Asked on every open rather than cached: a remote can be added or
@@ -1012,6 +1028,9 @@ impl App {
                     self.issues = None;
                     self.fetch_issues();
                 }
+            }
+            Action::ToggleBlockedIssues => {
+                self.set_show_blocked_issues(!self.settings.show_blocked_issues);
             }
             Action::StartWorkOnIssue(index) => {
                 // The issue is captured here rather than looked up again when

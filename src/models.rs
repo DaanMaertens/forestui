@@ -342,6 +342,12 @@ pub struct Settings {
     /// and the user's theme and buttons — down with it.
     #[serde(default, deserialize_with = "lenient_start_work")]
     pub start_work: StartWorkSettings,
+    /// List blocked issues in Start work's picker and on the issue cards.
+    /// One preference for both places, so turning it on in one shows them
+    /// in the other. Off by default, which is also what a file without the
+    /// key loads as.
+    #[serde(default)]
+    pub show_blocked_issues: bool,
 }
 
 fn lenient_start_work<'de, D>(deserializer: D) -> Result<StartWorkSettings, D::Error>
@@ -487,6 +493,7 @@ impl Default for Settings {
             custom_buttons: Vec::new(),
             remote_control: true,
             start_work: StartWorkSettings::default(),
+            show_blocked_issues: false,
         }
     }
 }
@@ -528,6 +535,27 @@ pub struct GitHubIssue {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub labels: Vec<GitHubLabel>,
+    /// GitHub's native "blocked by" list. `None` from a `gh` too old to
+    /// know the field, which leaves the issue unblocked.
+    #[serde(default)]
+    pub blocked_by: Option<BlockedBy>,
+}
+
+/// The `blockedBy` connection `gh issue list --json blockedBy` returns.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct BlockedBy {
+    #[serde(default)]
+    pub nodes: Vec<Blocker>,
+}
+
+/// One issue another one is blocked by.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Blocker {
+    #[serde(default)]
+    pub number: i64,
+    /// `OPEN` or `CLOSED`.
+    #[serde(default)]
+    pub state: String,
 }
 
 /// The login of whoever opened an issue or pull request.
@@ -562,6 +590,27 @@ pub struct GitHubPullRequest {
 impl GitHubIssue {
     pub fn relative_time(&self) -> String {
         crate::util::naturaltime(self.updated_at)
+    }
+
+    /// The issues still blocking this one. A closed blocker has been dealt
+    /// with, so it no longer counts.
+    fn open_blocker_nodes(&self) -> impl Iterator<Item = &Blocker> {
+        self.blocked_by
+            .iter()
+            .flat_map(|blocked_by| &blocked_by.nodes)
+            .filter(|blocker| blocker.state.eq_ignore_ascii_case("open"))
+    }
+
+    /// The numbers of the issues still blocking this one.
+    pub fn open_blockers(&self) -> Vec<i64> {
+        self.open_blocker_nodes()
+            .map(|blocker| blocker.number)
+            .collect()
+    }
+
+    /// Whether at least one open issue blocks this one.
+    pub fn is_blocked(&self) -> bool {
+        self.open_blocker_nodes().next().is_some()
     }
 }
 

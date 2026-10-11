@@ -13,6 +13,7 @@
 use super::App;
 use crate::models::Speaker;
 use crate::theme;
+use crate::work;
 use ratatui::style::Style;
 
 /// An actionable control in the detail pane — the immediate-mode stand-in for
@@ -38,7 +39,10 @@ pub enum Action {
     TogglePinSession(usize),
     DeleteSession(usize),
     RefreshIssues,
-    /// An issue card's Start work: the confirm screen for that issue.
+    /// The issues header's "show blocked" checkbox, shared with Start work.
+    ToggleBlockedIssues,
+    /// An issue card's Start work: the confirm screen for that issue, by its
+    /// position in the whole loaded list — hidden issues included.
     StartWorkOnIssue(usize),
     RemoveRepository,
     Archive,
@@ -141,10 +145,13 @@ pub enum DetailNode {
         label: &'static str,
     },
     /// The issues header with its inline refresh control, whose glyph doubles
-    /// as the loading spinner.
+    /// as the loading spinner, and the "show blocked" checkbox after it.
     IssuesHeader {
         title: &'static str,
         glyph: char,
+        show_blocked: bool,
+        /// The hidden-count note, while blocked issues are hidden.
+        hidden: Option<String>,
     },
 }
 
@@ -192,6 +199,7 @@ pub fn drawn(nodes: &[DetailNode]) -> Vec<(DetailItem, bool)> {
             DetailNode::Field { field, .. } => items.push((DetailItem::Field(*field), true)),
             DetailNode::IssuesHeader { .. } => {
                 items.push((DetailItem::Action(Action::RefreshIssues), true));
+                items.push((DetailItem::Action(Action::ToggleBlockedIssues), true));
             }
             _ => {}
         }
@@ -627,6 +635,7 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
 fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
     // The refresh control rides the header line and doubles as the loading
     // spinner — Textual's `.refresh-btn` was flat, `height: 1; border: none`.
+    let show_blocked = app.settings.show_blocked_issues;
     nodes.push(DetailNode::Blank);
     nodes.push(DetailNode::IssuesHeader {
         title: issues_header(app.settings.start_work.scope),
@@ -634,6 +643,11 @@ fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
             Some(_) => '↻',
             None => SPINNER[app.spinner_index % SPINNER.len()],
         },
+        show_blocked,
+        hidden: app
+            .issues
+            .as_deref()
+            .and_then(|list| work::hidden_blocked_text(work::hidden_blocked(list, show_blocked))),
     });
 
     let Some(list) = app.issues.as_deref() else {
@@ -644,7 +658,20 @@ fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
         text(nodes, "No issues found", theme::muted());
         return;
     }
-    for (index, issue) in list.iter().enumerate() {
+    // Enumerated before filtering: the index is into the whole list, which
+    // is what Start work resolves it against.
+    let shown: Vec<_> = list
+        .iter()
+        .enumerate()
+        .filter(|(_, issue)| work::is_shown(issue, show_blocked))
+        .collect();
+    // The header already says how many are hidden; this says that is all
+    // there is, rather than leaving a header over nothing.
+    if shown.is_empty() {
+        text(nodes, "No unblocked issues", theme::muted());
+        return;
+    }
+    for (index, issue) in shown {
         nodes.push(DetailNode::Blank);
         nodes.push(DetailNode::CardStart { padded: true });
 
@@ -658,6 +685,11 @@ fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
         if !labels.is_empty() {
             meta.push_str(&format!(" • {}", labels.join(", ")));
         }
+        // The marker takes the spare line between title and meta, where the
+        // labels cannot push it past the clip at the buttons.
+        let marker = work::blocked_marker(issue)
+            .map(|marker| vec![(marker, theme::warning())])
+            .unwrap_or_default();
         // The button floats beside the text instead of taking a full-width
         // band, same as the session cards: title, a blank, the meta on the
         // left; Start work's three rows share those same lines on the right.
@@ -671,7 +703,7 @@ fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
                     ),
                     theme::primary(),
                 )],
-                Vec::new(),
+                marker,
                 vec![(meta, theme::muted())],
             ],
             rows: vec![vec![ControlSpec::new(

@@ -204,3 +204,19 @@ fn the_scope_decides_the_gh_filters() {
     assert_eq!(issue_filters(Scope::All), unfiltered);
     assert_eq!(pull_request_filters(Scope::All), unfiltered);
 }
+
+/// A `gh` from before issue dependencies refuses the whole call over the
+/// one field it does not know; only that refusal is worth a retry without it.
+#[test]
+fn only_an_unknown_blocked_by_field_asks_for_the_older_fields() {
+    let refusal = "Unknown JSON field: \"blockedBy\"\nAvailable fields:\n  assignees\n  author";
+    assert!(rejects_blocked_by(refusal));
+    assert!(!rejects_blocked_by("HTTP 502: Bad Gateway"));
+    assert!(!rejects_blocked_by(""));
+    assert!(ISSUE_FIELDS.ends_with(",blockedBy"));
+    assert_eq!(
+        format!("{LEGACY_ISSUE_FIELDS},blockedBy"),
+        ISSUE_FIELDS,
+        "the fallback differs from the full list by blockedBy alone"
+    );
+}

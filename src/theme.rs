@@ -229,6 +229,12 @@ pub fn accent() -> Style {
     Style::default().fg(active().accent)
 }
 
+/// A shown blocked issue's marker: it cannot be worked on yet, which is
+/// worth noticing, but nothing is wrong.
+pub fn warning() -> Style {
+    Style::default().fg(active().warning)
+}
+
 pub fn destructive() -> Style {
     Style::default().fg(active().destructive)
 }
