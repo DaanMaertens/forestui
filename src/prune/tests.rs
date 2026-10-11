@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::{Repository, Worktree};
 use std::path::Path;
 
 fn git_in(dir: &Path, args: &[&str]) {
@@ -244,4 +245,119 @@ async fn a_repository_without_a_remote_is_skipped_as_such() {
         Outcome::Skipped(Skip::NoRemote)
     );
     assert!(fixture.worktree.exists());
+}
+
+/// The command line's prune over a tracked repository: what git removed
+/// leaves the state file, what was skipped stays in it.
+#[tokio::test]
+async fn pruning_tracked_worktrees_drops_only_the_removed_from_the_state_file() {
+    let fixture = Fixture::new("fix/done");
+    let dirty = fixture.clone.with_file_name("dirty");
+    git_in(
+        &fixture.clone,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "fix/dirty",
+            &dirty.to_string_lossy(),
+        ],
+    );
+    std::fs::write(dirty.join("scratch.txt"), "unsaved").unwrap();
+
+    let config = fixture.clone.with_file_name(".forestui-config.json");
+    let mut state = AppState::load_from(config.clone());
+    let mut repo = Repository::new("clone".into(), fixture.clone.to_string_lossy().into());
+    let done = Worktree::new(
+        "done".into(),
+        "fix/done".into(),
+        fixture.worktree.to_string_lossy().into(),
+    );
+    let kept = Worktree::new(
+        "dirty".into(),
+        "fix/dirty".into(),
+        dirty.to_string_lossy().into(),
+    );
+    let (done_id, kept_id) = (done.id, kept.id);
+    repo.worktrees = vec![done, kept];
+    let repo_id = repo.id;
+    state.add_repository(repo);
+
+    let outcomes = prune_tracked(&mut state, &[done_id, kept_id]).await;
+
+    assert_eq!(
+        outcomes,
+        vec![
+            named("done", Outcome::Removed { branch_kept: None }),
+            named(
+                "dirty",
+                Outcome::Skipped(Skip::Uncommitted("1 untracked".into()))
+            ),
+        ]
+    );
+    assert_eq!(state.take_save_error(), None);
+    let ids = |state: &AppState| -> Vec<uuid::Uuid> {
+        state
+            .find_repository(repo_id)
+            .unwrap()
+            .worktrees
+            .iter()
+            .map(|w| w.id)
+            .collect()
+    };
+    assert_eq!(ids(&state), vec![kept_id]);
+    assert_eq!(
+        ids(&AppState::load_from(config)),
+        vec![kept_id],
+        "written to disk"
+    );
+}
+
+fn repository(name: &str, outcomes: Vec<(String, Outcome)>) -> RepositoryPrune {
+    RepositoryPrune {
+        name: name.to_string(),
+        outcomes,
+    }
+}
+
+/// Skips are the routine doing its job; only a real failure fails the run.
+#[test]
+fn the_command_line_fails_only_on_a_failure() {
+    let skipped = summary(&[repository(
+        "app",
+        vec![
+            named("a", Outcome::Removed { branch_kept: None }),
+            named("b", Outcome::Skipped(Skip::Unpushed(1))),
+        ],
+    )]);
+    assert_eq!(
+        skipped.lines,
+        vec![
+            "app: Pruned 'a'.".to_string(),
+            "app: Skipped 'b' (1 unpushed commit).".to_string(),
+        ]
+    );
+    assert!(!skipped.failed);
+
+    let failed = summary(&[
+        repository("app", vec![named("a", Outcome::Failed("locked".into()))]),
+        repository("lib", Vec::new()),
+    ]);
+    assert!(failed.failed);
+    assert_eq!(
+        failed.lines,
+        vec![
+            "app: Pruned nothing.".to_string(),
+            "app: Could not prune 'a': locked.".to_string(),
+        ],
+        "a repository with nothing finished says nothing"
+    );
+}
+
+#[test]
+fn a_forest_with_nothing_finished_says_so() {
+    let quiet = summary(&[repository("app", Vec::new())]);
+    assert_eq!(quiet.lines, vec!["No finished worktrees.".to_string()]);
+    assert!(!quiet.failed);
 }

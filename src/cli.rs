@@ -3,7 +3,7 @@
 //! forestui runs inside tmux. When started outside one it re-executes itself
 //! through `tmux`, creating or joining a session named after the forest folder.
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 
 /// Taken from `Cargo.toml`, which the release workflow stamps from the git tag.
@@ -62,6 +62,22 @@ pub struct Args {
     /// can be inspected before it happens.
     #[arg(long = "claude-plugin", value_name = "ACTION")]
     pub claude_plugin: Option<ClaudePluginAction>,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum Command {
+    /// Remove finished worktrees and their local branches, then exit.
+    ///
+    /// The same prune as the repository pane's **Prune finished**, run over
+    /// every repository in the forest without the UI and without tmux.
+    /// Worktrees with uncommitted or unpushed work are skipped and listed.
+    Prune {
+        /// Path to the forest directory (default: ~/forest)
+        forest_path: Option<String>,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
