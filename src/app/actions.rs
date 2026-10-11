@@ -9,8 +9,8 @@ use super::{Action, App, Field, PendingJump, PendingStart};
 use crate::event::Severity;
 use crate::event::{AppEvent, BranchList, BranchTarget, EventTx};
 use crate::modal::{
-    AddWorktreeModal, Clash, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult,
-    PromptTemplatesModal, StartWorkConfirmModal, StartWorkModal,
+    Clash, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult, PromptTemplatesModal,
+    StartWorkConfirmModal, StartWorkModal, WorktreeForm,
 };
 use crate::modal::{IntegrationAction, ModalOutcome};
 use crate::models::{CustomClaudeButton, GitHubIssue, Repository, WorkItemLink, Worktree};
@@ -187,6 +187,13 @@ impl App {
                 };
                 let repo_id = flow.repo_id;
                 self.start_work_on_issue(repo_id, *issue, mode);
+            }
+            ModalEffect::LoadWorktreeBranches => {
+                let Some(Modal::StartWork(flow)) = self.modals.last() else {
+                    return;
+                };
+                let repo_id = flow.repo_id;
+                self.load_branches_then(repo_id, BranchTarget::StartWorkWorktree);
             }
             ModalEffect::ConfirmPullRequest(item) => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
@@ -572,18 +579,23 @@ impl App {
                     modal.update_branches(list);
                 }
             }
-            BranchTarget::AddWorktree => {
+            BranchTarget::StartWorkWorktree => {
                 let Some(repo) = self.state.find_repository(repo_id) else {
                     return;
                 };
-                self.modals
-                    .push(Modal::AddWorktree(Box::new(AddWorktreeModal::new(
+                // The flow it was loaded for, still open; otherwise the user
+                // moved on while the branches loaded.
+                if let Some(Modal::StartWork(flow)) = self.modals.last_mut()
+                    && flow.repo_id == repo_id
+                {
+                    flow.set_worktree_form(WorktreeForm::new(
                         repo,
                         list.branches,
                         list.remotes,
                         settings_service::get_forest_path(),
                         self.settings.branch_prefix.clone(),
-                    ))));
+                    ));
+                }
             }
             BranchTarget::StartWorkConfirm => {
                 let Some(start) = self.pending_start.take() else {
@@ -895,13 +907,6 @@ impl App {
         }
     }
 
-    pub(super) fn action_add_worktree(&mut self) {
-        match self.state.selection.repository_id {
-            Some(repo_id) => self.load_branches_then(repo_id, BranchTarget::AddWorktree),
-            None => self.notify("Select a repository first", Severity::Warning),
-        }
-    }
-
     pub(super) fn action_toggle_archive(&mut self) {
         let Some(worktree_id) = self.state.selection.worktree_id else {
             return;
@@ -1067,7 +1072,6 @@ impl App {
             Action::Sync => self.sync(path),
             Action::StartWork => self.action_start_work(),
             Action::RepositorySettings => self.action_repository_settings(),
-            Action::AddWorktree => self.action_add_worktree(),
             Action::Editor => self.open_in_editor(&path),
             Action::Terminal => self.open_in_terminal(&path),
             Action::Files => self.open_in_file_manager(&path),

@@ -23,7 +23,6 @@ use ratatui::style::Style;
 pub enum Action {
     StartWork,
     Sync,
-    AddWorktree,
     Editor,
     Terminal,
     Files,
@@ -245,7 +244,6 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
     let mut top = vec![
         ControlSpec::new(Action::StartWork, "Start work", theme::Variant::Primary),
         sync_control(app, false),
-        ControlSpec::new(Action::AddWorktree, "Add Worktree", theme::Variant::Normal),
     ];
     // Only there when it has something to do: a control that is always
     // drawn, mostly disabled, is clutter on the pane's busiest row.

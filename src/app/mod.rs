@@ -55,7 +55,7 @@ pub enum Focus {
 
 /// The branch to show beside a worktree name, or `None` when it only repeats it.
 ///
-/// `w` creates `<branch_prefix><name>`, which is the overwhelmingly common case,
+/// A new branch is created as `<branch_prefix><name>`, which is the overwhelmingly common case,
 /// so showing it back costs a third of the sidebar and tells the user nothing. A
 /// branch that genuinely differs — an existing branch checked out under another
 /// name — is worth the space.

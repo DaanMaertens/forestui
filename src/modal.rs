@@ -63,6 +63,9 @@ pub enum ModalEffect {
     /// Start work picked an issue in a work mode: load the branches and open
     /// the confirm screen for it on top of the picker.
     ConfirmIssue(Box<GitHubIssue>, WorkMode),
+    /// Start work's `worktree` mode was chosen: load the branches its form
+    /// searches.
+    LoadWorktreeBranches,
     /// Start work picked a PR to review, its review kind already settled:
     /// open the confirm screen for it on top of the picker.
     ConfirmPullRequest(Box<WorkItem>),
@@ -231,7 +234,6 @@ pub enum ModalResult {
 #[derive(Debug)]
 pub enum Modal {
     AddRepository(AddRepositoryModal),
-    AddWorktree(Box<AddWorktreeModal>),
     StartWork(Box<StartWorkModal>),
     StartWorkConfirm(Box<StartWorkConfirmModal>),
     Settings(Box<SettingsModal>),
@@ -256,7 +258,6 @@ impl Modal {
 
         match self {
             Modal::AddRepository(m) => m.handle_key(key),
-            Modal::AddWorktree(m) => m.handle_key(key),
             Modal::StartWork(m) => m.handle_key(key),
             Modal::StartWorkConfirm(m) => m.handle_key(key),
             Modal::Settings(m) => m.handle_key(key),
@@ -293,7 +294,6 @@ impl Modal {
     pub fn set_focus(&mut self, index: usize) {
         match self {
             Modal::AddRepository(m) => m.focus = index.min(AddRepositoryModal::FIELDS - 1),
-            Modal::AddWorktree(m) => m.focus = index.min(m.field_count() - 1),
             Modal::StartWork(m) => m.set_focus(index),
             Modal::StartWorkConfirm(m) => m.set_focus(index),
             Modal::Settings(m) => m.focus = index.min(SettingsModal::FIELDS - 1),
@@ -315,13 +315,6 @@ impl Modal {
     /// Select a row in whichever list this modal shows, for a click on it.
     pub fn set_row(&mut self, row: usize) {
         match self {
-            Modal::AddWorktree(m) => {
-                m.picker.select_row(row);
-                // Picking a row commits it, the way Enter does from the
-                // keyboard: highlighting alone left Create disabled and a
-                // mouse-only user with no way to choose a branch.
-                m.pick_selected();
-            }
             Modal::CustomButtons(m) if !m.buttons.is_empty() => {
                 m.selected = row.min(m.buttons.len() - 1);
             }
@@ -458,10 +451,12 @@ impl AddRepositoryModal {
     }
 }
 
-// ------------------------------------------------------------------ Add worktree
+// ----------------------------------------------------------------- Worktree form
 
+/// Start work's `worktree` step: a plain worktree on a new or an existing
+/// branch. It lives inside [`StartWorkModal`], which handles Esc and Back.
 #[derive(Debug)]
-pub struct AddWorktreeModal {
+pub struct WorktreeForm {
     pub repo_id: Uuid,
     pub repo_name: String,
     pub forest_dir: PathBuf,
@@ -472,14 +467,15 @@ pub struct AddWorktreeModal {
     pub picker: SearchPicker<BranchEntry>,
     pub new_branch: bool,
     pub error: String,
-    /// One of the `FOCUS_*` constants, or [`AddWorktreeModal::create_index`] /
-    /// [`AddWorktreeModal::cancel_index`], whose positions depend on the mode.
+    /// One of the `FOCUS_*` constants, or [`WorktreeForm::create_index`],
+    /// [`WorktreeForm::back_index`] or [`WorktreeForm::cancel_index`], whose
+    /// positions depend on the mode.
     pub focus: usize,
 }
 
-impl AddWorktreeModal {
-    /// The fixed head of the focus ring. Create and Cancel follow, but their
-    /// indices move with the mode — the results list only exists while an
+impl WorktreeForm {
+    /// The fixed head of the focus ring. Create, Back and Cancel follow, but
+    /// their indices move with the mode — the results list only exists while an
     /// existing branch is being picked — so they are methods, not constants.
     pub const FOCUS_NAME: usize = 0;
     pub const FOCUS_MODE: usize = 1;
@@ -512,13 +508,17 @@ impl AddWorktreeModal {
     }
 
     pub fn field_count(&self) -> usize {
-        // The fixed head, then Create and Cancel; the results list sits between
-        // them only while an existing branch is being picked.
+        // The fixed head, then Create, Back and Cancel; the results list sits
+        // between them only while an existing branch is being picked.
         let head = Self::FOCUS_BRANCH + 1;
-        head + usize::from(!self.new_branch) + 2
+        head + usize::from(!self.new_branch) + 3
     }
 
     pub fn create_index(&self) -> usize {
+        self.field_count() - 3
+    }
+
+    pub fn back_index(&self) -> usize {
         self.field_count() - 2
     }
 
@@ -533,6 +533,18 @@ impl AddWorktreeModal {
         } else {
             Some(Self::FOCUS_RESULTS)
         }
+    }
+
+    pub fn set_focus(&mut self, index: usize) {
+        self.focus = index.min(self.field_count() - 1);
+    }
+
+    /// Select a clicked branch row. Picking a row commits it, the way Enter
+    /// does from the keyboard: highlighting alone left Create disabled and a
+    /// mouse-only user with no way to choose a branch.
+    pub fn set_row(&mut self, row: usize) {
+        self.picker.select_row(row);
+        self.pick_selected();
     }
 
     /// Commit the highlighted branch into the query, which is what
@@ -615,11 +627,9 @@ impl AddWorktreeModal {
         })
     }
 
+    /// Esc and Back are the flow's, which steps back to the modes; Cancel
+    /// closes the whole flow.
     fn handle_key(&mut self, key: KeyEvent) -> ModalOutcome {
-        if is_escape(key) {
-            return ModalOutcome::Close;
-        }
-
         // Text editing takes precedence while a field has focus.
         if self.focus == Self::FOCUS_NAME && edit_input(&mut self.name, key) {
             self.error.clear();
@@ -709,6 +719,8 @@ pub enum StartWorkStep {
     /// The description's names are taken: open that worktree, make a
     /// numbered copy, or go back and edit.
     Clash,
+    /// The `worktree` mode's form: a plain worktree, no Claude.
+    Worktree,
 }
 
 /// The worktree a free-text feature's names collided with.
@@ -750,6 +762,9 @@ pub struct StartWorkModal {
     pub description: TextInput,
     /// Set on the clash step.
     pub clash: Option<Clash>,
+    /// The `worktree` mode's form, once its branches have loaded. Kept
+    /// across Back, like the description.
+    pub worktree: Option<Box<WorktreeForm>>,
     /// Work item → the worktree already started for it, as the flow opened.
     /// Only marks the list: picking an item checks the live state.
     linked: HashMap<WorkItemLink, String>,
@@ -812,6 +827,7 @@ impl StartWorkModal {
             picker: None,
             description: TextInput::new("").with_placeholder("Describe the feature..."),
             clash: None,
+            worktree: None,
             linked: repo
                 .worktrees
                 .iter()
@@ -835,10 +851,18 @@ impl StartWorkModal {
     }
 
     /// Whether `mode` can be picked here: the repository is on GitHub, or
-    /// the mode needs nothing from it — only `feature` does, through its
-    /// free-text entry.
+    /// the mode needs nothing from it — `feature` through its free-text
+    /// entry, and `worktree`.
     pub fn mode_enabled(&self, mode: WorkMode) -> bool {
-        self.has_github() || mode == WorkMode::Feature
+        self.has_github() || matches!(mode, WorkMode::Feature | WorkMode::Worktree)
+    }
+
+    /// Fill the `worktree` step's form once its branches have loaded. A
+    /// form already here is kept: it may hold what was typed before Back.
+    pub fn set_worktree_form(&mut self, form: WorktreeForm) {
+        if self.worktree.is_none() {
+            self.worktree = Some(Box::new(form));
+        }
     }
 
     /// Take the probe's answer. A repository found not to be on GitHub moves
@@ -945,6 +969,10 @@ impl StartWorkModal {
     }
 
     fn fill_picker(&mut self) {
+        // The form stands in for a list.
+        if self.mode == WorkMode::Worktree {
+            return;
+        }
         let entries = if self.mode == WorkMode::PrReview {
             let Some(prs) = self.pull_requests.as_deref() else {
                 return;
@@ -1047,20 +1075,34 @@ impl StartWorkModal {
                 Self::FOCUS_BACK,
                 Self::FOCUS_CANCEL,
             ],
-            StartWorkStep::Item | StartWorkStep::Describe => {
+            // The worktree step's ring while its branches load; the form
+            // keeps its own once it is up.
+            StartWorkStep::Item | StartWorkStep::Describe | StartWorkStep::Worktree => {
                 &[Self::FOCUS_LIST, Self::FOCUS_BACK, Self::FOCUS_CANCEL]
             }
             StartWorkStep::Clash => &[Self::FOCUS_OPEN, Self::FOCUS_COPY, Self::FOCUS_EDIT],
         }
     }
 
+    /// The form, while it is the step on screen. Its controls carry its own
+    /// focus indices, so a click or a key on this step is the form's.
+    fn active_form(&mut self) -> Option<&mut WorktreeForm> {
+        match self.step {
+            StartWorkStep::Worktree => self.worktree.as_deref_mut(),
+            _ => None,
+        }
+    }
+
     pub fn set_focus(&mut self, index: usize) {
-        if self.ring().contains(&index) {
+        if let Some(form) = self.active_form() {
+            form.set_focus(index);
+        } else if self.ring().contains(&index) {
             self.focus = index;
         }
     }
 
-    /// Select a clicked row: a mode on the mode step, an item on the item step.
+    /// Select a clicked row: a mode on the mode step, an item on the item
+    /// step, a branch on the worktree step.
     pub fn set_row(&mut self, row: usize) {
         match self.step {
             StartWorkStep::Mode => {
@@ -1073,6 +1115,11 @@ impl StartWorkModal {
             StartWorkStep::Item => {
                 if let Some(picker) = self.picker.as_mut() {
                     picker.select_row(row);
+                }
+            }
+            StartWorkStep::Worktree => {
+                if let Some(form) = self.worktree.as_deref_mut() {
+                    form.set_row(row);
                 }
             }
             StartWorkStep::Describe | StartWorkStep::Clash => {}
@@ -1122,11 +1169,22 @@ impl StartWorkModal {
         if is_escape(key) {
             return match self.step {
                 StartWorkStep::Mode => ModalOutcome::Close,
-                StartWorkStep::Item | StartWorkStep::Describe | StartWorkStep::Clash => {
+                StartWorkStep::Item
+                | StartWorkStep::Describe
+                | StartWorkStep::Clash
+                | StartWorkStep::Worktree => {
                     self.go_back();
                     ModalOutcome::None
                 }
             };
+        }
+
+        if let Some(form) = self.active_form() {
+            if key.code == KeyCode::Enter && form.focus == form.back_index() {
+                self.go_back();
+                return ModalOutcome::None;
+            }
+            return form.handle_key(key);
         }
 
         if self.focus == Self::FOCUS_LIST {
@@ -1139,6 +1197,19 @@ impl StartWorkModal {
                     KeyCode::Down => {
                         self.step_mode(1);
                         return ModalOutcome::None;
+                    }
+                    KeyCode::Enter if self.mode == WorkMode::Worktree => {
+                        self.go_to(StartWorkStep::Worktree);
+                        return match self.worktree.as_deref_mut() {
+                            Some(form) => {
+                                // What was typed is kept; a complaint about
+                                // it from the last visit is not news.
+                                form.focus = WorktreeForm::FOCUS_NAME;
+                                form.error.clear();
+                                ModalOutcome::None
+                            }
+                            None => ModalOutcome::Effect(ModalEffect::LoadWorktreeBranches),
+                        };
                     }
                     KeyCode::Enter if self.mode_enabled(self.mode) => {
                         // Without GitHub the list would hold the free-text
@@ -1202,7 +1273,7 @@ impl StartWorkModal {
                         });
                     }
                 }
-                StartWorkStep::Clash => {}
+                StartWorkStep::Clash | StartWorkStep::Worktree => {}
             }
         }
 
@@ -1245,7 +1316,9 @@ impl StartWorkModal {
     /// list back to the modes.
     fn go_back(&mut self) {
         let previous = match self.step {
-            StartWorkStep::Mode | StartWorkStep::Item => StartWorkStep::Mode,
+            StartWorkStep::Mode | StartWorkStep::Item | StartWorkStep::Worktree => {
+                StartWorkStep::Mode
+            }
             StartWorkStep::Describe => self.before_describe(),
             StartWorkStep::Clash => StartWorkStep::Describe,
         };

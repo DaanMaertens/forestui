@@ -36,7 +36,7 @@ async fn detail_items_differ_between_repository_and_worktree() {
     app.issues = Some(Vec::new());
 
     let repo_items = app.detail_items();
-    assert!(repo_items.contains(&DetailItem::Action(Action::AddWorktree)));
+    assert!(repo_items.contains(&DetailItem::Action(Action::StartWork)));
     assert!(repo_items.contains(&DetailItem::Action(Action::RemoveRepository)));
     assert!(!repo_items.contains(&DetailItem::Field(Field::WorktreeName)));
 
@@ -46,7 +46,7 @@ async fn detail_items_differ_between_repository_and_worktree() {
     assert!(worktree_items.contains(&DetailItem::Field(Field::WorktreeName)));
     assert!(worktree_items.contains(&DetailItem::Field(Field::BranchName)));
     assert!(worktree_items.contains(&DetailItem::Action(Action::Archive)));
-    assert!(!worktree_items.contains(&DetailItem::Action(Action::AddWorktree)));
+    assert!(!worktree_items.contains(&DetailItem::Action(Action::StartWork)));
 }
 
 #[tokio::test]
@@ -257,7 +257,7 @@ async fn archive_toggle_moves_the_worktree_out_of_the_active_list() {
 /// The sidebar's branch column earns its space or does not appear.
 #[test]
 fn only_a_branch_that_differs_from_the_name_is_shown() {
-    // What `w` creates: prefix + name, and so pure repetition.
+    // What a plain worktree on a new branch gets: prefix + name, and so pure repetition.
     assert_eq!(informative_branch("feat/wt-a", "wt-a", "feat/"), None);
     // No prefix configured.
     assert_eq!(informative_branch("wt-a", "wt-a", ""), None);

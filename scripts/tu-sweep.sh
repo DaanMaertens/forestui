@@ -485,7 +485,6 @@ if [ "$LABEL" = "python" ]; then press Down; sleep 1.2; fi
 capture UC-54 worktree-detail
 
 for spec in "a:UC-55:modal-add-repository:Repository Path" \
-            "w:UC-56:modal-add-worktree:Worktree Name" \
             "S:UC-57:modal-settings:BRANCH PREFIX" \
             "d:UC-58:modal-confirm-delete:Permanently delete"; do
   IFS=: read -r key id slug expect <<< "$spec"
@@ -494,6 +493,18 @@ for spec in "a:UC-55:modal-add-repository:Repository Path" \
   capture "$id" "$slug"
   focus_app; press Escape; sleep 1.0
 done
+
+# The plain worktree form is Start work's last mode. Three Downs reach it
+# whether or not the GitHub probe has greyed out the modes before it, and Esc
+# steps back to the mode list before a second one closes the flow.
+focus_app; press s
+await "Work Mode"
+press Down; press Down; press Down; press Enter
+await "Worktree Name"; sleep 0.8
+capture UC-56 modal-add-worktree
+focus_app; press Escape
+await "Work Mode"
+press Escape; sleep 1.0
 
 for spec in "e:UC-60:window-editor:edit:alpha" \
             "t:UC-61:window-terminal:term:alpha" \
