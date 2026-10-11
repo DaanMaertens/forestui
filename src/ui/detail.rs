@@ -181,27 +181,50 @@ fn render_node(pane: &mut Pane, app: &App, node: DetailNode) {
             };
             rename_field(pane, label, input);
         }
-        DetailNode::IssuesHeader { title, glyph } => issues_header(pane, title, glyph),
+        DetailNode::IssuesHeader {
+            title,
+            glyph,
+            show_blocked,
+            hidden,
+        } => issues_header(pane, title, glyph, show_blocked, hidden.as_deref()),
     }
 }
 
-/// The issues header with its inline refresh control.
-fn issues_header(pane: &mut Pane, title: &'static str, glyph: char) {
+/// The issues header with its inline refresh control, then the "show
+/// blocked" checkbox and, while blocked issues are hidden, how many.
+fn issues_header(
+    pane: &mut Pane,
+    title: &'static str,
+    glyph: char,
+    show_blocked: bool,
+    hidden: Option<&str>,
+) {
+    let lit = |(focused, hovered): (bool, bool)| {
+        if focused || hovered {
+            theme::accent()
+        } else {
+            theme::secondary()
+        }
+    };
     // `.refresh-btn { min-width: 3; width: 3 }` — the glyph is narrower than
     // the control, and it is the control that takes the click.
-    let (focused, hovered) = pane.claim(as_u16(title.chars().count() + 1), 3, 1);
-    pane.row(vec![
+    let refresh_x = title.chars().count() + 1;
+    let refresh = lit(pane.claim(as_u16(refresh_x), 3, 1));
+    // One line like the refresh control, not a boxed button: a box would
+    // cost the header two more rows for a switch flipped now and then.
+    let checkbox = format!("[{}] show blocked", if show_blocked { 'x' } else { ' ' });
+    let toggle = lit(pane.claim(as_u16(refresh_x + 3), as_u16(checkbox.chars().count()), 1));
+    let mut spans = vec![
         Span::styled(title, theme::section_header()),
         Span::raw(" "),
-        Span::styled(
-            glyph.to_string(),
-            if focused || hovered {
-                theme::accent()
-            } else {
-                theme::secondary()
-            },
-        ),
-    ]);
+        Span::styled(glyph.to_string(), refresh),
+        Span::raw("  "),
+        Span::styled(checkbox, toggle),
+    ];
+    if let Some(hidden) = hidden {
+        spans.push(Span::styled(format!("  {hidden}"), theme::muted()));
+    }
+    pane.row(spans);
 }
 
 /// Where a focusable item landed. The line alone would not do: `Editor`,

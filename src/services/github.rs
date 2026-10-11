@@ -293,8 +293,24 @@ fn pull_request_filters(scope: Scope) -> &'static [&'static [&'static str]] {
     }
 }
 
+/// The fields an issue is fetched with. `blockedBy` comes along in the same
+/// call, so knowing which issues are blocked costs no `gh` call per issue.
+const ISSUE_FIELDS: &str =
+    "number,title,state,url,createdAt,updatedAt,author,assignees,labels,blockedBy";
+
+/// [`ISSUE_FIELDS`] for a `gh` too old to know `blockedBy`, whose issues
+/// then all count as unblocked.
+const LEGACY_ISSUE_FIELDS: &str =
+    "number,title,state,url,createdAt,updatedAt,author,assignees,labels";
+
+/// Whether `gh` refused a call because it does not know `blockedBy`. `gh`
+/// rejects the whole call over one unknown field, so without the retry this
+/// enables an older `gh` would list no issues at all.
+fn rejects_blocked_by(stderr: &str) -> bool {
+    stderr.contains("Unknown JSON field") && stderr.contains("blockedBy")
+}
+
 async fn fetch_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue> {
-    const JSON_FIELDS: &str = "number,title,state,url,createdAt,updatedAt,author,assignees,labels";
     let limit_str = limit.to_string();
 
     let mut issues: Vec<GitHubIssue> = Vec::new();
@@ -303,15 +319,19 @@ async fn fetch_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue
     for filter in issue_filters(scope) {
         let mut args = vec!["issue", "list"];
         args.extend_from_slice(filter);
-        args.extend_from_slice(&[
-            "--state",
-            "open",
-            "--limit",
-            &limit_str,
-            "--json",
-            JSON_FIELDS,
-        ]);
-        let (code, stdout, _) = run_gh(&args, Some(Path::new(path))).await;
+        args.extend_from_slice(&["--state", "open", "--limit", &limit_str, "--json"]);
+        let (mut code, mut stdout, stderr) = run_gh(
+            &[&args[..], &[ISSUE_FIELDS]].concat(),
+            Some(Path::new(path)),
+        )
+        .await;
+        if code != 0 && rejects_blocked_by(&stderr) {
+            (code, stdout, _) = run_gh(
+                &[&args[..], &[LEGACY_ISSUE_FIELDS]].concat(),
+                Some(Path::new(path)),
+            )
+            .await;
+        }
         if code != 0 || stdout.is_empty() {
             continue;
         }

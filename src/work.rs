@@ -385,13 +385,57 @@ impl Searchable for PullRequestEntry {
     }
 }
 
-/// The rows a mode's picker lists: the issues it lists, each with the
-/// worktree `linked` says it was started in, behind the free-text entry in
-/// `feature`.
+/// Whether a list shows `issue`: always, unless it is blocked and blocked
+/// issues are hidden. Only a view filter — the cache, the `issue`/`feature`
+/// split and duplicate detection all see every issue.
+pub fn is_shown(issue: &GitHubIssue, show_blocked: bool) -> bool {
+    show_blocked || !issue.is_blocked()
+}
+
+/// How many of `issues` a list leaves out for being blocked.
+pub fn hidden_blocked(issues: &[GitHubIssue], show_blocked: bool) -> usize {
+    issues
+        .iter()
+        .filter(|issue| !is_shown(issue, show_blocked))
+        .count()
+}
+
+/// What a list says about the blocked issues it hides, so a missing issue is
+/// not a mystery. `None` when it hides none.
+pub fn hidden_blocked_text(hidden: usize) -> Option<String> {
+    (hidden > 0).then(|| format!("{hidden} blocked hidden"))
+}
+
+/// How many blockers the marker names before it only counts the rest.
+const MARKER_BLOCKERS: usize = 3;
+
+/// The marker a shown blocked issue carries, naming what blocks it. `None`
+/// for an issue nothing open blocks.
+pub fn blocked_marker(issue: &GitHubIssue) -> Option<String> {
+    let blockers = issue.open_blockers();
+    if blockers.is_empty() {
+        return None;
+    }
+    let named: Vec<String> = blockers
+        .iter()
+        .take(MARKER_BLOCKERS)
+        .map(|number| format!("#{number}"))
+        .collect();
+    let mut marker = format!("blocked by {}", named.join(", "));
+    if blockers.len() > MARKER_BLOCKERS {
+        marker.push_str(&format!(" +{}", blockers.len() - MARKER_BLOCKERS));
+    }
+    Some(marker)
+}
+
+/// The rows a mode's picker lists: the issues it lists — less the blocked
+/// ones, unless `show_blocked` — each with the worktree `linked` says it was
+/// started in, behind the free-text entry in `feature`.
 pub fn item_entries(
     mode: WorkMode,
     issues: &[GitHubIssue],
     feature_labels: &[impl AsRef<str>],
+    show_blocked: bool,
     linked: impl Fn(i64) -> Option<String>,
 ) -> Vec<ItemEntry> {
     let free_text = (mode == WorkMode::Feature).then_some(ItemEntry::FreeText);
@@ -400,6 +444,7 @@ pub fn item_entries(
         .chain(
             issues_for(mode, issues, feature_labels)
                 .into_iter()
+                .filter(|issue| is_shown(issue, show_blocked))
                 .map(|issue| {
                     let worktree = linked(issue.number);
                     ItemEntry::Issue(IssueEntry::new(issue, worktree))

@@ -36,6 +36,17 @@ pub fn get_forest_path() -> PathBuf {
 }
 
 pub fn settings_path() -> PathBuf {
+    // A test that drives the app through a saving action must never reach
+    // the developer's own settings file. One file per test thread, since
+    // tests run side by side; the process id keeps a later run from reading
+    // a file an earlier one left behind.
+    #[cfg(test)]
+    return std::env::temp_dir().join(format!(
+        "forestui-test-settings-{}-{:?}.json",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    #[cfg(not(test))]
     crate::util::home_dir()
         .join(".config")
         .join("forestui")

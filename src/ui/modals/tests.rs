@@ -95,7 +95,7 @@ fn issue() -> GitHubIssue {
 }
 
 fn start_work_modal(step: StartWorkStep) -> Modal {
-    let mut modal = StartWorkModal::new(&repo(), Some(vec![issue()]), Default::default());
+    let mut modal = StartWorkModal::new(&repo(), Some(vec![issue()]), Default::default(), false);
     modal.step = step;
     Modal::StartWork(Box::new(modal))
 }

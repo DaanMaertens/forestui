@@ -109,3 +109,69 @@ fn state_roundtrips_its_json_shape() {
     let out = serde_json::to_string(&state).unwrap();
     assert!(out.contains("\"base_branch\":\"origin/main\""));
 }
+
+/// Two issues as `gh issue list --json ...,blockedBy` prints them: #12 waits
+/// on an open #9 and a closed #10, #13 only on the closed #10.
+const BLOCKED_BY_JSON: &str = r#"[
+  {"number":12,"title":"Twelve","state":"OPEN","url":"https://github.com/o/r/issues/12",
+   "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z",
+   "author":{"login":"me"},"assignees":[],"labels":[],
+   "blockedBy":{"nodes":[
+     {"number":9,"state":"OPEN","title":"Nine","url":"https://github.com/o/r/issues/9"},
+     {"number":10,"state":"CLOSED","title":"Ten","url":"https://github.com/o/r/issues/10"}
+   ],"totalCount":2}},
+  {"number":13,"title":"Thirteen","state":"OPEN","url":"https://github.com/o/r/issues/13",
+   "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z",
+   "author":{"login":"me"},"assignees":[],"labels":[],
+   "blockedBy":{"nodes":[
+     {"number":10,"state":"CLOSED","title":"Ten","url":"https://github.com/o/r/issues/10"}
+   ],"totalCount":1}}
+]"#;
+
+#[test]
+fn blocked_by_parses_from_gh_issue_list() {
+    let issues: Vec<GitHubIssue> = serde_json::from_str(BLOCKED_BY_JSON).unwrap();
+    assert_eq!(issues[0].open_blockers(), vec![9]);
+    assert!(issues[0].is_blocked());
+}
+
+#[test]
+fn an_issue_whose_blockers_are_all_closed_is_not_blocked() {
+    let issues: Vec<GitHubIssue> = serde_json::from_str(BLOCKED_BY_JSON).unwrap();
+    assert!(issues[1].open_blockers().is_empty());
+    assert!(!issues[1].is_blocked());
+}
+
+#[test]
+fn gh_output_without_blocked_by_counts_as_unblocked() {
+    let older = r#"[{"number":5,"title":"Five","createdAt":"2026-01-01T00:00:00Z",
+        "updatedAt":"2026-01-01T00:00:00Z","labels":[]},
+        {"number":6,"title":"Six","createdAt":"2026-01-01T00:00:00Z",
+        "updatedAt":"2026-01-01T00:00:00Z","blockedBy":null}]"#;
+    let issues: Vec<GitHubIssue> = serde_json::from_str(older).unwrap();
+    assert!(issues.iter().all(|issue| !issue.is_blocked()));
+}
+
+#[test]
+fn blocker_state_is_compared_without_case() {
+    let json = r#"{"number":1,"createdAt":"2026-01-01T00:00:00Z",
+        "updatedAt":"2026-01-01T00:00:00Z",
+        "blockedBy":{"nodes":[{"number":2,"state":"open"}]}}"#;
+    let issue: GitHubIssue = serde_json::from_str(json).unwrap();
+    assert_eq!(issue.open_blockers(), vec![2]);
+}
+
+#[test]
+fn settings_without_the_blocked_key_hide_blocked_issues() {
+    let settings: Settings = serde_json::from_str("{}").unwrap();
+    assert!(!settings.show_blocked_issues);
+    assert!(!Settings::default().show_blocked_issues);
+}
+
+#[test]
+fn settings_keep_show_blocked_issues_across_a_round_trip() {
+    let settings: Settings = serde_json::from_str(r#"{"show_blocked_issues":true}"#).unwrap();
+    assert!(settings.show_blocked_issues);
+    let back: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+    assert!(back.show_blocked_issues);
+}

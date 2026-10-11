@@ -763,11 +763,17 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
             // The free-text entry is not a work item: an empty list still
             // says so above it, and the count is of the items alone.
             let items = picker.entries().filter(|e| e.is_item()).count();
-            if items == 0 {
-                column.text(frame, empty, theme::muted());
+            let mut count = if items == 0 {
+                empty.to_string()
             } else {
-                column.text(frame, item_count_line(picker, noun), theme::muted());
+                item_count_line(picker, noun)
+            };
+            // Said beside the count, so an issue the list leaves out is
+            // accounted for rather than missing.
+            if let Some(hidden) = work::hidden_blocked_text(modal.hidden_blocked()) {
+                count.push_str(&format!(" · {hidden}"));
             }
+            column.text(frame, count, theme::muted());
             // Leave room for the gap, the hint and the buttons below the list.
             let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
             picker_results(
@@ -790,6 +796,14 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
                         line.spans
                             .push(Span::styled("  draft", marker(theme::muted())));
                     }
+                    if let ItemEntry::Issue(entry) = entry
+                        && let Some(blocked) = work::blocked_marker(&entry.issue)
+                    {
+                        line.spans.push(Span::styled(
+                            format!("  {blocked}"),
+                            marker(theme::warning()),
+                        ));
+                    }
                     // Picking a marked item jumps to its worktree rather than
                     // creating one, so the row says where it will land.
                     if let Some(worktree) = entry.worktree() {
@@ -809,25 +823,30 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         column.gap();
     }
     column.text(frame, "Enter picks · Esc goes back", theme::muted());
-    column.controls(
-        frame,
-        hits,
-        vec![
-            control(
-                "Back",
-                modal.focus == StartWorkModal::FOCUS_BACK,
-                theme::Variant::Normal,
-                StartWorkModal::FOCUS_BACK,
-            ),
-            control(
-                "Cancel",
-                modal.focus == StartWorkModal::FOCUS_CANCEL,
-                theme::Variant::Normal,
-                StartWorkModal::FOCUS_CANCEL,
-            ),
-        ],
-        true,
-    );
+    let mut controls = Vec::new();
+    if modal.offers_blocked_toggle() {
+        controls.push(checkbox(
+            "Show blocked",
+            modal.show_blocked,
+            modal.focus == StartWorkModal::FOCUS_BLOCKED,
+            StartWorkModal::FOCUS_BLOCKED,
+        ));
+    }
+    controls.extend([
+        control(
+            "Back",
+            modal.focus == StartWorkModal::FOCUS_BACK,
+            theme::Variant::Normal,
+            StartWorkModal::FOCUS_BACK,
+        ),
+        control(
+            "Cancel",
+            modal.focus == StartWorkModal::FOCUS_CANCEL,
+            theme::Variant::Normal,
+            StartWorkModal::FOCUS_CANCEL,
+        ),
+    ]);
+    column.controls(frame, hits, controls, true);
 }
 
 const FREE_TEXT_TITLE: &str = "Start Work: Free-text feature";
