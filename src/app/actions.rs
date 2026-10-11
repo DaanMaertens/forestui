@@ -232,6 +232,7 @@ impl App {
                 });
             }
             ModalEffect::ShowBlockedIssues(show) => self.set_show_blocked_issues(show),
+            ModalEffect::EditTemplate(template) => self.edit_template(template),
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
                 let tx = self.tx.clone();
@@ -533,17 +534,24 @@ impl App {
             Some(Modal::StartWork(_)) => true,
             Some(_) => return,
         };
-        self.modals.push(Modal::StartWorkConfirm(Box::new(
-            StartWorkConfirmModal::new(
-                repo,
-                start.mode,
-                start.item,
-                start.names,
-                list,
-                settings_service::get_forest_path(),
-                has_parent,
-            ),
-        )));
+        let template = crate::prompt::resolve(
+            &settings_service::prompts_dir(),
+            start.item.template(start.mode),
+        );
+        let modal = StartWorkConfirmModal::new(
+            repo,
+            start.mode,
+            start.item,
+            start.names,
+            template.text,
+            list,
+            settings_service::get_forest_path(),
+            has_parent,
+        );
+        self.modals.push(Modal::StartWorkConfirm(Box::new(modal)));
+        if let Some(warning) = template.warning {
+            self.notify(warning, Severity::Warning);
+        }
     }
 
     pub(super) fn switch_to_window(&mut self, window_id: &str, window_name: &str) {
@@ -1151,6 +1159,26 @@ impl App {
         });
     }
 
+    /// Open a global prompt template in the default editor, the same way a
+    /// worktree is opened, writing it from its default first so the editor
+    /// starts on the text in use. Nothing is read back: the file is the
+    /// template, and the next confirm screen reads it afresh.
+    fn edit_template(&mut self, template: crate::prompt::Template) {
+        match crate::prompt::ensure_file(&settings_service::prompts_dir(), template) {
+            Ok(path) => self.open_in_editor_as(
+                &format!("prompts/{}", template.file_name()),
+                &path.to_string_lossy(),
+            ),
+            Err(error) => self.notify(
+                format!(
+                    "Could not create the {} template: {error}",
+                    template.label()
+                ),
+                Severity::Error,
+            ),
+        }
+    }
+
     /// The editor a prompt is edited in: the one the shell names, as git
     /// picks it, then forestui's own if it is a terminal editor, then `vi`.
     /// The popup ends when the editor exits, so a GUI editor that returns at
@@ -1168,20 +1196,31 @@ impl App {
     }
 
     fn open_in_editor(&mut self, path: &str) {
+        let name = self.state.tmux_window_name(path);
+        self.open_in_editor_as(&name, path);
+    }
+
+    /// Open `path` — a directory or a single file — in the default editor:
+    /// a terminal editor in an `edit:<name>` window, anything else detached.
+    fn open_in_editor_as(&mut self, name: &str, path: &str) {
         let editor = self.settings.default_editor.clone();
 
-        if tmux::is_inside_tmux() && tmux::is_tui_editor(&editor) {
-            let name = self.state.tmux_window_name(path);
-            if tmux::create_editor_window(&name, path, &editor) {
-                self.notify(
-                    format!("Opened {editor} in edit:{name}"),
-                    Severity::Information,
-                );
-                return;
-            }
+        if tmux::is_inside_tmux()
+            && tmux::is_tui_editor(&editor)
+            && tmux::create_editor_window(name, path, &editor)
+        {
+            self.notify(
+                format!("Opened {editor} in edit:{name}"),
+                Severity::Information,
+            );
+            return;
         }
 
-        // GUI editor, or not inside tmux: spawn it detached.
+        // GUI editor, or not inside tmux: spawn it detached. Never from a
+        // unit test, which has no tmux and would start a real editor.
+        if cfg!(test) {
+            return;
+        }
         let mut parts = editor.split_whitespace();
         let Some(program) = parts.next() else {
             return;

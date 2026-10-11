@@ -153,3 +153,94 @@ fn a_failed_edit_still_removes_the_file() {
     assert_eq!(edited, Err("no editor".to_string()));
     assert!(!seen.expect("the editor ran").exists());
 }
+
+#[test]
+fn without_a_file_every_template_is_its_built_in_default() {
+    let dir = tempfile::tempdir().unwrap();
+    for template in Template::ALL {
+        let resolved = resolve(dir.path(), template);
+        assert_eq!(resolved.text, template.default_text(), "{template:?}");
+        assert_eq!(resolved.warning, None, "{template:?}");
+    }
+}
+
+#[test]
+fn a_template_file_is_used_instead_of_the_default() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("issue.md"), "Fix #{number} my way").unwrap();
+
+    let resolved = resolve(dir.path(), Template::Issue);
+    assert_eq!(resolved.text, "Fix #{number} my way");
+    assert_eq!(resolved.warning, None);
+    // Each template has its own file: the others keep their defaults.
+    assert_eq!(
+        resolve(dir.path(), Template::Feature).text,
+        FEATURE_TEMPLATE
+    );
+}
+
+#[test]
+fn the_file_names_are_the_template_names() {
+    let names: Vec<_> = Template::ALL.iter().map(|t| t.file_name()).collect();
+    assert_eq!(
+        names,
+        [
+            "issue.md",
+            "feature.md",
+            "free-feature.md",
+            "pr-review-others.md",
+            "pr-review-own.md"
+        ]
+    );
+}
+
+#[test]
+fn an_unreadable_file_falls_back_to_the_default_with_a_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    // Not UTF-8, so it cannot be read as text.
+    std::fs::write(dir.path().join("feature.md"), [0xff, 0xfe, 0x00]).unwrap();
+    // A directory where the file should be cannot be read at all.
+    std::fs::create_dir(dir.path().join("issue.md")).unwrap();
+
+    for template in [Template::Feature, Template::Issue] {
+        let resolved = resolve(dir.path(), template);
+        assert_eq!(resolved.text, template.default_text(), "{template:?}");
+        let warning = resolved.warning.expect("a warning");
+        assert!(warning.contains(template.file_name()), "{warning}");
+    }
+}
+
+#[test]
+fn an_empty_file_falls_back_to_the_default_with_a_warning() {
+    // An empty first prompt would start Claude on nothing; a file emptied by
+    // accident should not do that silently.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pr-review-own.md"), " \n\n").unwrap();
+
+    let resolved = resolve(dir.path(), Template::PrReviewOwn);
+    assert_eq!(resolved.text, PR_REVIEW_OWN_TEMPLATE);
+    assert!(resolved.warning.is_some());
+}
+
+#[test]
+fn ensuring_a_file_creates_it_from_the_default_and_its_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompts = dir.path().join("prompts");
+
+    let path = ensure_file(&prompts, Template::FreeFeature).unwrap();
+    assert_eq!(path, prompts.join("free-feature.md"));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        FREE_FEATURE_TEMPLATE
+    );
+}
+
+#[test]
+fn ensuring_a_file_never_overwrites_one_that_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("issue.md");
+    std::fs::write(&path, "mine").unwrap();
+
+    assert_eq!(ensure_file(dir.path(), Template::Issue).unwrap(), path);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "mine");
+}

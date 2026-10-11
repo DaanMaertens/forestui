@@ -118,6 +118,7 @@ fn confirm_modal() -> Modal {
             issue.number,
             &issue.title,
         ),
+        crate::prompt::ISSUE_TEMPLATE.to_string(),
         branches,
         PathBuf::from("/forest"),
         true,
@@ -161,6 +162,10 @@ fn every_modal() -> Vec<(Modal, &'static str)> {
         (
             Modal::ThemePicker(crate::modal::ThemePickerModal::new()),
             "Theme",
+        ),
+        (
+            Modal::PromptTemplates(crate::modal::PromptTemplatesModal::new()),
+            "Prompt Templates",
         ),
         (
             Modal::Confirm(ConfirmModal::new(
@@ -375,6 +380,10 @@ fn clicking_a_modal_control_maps_to_its_focus_index() {
         ("│ Forest Dark… │", SettingsModal::FOCUS_THEME),
         ("│ Manage Custom Buttons... │", SettingsModal::FOCUS_MANAGE),
         (
+            "│ Edit Prompt Templates... │",
+            SettingsModal::FOCUS_TEMPLATES,
+        ),
+        (
             "│ Manage Integration... │",
             SettingsModal::FOCUS_INTEGRATION,
         ),
@@ -468,5 +477,25 @@ fn branch_rows_are_clickable() {
         index_at(&hits, cell_of(&screen, "origin/main")),
         Some(results),
         "{screen}"
+    );
+}
+
+#[test]
+fn the_template_picker_lists_every_template_by_file_and_clicks_select_it() {
+    let mut picker = crate::modal::PromptTemplatesModal::new();
+    picker.select(3);
+    let (screen, hits) = render_with_hits(&Modal::PromptTemplates(picker), 160, 40);
+    for (row, template) in crate::prompt::Template::ALL.iter().enumerate() {
+        assert!(screen.contains(template.label()), "{screen}");
+        assert_eq!(
+            index_at(&hits, cell_of(&screen, template.file_name())),
+            Some(row),
+            "{screen}"
+        );
+    }
+    assert!(screen.contains("▸ Review someone else's PR"), "{screen}");
+    assert!(
+        screen.contains("· Esc back"),
+        "the hint fits whole:\n{screen}"
     );
 }

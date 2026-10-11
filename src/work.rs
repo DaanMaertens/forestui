@@ -3,7 +3,7 @@
 
 use crate::fuzzy::Searchable;
 use crate::models::{GitHubIssue, GitHubPullRequest, StartWorkSettings, WorkItemLink, Worktree};
-use crate::prompt;
+use crate::prompt::Template;
 
 /// The longest slug a title contributes to a name, so a long title cannot
 /// produce a directory or branch name nobody wants to type.
@@ -63,10 +63,10 @@ impl ReviewKind {
         }
     }
 
-    fn template(self) -> &'static str {
+    fn template(self) -> Template {
         match self {
-            ReviewKind::Others => prompt::PR_REVIEW_OTHERS_TEMPLATE,
-            ReviewKind::Own => prompt::PR_REVIEW_OWN_TEMPLATE,
+            ReviewKind::Others => Template::PrReviewOthers,
+            ReviewKind::Own => Template::PrReviewOwn,
         }
     }
 }
@@ -301,14 +301,14 @@ impl WorkItem {
         }
     }
 
-    /// The built-in template its first prompt is filled from. An issue's
-    /// depends on the mode it is started in; a PR's on its review kind.
-    pub fn template(&self, mode: WorkMode) -> &'static str {
+    /// The template its first prompt is filled from. An issue's depends on
+    /// the mode it is started in; a PR's on its review kind.
+    pub fn template(&self, mode: WorkMode) -> Template {
         match self {
-            WorkItem::Issue { .. } if mode == WorkMode::Feature => prompt::FEATURE_TEMPLATE,
-            WorkItem::Issue { .. } => prompt::ISSUE_TEMPLATE,
+            WorkItem::Issue { .. } if mode == WorkMode::Feature => Template::Feature,
+            WorkItem::Issue { .. } => Template::Issue,
             WorkItem::PullRequest { review, .. } => review.template(),
-            WorkItem::FreeText { .. } => prompt::FREE_FEATURE_TEMPLATE,
+            WorkItem::FreeText { .. } => Template::FreeFeature,
         }
     }
 }

@@ -10,8 +10,8 @@ use crate::app::{App, Direction, HitTarget, ModalClick};
 use crate::fuzzy::{self, Searchable};
 use crate::modal::{
     AddRepositoryModal, AddWorktreeModal, ClaudeIntegrationModal, ConfirmModal, CustomButtonsModal,
-    EDITORS, EditButtonModal, Modal, RenameSessionModal, SPINNER, SettingsModal,
-    StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal,
+    EDITORS, EditButtonModal, Modal, PromptTemplatesModal, RenameSessionModal, SPINNER,
+    SettingsModal, StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal,
 };
 use crate::picker::SearchPicker;
 use crate::theme;
@@ -82,6 +82,7 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) -> Hits {
         Modal::CustomButtons(m) => custom_buttons(frame, m, area, &mut hits),
         Modal::EditButton(m) => edit_button(frame, m, area, &mut hits),
         Modal::ThemePicker(m) => theme_picker(frame, m, area, &mut hits),
+        Modal::PromptTemplates(m) => prompt_templates(frame, m, area, &mut hits),
         Modal::ClaudeIntegration(m) => claude_integration(frame, m, area, &mut hits),
         Modal::Confirm(m) => confirm(frame, m, area, &mut hits),
         Modal::RenameSession(m) => rename_session(frame, m, area, &mut hits),
@@ -1185,9 +1186,10 @@ fn branch_fields(
 // ------------------------------------------------------------------ Settings
 
 fn settings(frame: &mut Frame, modal: &SettingsModal, area: Rect, hits: &mut Hits) {
-    // Three labelled controls, the custom-button and integration sections, then
-    // the gap and the buttons.
-    let rect = widgets::centered_rect(WIDE, CHROME + 26, area);
+    // Three labelled controls, the custom-button, template and integration
+    // sections, then the gap and the buttons. 36 rows: still inside a 40-row
+    // terminal's 95%, which is the size this dialog must fit whole.
+    let rect = widgets::centered_rect(WIDE, CHROME + 30, area);
     let mut column = dialog(frame, rect, "Settings", theme::title());
 
     let editor = EDITORS
@@ -1238,6 +1240,18 @@ fn settings(frame: &mut Frame, modal: &SettingsModal, area: Rect, hits: &mut Hit
             modal.focus == SettingsModal::FOCUS_MANAGE,
             theme::Variant::Normal,
             SettingsModal::FOCUS_MANAGE,
+        )],
+        false,
+    );
+    column.line(frame, widgets::section("PROMPT TEMPLATES"));
+    column.controls(
+        frame,
+        hits,
+        vec![control(
+            "Edit Prompt Templates...",
+            modal.focus == SettingsModal::FOCUS_TEMPLATES,
+            theme::Variant::Normal,
+            SettingsModal::FOCUS_TEMPLATES,
         )],
         false,
     );
@@ -1495,6 +1509,53 @@ fn theme_picker(frame: &mut Frame, modal: &ThemePickerModal, area: Rect, hits: &
     column.text(
         frame,
         "↑/↓ preview · Enter apply · Esc revert",
+        theme::muted(),
+    );
+}
+
+// ------------------------------------------------------- Prompt templates
+
+fn prompt_templates(frame: &mut Frame, modal: &PromptTemplatesModal, area: Rect, hits: &mut Hits) {
+    let templates = crate::prompt::Template::ALL;
+    // Where the files are, a gap, the list, a gap, and the hint.
+    let rect = widgets::centered_rect(68, CHROME + templates.len() as u16 + 4, area);
+    let mut column = dialog(frame, rect, "Prompt Templates", theme::title());
+    let dir = crate::services::settings::prompts_dir();
+    let dir = match dir.strip_prefix(crate::util::home_dir()) {
+        Ok(relative) => format!("~/{}", relative.display()),
+        Err(_) => dir.display().to_string(),
+    };
+    column.text(frame, format!("Files in {dir}"), theme::muted());
+    column.gap();
+
+    for (row, template) in templates.iter().enumerate() {
+        let Some(line_rect) = column.take(1) else {
+            break;
+        };
+        let selected = row == modal.index;
+        let style = if selected {
+            theme::cursor()
+        } else {
+            theme::secondary()
+        };
+        let label = format!(
+            "{:<width$}",
+            template.label(),
+            // One column spare, so the file name never touches the border.
+            width = (line_rect.width as usize).saturating_sub(4 + template.file_name().len())
+        );
+        let line = Line::from(vec![
+            Span::styled(if selected { " ▸ " } else { "   " }.to_string(), style),
+            Span::styled(label, style),
+            Span::styled(template.file_name(), style.patch(theme::muted())),
+        ]);
+        frame.render_widget(Paragraph::new(line), line_rect);
+        hits.push((line_rect, row, ModalClick::Activate));
+    }
+    column.gap();
+    column.text(
+        frame,
+        "↑/↓ choose · Enter edit, from the default if new · Esc back",
         theme::muted(),
     );
 }

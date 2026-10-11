@@ -183,22 +183,19 @@ fn each_work_item_fills_its_own_template() {
         number: 7,
         title: "x".into(),
     };
-    assert_eq!(issue.template(WorkMode::Issue), prompt::ISSUE_TEMPLATE);
-    assert_eq!(issue.template(WorkMode::Feature), prompt::FEATURE_TEMPLATE);
+    assert_eq!(issue.template(WorkMode::Issue), Template::Issue);
+    assert_eq!(issue.template(WorkMode::Feature), Template::Feature);
     let free = WorkItem::FreeText {
         description: "x".into(),
     };
-    assert_eq!(
-        free.template(WorkMode::Feature),
-        prompt::FREE_FEATURE_TEMPLATE
-    );
+    assert_eq!(free.template(WorkMode::Feature), Template::FreeFeature);
     assert_eq!(
         pull_request(ReviewKind::Others).template(WorkMode::PrReview),
-        prompt::PR_REVIEW_OTHERS_TEMPLATE
+        Template::PrReviewOthers
     );
     assert_eq!(
         pull_request(ReviewKind::Own).template(WorkMode::PrReview),
-        prompt::PR_REVIEW_OWN_TEMPLATE
+        Template::PrReviewOwn
     );
 }
 

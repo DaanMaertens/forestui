@@ -40,7 +40,10 @@ you must drive the built executable, not `cargo run`:
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo build            # in the project root
-FUI_CMD=<project-root>/target/debug/forestui
+# Not necessarily <project-root>/target: CARGO_TARGET_DIR may point at a
+# shared build dir. Ask cargo where the binary actually landed.
+FUI_CMD=$(cargo metadata --format-version 1 --no-deps \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/debug/forestui
 ```
 
 **NEVER launch forestui or any tmux command without `TMUX_TMPDIR` isolation.**
@@ -50,13 +53,24 @@ user is likely running their own tmux/forestui session right now. Any direct
 interaction with the test tmux must go through `tu` commands.
 
 ```bash
-FUI_TEST_DIR=$(mktemp -d)
+FUI_TEST_DIR=$(mktemp -d /tmp/fui.XXXX)
 
 tu run --name fui --env TMUX_TMPDIR=$FUI_TEST_DIR \
   --cwd <project-root> -- env -u TMUX $FUI_CMD
 
 tu wait --name fui --text "forestui" --timeout 15000
 ```
+
+**Keep `TMUX_TMPDIR` short — always `mktemp -d /tmp/fui.XXXX`, never a
+scratchpad or session directory.** tmux puts its socket at
+`$TMUX_TMPDIR/tmux-<uid>/default`, and a Unix socket path is capped at about
+108 bytes. A longer one fails with `error connecting to …/default (File name
+too long)` and forestui never starts — the screen shows only that line, so a
+`tu wait` for "forestui" just times out. This bites repeatedly when Claude
+itself runs inside forestui: its scratchpad and temp dirs are named after the
+worktree path (`/tmp/claude-<uid>/-home-…-<worktree>/<session-id>/…`), and a
+bare `mktemp -d` may follow a `TMPDIR` that points there. Name `/tmp`
+explicitly.
 
 Pass a throwaway forest directory as an argument (`$FUI_CMD /tmp/some-forest`)
 so tests never touch the user's real `~/forest`.

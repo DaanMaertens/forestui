@@ -14,7 +14,7 @@ use crate::models::{
     validate_claude_command,
 };
 use crate::picker::SearchPicker;
-use crate::prompt;
+use crate::prompt::{self, Template};
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
 use crate::util;
 use crate::work::{self, ItemEntry, WorkItem, WorkMode, WorktreeNames};
@@ -77,6 +77,9 @@ pub enum ModalEffect {
     /// Start work's "Show blocked" was toggled: remember the choice, which
     /// the issue cards share. The picker has already re-listed itself.
     ShowBlockedIssues(bool),
+    /// Open a global prompt template in an editor, writing it from its
+    /// default first if it has no file yet.
+    EditTemplate(Template),
 }
 
 /// What the integration dialog can do, given what is currently on disk.
@@ -223,6 +226,7 @@ pub enum Modal {
     CustomButtons(CustomButtonsModal),
     EditButton(Box<EditButtonModal>),
     ThemePicker(ThemePickerModal),
+    PromptTemplates(PromptTemplatesModal),
     ClaudeIntegration(ClaudeIntegrationModal),
     Confirm(ConfirmModal),
     RenameSession(RenameSessionModal),
@@ -247,6 +251,7 @@ impl Modal {
             Modal::CustomButtons(m) => m.handle_key(key),
             Modal::EditButton(m) => m.handle_key(key),
             Modal::ThemePicker(m) => m.handle_key(key),
+            Modal::PromptTemplates(m) => m.handle_key(key),
             Modal::ClaudeIntegration(m) => m.handle_key(key),
             Modal::Confirm(m) => m.handle_key(key),
             Modal::RenameSession(m) => m.handle_key(key),
@@ -282,6 +287,7 @@ impl Modal {
             Modal::Settings(m) => m.focus = index.min(SettingsModal::FIELDS - 1),
             Modal::EditButton(m) => m.focus = index.min(EditButtonModal::FIELDS - 1),
             Modal::ThemePicker(m) => m.select(index),
+            Modal::PromptTemplates(m) => m.select(index),
             Modal::ClaudeIntegration(m) => m.set_focus(index),
             Modal::CustomButtons(m) => {
                 if !m.buttons.is_empty() {
@@ -308,6 +314,7 @@ impl Modal {
                 m.selected = row.min(m.buttons.len() - 1);
             }
             Modal::ThemePicker(m) => m.select(row),
+            Modal::PromptTemplates(m) => m.select(row),
             Modal::StartWork(m) => m.set_row(row),
             _ => {}
         }
@@ -1176,6 +1183,10 @@ pub struct StartWorkConfirmModal {
     /// Launch with the built-in YOLO flag. Off on every open: trusting one
     /// task must not become the default for the next.
     pub yolo: bool,
+    /// The prompt template as resolved when the screen opened — its file if
+    /// there is one, else the default. Read once here: the prompt is filled
+    /// on every frame, and that must not mean a file read per repaint.
+    template: String,
     /// The prompt as an editor left it, in place of the filled-in template.
     /// Held here and nowhere else, so the edit applies to this launch only.
     pub edited_prompt: Option<String>,
@@ -1242,12 +1253,15 @@ impl StartWorkConfirmModal {
     }
 
     /// `names` are passed in rather than derived from `item`: a free-text
-    /// feature's may carry a suffix the clash question chose.
+    /// feature's may carry a suffix the clash question chose. `template` is
+    /// the text of `item.template(mode)`, read by the caller.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repo: &Repository,
         mode: WorkMode,
         item: WorkItem,
         names: WorktreeNames,
+        template: String,
         branches: BranchList,
         forest_dir: PathBuf,
         has_parent: bool,
@@ -1266,6 +1280,7 @@ impl StartWorkConfirmModal {
             base_branch: TextInput::new(base).with_placeholder("origin/main"),
             pull_first: true,
             yolo: false,
+            template,
             edited_prompt: None,
             is_editing: false,
             is_fetching: false,
@@ -1302,7 +1317,7 @@ impl StartWorkConfirmModal {
             }
         };
         prompt::fill(
-            self.item.template(self.mode),
+            &self.template,
             &prompt::TemplateVars {
                 number,
                 title,
@@ -1512,10 +1527,11 @@ impl SettingsModal {
     pub const FOCUS_PREFIX: usize = 1;
     pub const FOCUS_THEME: usize = 2;
     pub const FOCUS_MANAGE: usize = 3;
-    pub const FOCUS_INTEGRATION: usize = 4;
-    pub const FOCUS_REMOTE_CONTROL: usize = 5;
-    pub const FOCUS_SAVE: usize = 6;
-    pub const FOCUS_CANCEL: usize = 7;
+    pub const FOCUS_TEMPLATES: usize = 4;
+    pub const FOCUS_INTEGRATION: usize = 5;
+    pub const FOCUS_REMOTE_CONTROL: usize = 6;
+    pub const FOCUS_SAVE: usize = 7;
+    pub const FOCUS_CANCEL: usize = 8;
     pub const FIELDS: usize = Self::FOCUS_CANCEL + 1;
 
     pub fn new(settings: &Settings) -> Self {
@@ -1608,6 +1624,9 @@ impl SettingsModal {
             (Self::FOCUS_MANAGE, KeyCode::Enter) => ModalOutcome::Push(Box::new(
                 Modal::CustomButtons(CustomButtonsModal::new(self.custom_buttons.clone())),
             )),
+            (Self::FOCUS_TEMPLATES, KeyCode::Enter) => ModalOutcome::Push(Box::new(
+                Modal::PromptTemplates(PromptTemplatesModal::new()),
+            )),
             (Self::FOCUS_CANCEL, KeyCode::Enter) => self.close_without_saving(),
             (_, KeyCode::Enter) => {
                 ModalOutcome::Submit(ModalResult::SettingsSaved(Box::new(self.to_settings())))
@@ -1692,6 +1711,49 @@ impl ThemePickerModal {
 impl Default for ThemePickerModal {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ------------------------------------------------------- Prompt templates
+
+/// The global prompt templates, one row each. Enter opens the highlighted
+/// one in an editor and the list stays up, so several can be edited in one
+/// visit; the files are saved by the editor, not by the Settings dialog.
+#[derive(Debug, Default)]
+pub struct PromptTemplatesModal {
+    /// Highlighted row, an index into [`Template::ALL`].
+    pub index: usize,
+}
+
+impl PromptTemplatesModal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn selected(&self) -> Template {
+        Template::ALL[self.index]
+    }
+
+    pub fn select(&mut self, index: usize) {
+        self.index = index.min(Template::ALL.len() - 1);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> ModalOutcome {
+        if is_escape(key) {
+            return ModalOutcome::Close;
+        }
+        let len = Template::ALL.len();
+        match key.code {
+            KeyCode::Up | KeyCode::BackTab => self.select(wrap_dec(self.index, len)),
+            KeyCode::Down | KeyCode::Tab => self.select((self.index + 1) % len),
+            KeyCode::Home => self.select(0),
+            KeyCode::End => self.select(len - 1),
+            KeyCode::Enter => {
+                return ModalOutcome::Effect(ModalEffect::EditTemplate(self.selected()));
+            }
+            _ => {}
+        }
+        ModalOutcome::None
     }
 }
 
