@@ -106,7 +106,7 @@ impl FinishedWorktrees {
 
 /// A worktree with a work item link, as the background check needs it.
 #[derive(Debug, Clone)]
-pub struct Linked {
+pub struct LinkedWorktree {
     id: Uuid,
     link: WorkItemLink,
     branch: String,
@@ -115,11 +115,11 @@ pub struct Linked {
 
 /// The repository's worktrees that have a work item link. Without one a
 /// worktree is never finished, so it is not asked about at all.
-pub fn linked(repo: &Repository) -> Vec<Linked> {
+pub fn linked(repo: &Repository) -> Vec<LinkedWorktree> {
     repo.worktrees
         .iter()
         .filter_map(|worktree| {
-            Some(Linked {
+            Some(LinkedWorktree {
                 id: worktree.id,
                 link: worktree.work_item.clone()?,
                 branch: worktree.branch.clone(),
@@ -133,8 +133,12 @@ pub fn linked(repo: &Repository) -> Vec<Linked> {
 /// `source`. A worktree with no verdict is one nobody could answer for —
 /// `gh` missing or signed out, a branch git cannot resolve, no remote
 /// default branch — and keeps whatever mark it had.
-pub async fn check(source: &str, linked: &[Linked]) -> HashMap<Uuid, bool> {
-    let is_free_text = |item: &&Linked| matches!(item.link, WorkItemLink::FreeText { .. });
+///
+/// A free-text branch counts as merged only when its tip is in the default
+/// branch, so a squash or rebase merge on GitHub goes unnoticed, as does a
+/// worktree from before `created_from_ref` was recorded.
+pub async fn check(source: &str, linked: &[LinkedWorktree]) -> HashMap<Uuid, bool> {
+    let is_free_text = |item: &&LinkedWorktree| matches!(item.link, WorkItemLink::FreeText { .. });
     let signed_in = linked.iter().any(|item| !is_free_text(&item))
         && github::get_auth_status().await.0 == AuthStatus::Authenticated;
     let target = if linked.iter().any(|item| is_free_text(&item)) {

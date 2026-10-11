@@ -6,7 +6,7 @@ use std::collections::HashMap;
 fn checked(app: &mut App, verdicts: &[(Uuid, bool)]) -> AppEvent {
     let repo_id = app.state.repositories()[0].id;
     AppEvent::WorktreesFinished {
-        check: app.finished.ticket_for_test(repo_id),
+        ticket: app.finished.ticket_for_test(repo_id),
         verdicts: verdicts.iter().copied().collect::<HashMap<_, _>>(),
     }
 }

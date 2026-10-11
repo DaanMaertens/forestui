@@ -187,11 +187,11 @@ pub enum AppEvent {
     /// Which of a repository's linked worktrees are finished: `true`
     /// finished, `false` not, absent when the check could not tell.
     ///
-    /// `check` goes back to
+    /// `ticket` goes back to
     /// [`FinishedWorktrees`](crate::app::finished::FinishedWorktrees), which
     /// keeps the marks — derived state, never saved.
     WorktreesFinished {
-        check: FinishedTicket,
+        ticket: FinishedTicket,
         verdicts: std::collections::HashMap<Uuid, bool>,
     },
     /// A rename task ended without renaming (the target existed, or the move

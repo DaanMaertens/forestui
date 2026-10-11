@@ -637,15 +637,15 @@ impl App {
         let Some(repo) = self.state.find_repository(repo_id) else {
             return;
         };
-        let source = repo.source_path.clone();
-        let linked = finished::linked(repo);
-        let Some(check) = self.finished.start(repo_id, Instant::now()) else {
+        let Some(ticket) = self.finished.start(repo_id, Instant::now()) else {
             return;
         };
+        let source = repo.source_path.clone();
+        let linked = finished::linked(repo);
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let verdicts = finished::check(&source, &linked).await;
-            tx.send(AppEvent::WorktreesFinished { check, verdicts });
+            tx.send(AppEvent::WorktreesFinished { ticket, verdicts });
         });
     }
 
@@ -1334,15 +1334,15 @@ impl App {
                     }
                 }
             }
-            AppEvent::WorktreesFinished { check, verdicts } => {
+            AppEvent::WorktreesFinished { ticket, verdicts } => {
                 // Only the worktrees the repository has now: one removed
                 // while the check ran, or another repository's, is not
                 // this result's to mark.
                 let current = self
                     .state
-                    .find_repository(check.repo_id())
+                    .find_repository(ticket.repo_id())
                     .map(|repo| repo.worktrees.iter().map(|w| w.id).collect());
-                if self.finished.fold(check, &verdicts, current.as_ref()) {
+                if self.finished.fold(ticket, &verdicts, current.as_ref()) {
                     self.redraw = true;
                     self.rebuild_rows();
                 }
