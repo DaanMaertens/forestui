@@ -458,8 +458,8 @@ pub fn create_editor_window(worktree_name: &str, worktree_path: &str, editor: &s
 /// A popup rather than a window: `display-popup -E` blocks its caller until
 /// the popup closes, which is the "editor closed, read the file" signal a
 /// window does not give, and it keeps the confirm screen in view around the
-/// edit. Call it off the UI thread.
-pub fn edit_in_popup(editor: &str, file: &Path) -> Result<(), String> {
+/// edit. `title` is drawn in the popup's border. Call it off the UI thread.
+pub fn edit_in_popup(editor: &str, file: &Path, title: &str) -> Result<(), String> {
     let pane = std::env::var("TMUX_PANE")
         .ok()
         .filter(|pane| !pane.is_empty())
@@ -475,7 +475,7 @@ pub fn edit_in_popup(editor: &str, file: &Path) -> Result<(), String> {
         "-h",
         "90%",
         "-T",
-        " Edit prompt ",
+        &format!(" {title} "),
         "-t",
         &pane,
         &command,

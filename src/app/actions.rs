@@ -219,7 +219,7 @@ impl App {
                 tokio::spawn(async move {
                     let result = tokio::task::spawn_blocking(move || {
                         crate::prompt::edit_via_file(&text, |file| {
-                            tmux::edit_in_popup(&editor, file)
+                            tmux::edit_in_popup(&editor, file, "Edit prompt")
                         })
                     })
                     .await
@@ -232,6 +232,7 @@ impl App {
                 });
             }
             ModalEffect::ShowBlockedIssues(show) => self.set_show_blocked_issues(show),
+            ModalEffect::EditTemplate(template) => self.edit_template(template),
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
                 let tx = self.tx.clone();
@@ -533,17 +534,24 @@ impl App {
             Some(Modal::StartWork(_)) => true,
             Some(_) => return,
         };
-        self.modals.push(Modal::StartWorkConfirm(Box::new(
-            StartWorkConfirmModal::new(
-                repo,
-                start.mode,
-                start.item,
-                start.names,
-                list,
-                settings_service::get_forest_path(),
-                has_parent,
-            ),
-        )));
+        let template = crate::prompt::resolve(
+            &settings_service::prompts_dir(),
+            start.item.template(start.mode),
+        );
+        let modal = StartWorkConfirmModal::new(
+            repo,
+            start.mode,
+            start.item,
+            start.names,
+            template.text,
+            list,
+            settings_service::get_forest_path(),
+            has_parent,
+        );
+        self.modals.push(Modal::StartWorkConfirm(Box::new(modal)));
+        if let Some(warning) = template.warning {
+            self.notify(warning, Severity::Warning);
+        }
     }
 
     pub(super) fn switch_to_window(&mut self, window_id: &str, window_name: &str) {
@@ -1147,6 +1155,41 @@ impl App {
                     tx.send(AppEvent::ReloadDetail);
                 }
                 Err(error) => tx.error(format!("Sync failed: {error}")),
+            }
+        });
+    }
+
+    /// Open a global prompt template in the prompt editor, writing it from
+    /// its default first so the editor starts on the text in use. Nothing
+    /// is read back: the file is the template, and the next confirm screen
+    /// reads it afresh.
+    fn edit_template(&mut self, template: crate::prompt::Template) {
+        let path = match crate::prompt::ensure_file(&settings_service::prompts_dir(), template) {
+            Ok(path) => path,
+            Err(error) => {
+                self.notify(
+                    format!(
+                        "Could not create the {} template: {error}",
+                        template.label()
+                    ),
+                    Severity::Error,
+                );
+                return;
+            }
+        };
+        let editor = self.prompt_editor();
+        let title = format!("Prompt template: {}", template.file_name());
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let result =
+                tokio::task::spawn_blocking(move || tmux::edit_in_popup(&editor, &path, &title))
+                    .await
+                    .unwrap_or_else(|_| Err("the editor task panicked".to_string()));
+            if let Err(error) = result {
+                tx.send(AppEvent::Notify(
+                    format!("Could not edit the template: {error}"),
+                    Severity::Error,
+                ));
             }
         });
     }

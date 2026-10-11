@@ -53,6 +53,24 @@ pub fn settings_path() -> PathBuf {
         .join("settings.json")
 }
 
+/// Where the global prompt templates live: `prompts/` beside the settings
+/// file, one Markdown file per template.
+pub fn prompts_dir() -> PathBuf {
+    // Beside the test settings file too, so a test that opens a template
+    // writes into its own temp dir rather than the developer's config.
+    #[cfg(test)]
+    return std::env::temp_dir().join(format!(
+        "forestui-test-prompts-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    #[cfg(not(test))]
+    crate::util::home_dir()
+        .join(".config")
+        .join("forestui")
+        .join("prompts")
+}
+
 /// Load settings, falling back to defaults for a missing or unreadable file.
 pub fn load_settings() -> Settings {
     load_settings_from(&settings_path())
