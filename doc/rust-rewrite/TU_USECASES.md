@@ -1448,11 +1448,12 @@ That was a real bug this case caught.
 **Expected:** `Down` past the last row stays on the last row; the detail pane
 follows the cursor with no `Enter` needed.
 
-### UC-77 — Create worktree from a GitHub issue
-**Area:** Modals | **Priority:** P1 | 🔴 NOT EXECUTED
-**Blocked by:** needs an authenticated `gh` against a real repository with issues.
-The isolated `HOME` the harness uses has no `gh` credentials by design. Covered
-only by unit tests (`modal.rs::base_branch_default_prefers_remote`).
+### UC-77 — Create worktree from a GitHub issue — ⬛ RETIRED
+The Create-from-issue dialog was replaced by Start work (issue #6): an issue
+card's `Start work` opens Start work's confirm screen, which carries the base
+branch, Fetch and pull-first checkbox the dialog had. That path is UC-102,
+driven against a stubbed `gh`, so the credentials this case was blocked on are
+no longer needed.
 
 ---
 
@@ -1625,11 +1626,16 @@ being diffed stops short of the content the case exists to compare.
 
 ### UC-99 — Start work for an issue, from `s` to a running Claude
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** with beta selected, `s` → `Enter` (mode `issue`) → type `metrics`
-→ `Enter` (issue #298) → `Enter` (Launch, from the focused name field).
-**Expected:** the mode step lists `issue`, `feature` and `pr-review`, the last
-greyed out with `(not yet)`. The item step lists `#326` and `#298`, but not the
-`enhancement`-labelled `#77`, which belongs to `feature` (UC-100). The
+**Steps:** with beta selected, `s` → `Enter` (mode `issue`) → `Tab` `Tab`
+`Enter` (tick `Not just mine`) → `Space` (untick it) → `Shift+Tab` twice →
+type `metrics` → `Enter` (issue #298) → `Enter` (Launch, from the focused name
+field).
+**Expected:** the mode step lists `issue`, `feature` and `pr-review`, all
+enabled (`pr-review` is UC-104). The item step lists `#326` and `#298`, but not the
+`enhancement`-labelled `#77`, which belongs to `feature` (UC-100), nor `#412`,
+which is neither assigned to nor opened by the user. Ticking
+`[x] Not just mine` lists `#412` too, for this pick alone; unticking it goes
+back to the user's own. The
 confirm screen is titled `Start Work: Issue #298`, names the worktree
 `issue-298-proactive-metrics-coalesced-fire-rows-ov` on
 `fix/issue-298-proactive-metrics-coalesced-fire-rows-ov`, has the base branch,
@@ -1638,8 +1644,9 @@ with `gh issue view 298 --comments`. Launch creates the worktree on that
 branch, records `{"kind": "issue", "number": 298}` as its `work_item` in the
 config, and opens a window named after the worktree running Claude with `-n`
 set to the same name and the prompt as its first message.
-**Fails if:** any step is skipped, the worktree or branch is named otherwise,
-the link is missing from the config, or the window carries a mode prefix.
+**Fails if:** any step is skipped, `#412` is listed without the tick or
+missing with it, the worktree or branch is named otherwise, the link is
+missing from the config, or the window carries a mode prefix.
 
 ### UC-100 — Start work for a feature
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
@@ -1813,18 +1820,23 @@ composite shows a difference not listed above, treat it as a regression.
 | Errors & edge cases | 42–47 | 2 |
 | Config persistence | 48–52 | 3 |
 | Automated parity sweep | 53–70 (59 retired) | 12 |
-| Hand-driven, unscripted | 71–77 | 4 |
+| Hand-driven, unscripted | 71–77 (77 retired) | 4 |
 | Flows & mouse | 78–89 | 8 |
 | Visual parity | 90–94 (93 retired) | 1 |
-| Start work | 99–101 | 3 |
+| Start work | 99–106 | 8 |
 
-**98 numbered use cases, 3 retired with the `?` binding (UC-26, 59, 93) —
-95 active · 54 P0 · 80 executed live · 17 written from source only.**
+**104 numbered use cases written up here (UC-97 and 98 are assertions in
+`tu-sweep.sh` only), 3 retired with the `?` binding (UC-26, 59, 93) and 1 with
+the Create-from-issue dialog (UC-77) —
+100 active · 60 P0 · 82 executed live · 17 written from source only · 1 in
+progress (UC-94).**
 
 UC-01–52 were written against the Python build on 2026-08-14 (35 executed).
 UC-53–70 are the automated sweep and have been executed against **both** builds
 (UC-59 has since retired and is no longer captured);
-UC-71–76 were hand-driven against the Rust build; UC-77 is blocked on `gh` auth.
+UC-71–76 were hand-driven against the Rust build; UC-77 is retired.
+UC-99–106 are Start work, finished worktrees and prune, swept against the Rust
+build only.
 
 Written from source, never driven live: UC-02, 03, 05, 15, 18, 19, 25, 35, 37, 38,
 41, 44, 45, 46, 47, 51, 52. Everything else in this file was transcribed from a real

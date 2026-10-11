@@ -1,16 +1,6 @@
 use super::*;
 
-fn open_pr(number: i64, title: &str, author: &str, head: &str) -> crate::models::GitHubPullRequest {
-    serde_json::from_value(serde_json::json!({
-        "number": number,
-        "title": title,
-        "author": {"login": author},
-        "isDraft": false,
-        "headRefName": head,
-        "createdAt": "2026-01-01T00:00:00Z",
-    }))
-    .expect("pull request fixture")
-}
+use crate::models::Scope;
 
 /// Alice's PR #30 and my own #31, as `gh` would list them for `daan`.
 fn two_prs() -> Vec<crate::models::GitHubPullRequest> {
@@ -34,6 +24,7 @@ fn open_pr_review(app: &mut App, path: &str) {
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
     app.handle_event(AppEvent::PullRequests {
+        scope: Scope::Mine,
         path: path.to_string(),
         prs: two_prs(),
         viewer: Some("daan".into()),
@@ -66,6 +57,7 @@ async fn pr_review_lists_the_pull_requests_once_they_load() {
     assert!(rendered(&mut app).contains("Loading pull requests"));
 
     app.handle_event(AppEvent::PullRequests {
+        scope: Scope::Mine,
         path: path.clone(),
         prs: two_prs(),
         viewer: Some("daan".into()),
@@ -247,6 +239,7 @@ async fn a_pr_whose_branch_is_checked_out_jumps_there() {
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
     app.handle_event(AppEvent::PullRequests {
+        scope: Scope::Mine,
         path,
         prs: vec![open_pr(31, "Mine", "daan", &branch)],
         viewer: Some("daan".into()),
@@ -283,6 +276,7 @@ async fn a_fork_pr_is_not_matched_by_branch_name() {
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
     app.handle_event(AppEvent::PullRequests {
+        scope: Scope::Mine,
         path,
         prs: vec![fork],
         viewer: Some("daan".into()),
@@ -299,6 +293,7 @@ async fn a_stray_pull_request_list_is_ignored() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
     app.handle_key(key(KeyCode::Char('s')));
     app.handle_event(AppEvent::PullRequests {
+        scope: Scope::Mine,
         path: "/somewhere/else".into(),
         prs: two_prs(),
         viewer: None,

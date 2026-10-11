@@ -13,6 +13,7 @@ use crate::modal::{
     EDITORS, EditButtonModal, Modal, PromptTemplatesModal, RenameSessionModal, SPINNER,
     SettingsModal, StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal,
 };
+use crate::models::Scope;
 use crate::picker::SearchPicker;
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
@@ -730,22 +731,30 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         WorkMode::Issue => (
             "Issue",
             " Loading issues...",
-            "No open non-feature issues assigned to or opened by you",
+            "No open non-feature issues",
             "issues",
         ),
         WorkMode::Feature => (
             "Issue",
             " Loading issues...",
-            "No open feature issues assigned to or opened by you",
+            "No open feature issues",
             "features",
         ),
         WorkMode::PrReview => (
             "Pull Request",
             " Loading pull requests...",
-            "No open PRs awaiting your review or opened by you",
+            "No open PRs",
             "PRs",
         ),
     };
+    // The empty line names the scope it searched, so "nothing for me" is
+    // not read as "nothing at all".
+    let mine = match (modal.scope, modal.mode) {
+        (Scope::All, _) => "",
+        (Scope::Mine, WorkMode::PrReview) => " awaiting your review or opened by you",
+        (Scope::Mine, _) => " assigned to or opened by you",
+    };
+    let empty = format!("{empty}{mine}");
     column.line(frame, widgets::section(section));
     match &modal.picker {
         None => {
@@ -765,7 +774,7 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
             // says so above it, and the count is of the items alone.
             let items = picker.entries().filter(|e| e.is_item()).count();
             let mut count = if items == 0 {
-                empty.to_string()
+                empty
             } else {
                 item_count_line(picker, noun)
             };
@@ -831,6 +840,14 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
             modal.show_blocked,
             modal.focus == StartWorkModal::FOCUS_BLOCKED,
             StartWorkModal::FOCUS_BLOCKED,
+        ));
+    }
+    if modal.offers_scope_toggle() {
+        controls.push(checkbox(
+            "Not just mine",
+            modal.scope == Scope::All,
+            modal.focus == StartWorkModal::FOCUS_SCOPE,
+            StartWorkModal::FOCUS_SCOPE,
         ));
     }
     controls.extend([

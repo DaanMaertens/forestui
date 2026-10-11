@@ -9,8 +9,8 @@ use crate::event::BranchList;
 use crate::fuzzy::{self, BranchEntry, Searchable};
 use crate::models::{
     CustomClaudeButton, GitHubIssue, GitHubPullRequest, MAX_BUTTON_LABEL_LENGTH,
-    MAX_BUTTON_PREFIX_LENGTH, MAX_CLAUDE_COMMAND_LENGTH, Repository, Settings, StartWorkSettings,
-    WorkItemLink, derive_prefix, validate_button_label, validate_button_prefix,
+    MAX_BUTTON_PREFIX_LENGTH, MAX_CLAUDE_COMMAND_LENGTH, Repository, Scope, Settings,
+    StartWorkSettings, WorkItemLink, derive_prefix, validate_button_label, validate_button_prefix,
     validate_claude_command,
 };
 use crate::picker::SearchPicker;
@@ -78,6 +78,10 @@ pub enum ModalEffect {
     /// Start work's "Show blocked" was toggled: remember the choice, which
     /// the issue cards share. The picker has already re-listed itself.
     ShowBlockedIssues(bool),
+    /// Start work's "Not just mine" was toggled: list the items of the
+    /// checkout at this path for the flow's new scope. The picker has
+    /// dropped the lists it had, which were for the other one.
+    ListScope(String),
     /// Open a global prompt template in an editor, writing it from its
     /// default first if it has no file yet.
     EditTemplate(Template),
@@ -755,6 +759,17 @@ pub struct StartWorkModal {
     /// Whether blocked issues are listed. Starts from the shared setting and
     /// is toggled here; the app persists every toggle.
     pub show_blocked: bool,
+    /// Whose items are listed. Starts from the settings in effect and is
+    /// toggled here for this flow alone: the setting, which the repository
+    /// pane's cards follow too, is the file's to change.
+    pub scope: Scope,
+    /// Whether the user has ticked or unticked "Not just mine" in this
+    /// flow: their choice then outranks a scope the repository settings
+    /// answer with later.
+    scope_chosen: bool,
+    /// What was typed when the lists were dropped for another scope, put
+    /// back once the new list arrives.
+    query_after_reload: Option<String>,
     /// One of the `FOCUS_*` constants; see [`StartWorkModal::ring`].
     pub focus: usize,
 }
@@ -774,6 +789,9 @@ impl StartWorkModal {
     /// The item step's "Show blocked" checkbox, in the modes that list issues.
     /// Not a letter key: the query field takes every typed character.
     pub const FOCUS_BLOCKED: usize = 6;
+    /// The item step's "Not just mine" checkbox, in every mode listed from
+    /// GitHub.
+    pub const FOCUS_SCOPE: usize = 7;
 
     pub fn new(
         repo: &Repository,
@@ -799,12 +817,15 @@ impl StartWorkModal {
                 .iter()
                 .filter_map(|w| Some((w.work_item.clone()?, w.name.clone())))
                 .collect(),
+            scope: start_work.scope,
+            scope_chosen: false,
             start_work,
             show_blocked,
+            query_after_reload: None,
             focus: Self::FOCUS_LIST,
         };
         if let Some(issues) = issues {
-            modal.set_issues(issues);
+            modal.set_issues(modal.scope, issues);
         }
         modal
     }
@@ -860,38 +881,49 @@ impl StartWorkModal {
         self.description.value().trim().to_string()
     }
 
-    /// Fill the item list once the issues have loaded. Issues already loaded
-    /// are kept: replacing the list under a half-typed query would move the
+    /// Fill the item list once the issues for `scope` have loaded; a list
+    /// for the other scope is not this flow's. Issues already loaded are
+    /// kept: replacing the list under a half-typed query would move the
     /// selection out from under the user.
-    pub fn set_issues(&mut self, issues: Vec<GitHubIssue>) {
-        if self.issues.is_none() {
+    pub fn set_issues(&mut self, scope: Scope, issues: Vec<GitHubIssue>) {
+        if scope == self.scope && self.issues.is_none() {
             self.issues = Some(issues);
             self.fill_picker();
         }
     }
 
     /// Take the settings in effect once the repository's own are known. A
-    /// different scope makes the loaded lists the wrong ones, so they are
-    /// dropped for the refetch to fill; different feature labels re-split
+    /// different scope replaces the flow's — the settings were not known
+    /// when it started from them — unless the user has already chosen one
+    /// here, and lists loaded for another scope are dropped for the
+    /// refetch to fill; different feature labels re-split
     /// the issues already here. The same settings change nothing, so a
     /// half-typed query survives the usual answer.
     pub fn set_start_work(&mut self, start_work: StartWorkSettings) {
         if start_work == self.start_work {
             return;
         }
-        if start_work.scope != self.start_work.scope {
-            self.issues = None;
-            self.pull_requests = None;
+        if start_work.scope != self.start_work.scope && !self.scope_chosen {
+            if start_work.scope != self.scope {
+                self.issues = None;
+                self.pull_requests = None;
+            }
+            self.scope = start_work.scope;
         }
         self.start_work = start_work;
         self.picker = None;
         self.fill_picker();
     }
 
-    /// Fill `pr-review`'s list once the PRs have loaded; kept, like the
-    /// issues, once there.
-    pub fn set_pull_requests(&mut self, prs: Vec<GitHubPullRequest>, viewer: Option<String>) {
-        if self.pull_requests.is_none() {
+    /// Fill `pr-review`'s list once the PRs for `scope` have loaded; kept,
+    /// like the issues, once there.
+    pub fn set_pull_requests(
+        &mut self,
+        scope: Scope,
+        prs: Vec<GitHubPullRequest>,
+        viewer: Option<String>,
+    ) {
+        if scope == self.scope && self.pull_requests.is_none() {
             self.pull_requests = Some(prs);
             self.viewer = viewer;
             if self.mode == WorkMode::PrReview {
@@ -906,6 +938,8 @@ impl StartWorkModal {
         if mode != self.mode {
             self.mode = mode;
             self.picker = None;
+            // Typed into the other mode's list.
+            self.query_after_reload = None;
             self.fill_picker();
         }
     }
@@ -936,10 +970,31 @@ impl StartWorkModal {
                 |number| self.linked.get(&WorkItemLink::Issue { number }).cloned(),
             )
         };
-        self.picker = Some(SearchPicker::new(
-            entries,
-            "Type a number or part of a title...",
-        ));
+        let mut picker = SearchPicker::new(entries, "Type a number or part of a title...");
+        if let Some(query) = self.query_after_reload.take() {
+            picker.set_query(&query);
+        }
+        self.picker = Some(picker);
+    }
+
+    /// Whether the item step offers "Not just mine": every list that comes
+    /// from GitHub has a scope.
+    pub fn offers_scope_toggle(&self) -> bool {
+        self.has_github()
+    }
+
+    /// Flip "Not just mine". Both lists were fetched for the other scope,
+    /// so both go; the app fills them for this one. What was typed waits
+    /// for the new list.
+    fn toggle_scope(&mut self) -> ModalOutcome {
+        self.scope = self.scope.toggled();
+        self.scope_chosen = true;
+        if let Some(picker) = self.picker.take() {
+            self.query_after_reload = Some(picker.query().value().to_string());
+        }
+        self.issues = None;
+        self.pull_requests = None;
+        ModalOutcome::Effect(ModalEffect::ListScope(self.repo_path.clone()))
     }
 
     /// Whether the item step offers "Show blocked": only the modes that list
@@ -982,6 +1037,13 @@ impl StartWorkModal {
             StartWorkStep::Item if self.offers_blocked_toggle() => &[
                 Self::FOCUS_LIST,
                 Self::FOCUS_BLOCKED,
+                Self::FOCUS_SCOPE,
+                Self::FOCUS_BACK,
+                Self::FOCUS_CANCEL,
+            ],
+            StartWorkStep::Item if self.offers_scope_toggle() => &[
+                Self::FOCUS_LIST,
+                Self::FOCUS_SCOPE,
                 Self::FOCUS_BACK,
                 Self::FOCUS_CANCEL,
             ],
@@ -1153,6 +1215,11 @@ impl StartWorkModal {
                 if self.ring().contains(&Self::FOCUS_BLOCKED) =>
             {
                 self.toggle_blocked()
+            }
+            (Self::FOCUS_SCOPE, KeyCode::Enter | KeyCode::Char(' '))
+                if self.ring().contains(&Self::FOCUS_SCOPE) =>
+            {
+                self.toggle_scope()
             }
             (Self::FOCUS_BACK, KeyCode::Enter) | (Self::FOCUS_EDIT, KeyCode::Enter) => {
                 self.go_back();
@@ -1768,8 +1835,11 @@ impl PromptTemplatesModal {
         }
     }
 
-    /// The files listed, in order. The global settings are edited in the
-    /// Settings dialog itself, so only a repository lists a settings file.
+    /// The files listed, in order. Only a repository lists a settings file:
+    /// the global `settings.json` is the app's to write — every Settings
+    /// save and checkbox toggle rewrites it — so an editor open on it would
+    /// race those writes, and its `start_work` section is edited by hand
+    /// with forestui closed.
     pub fn rows(&self) -> Vec<ConfigFile> {
         let settings = self.repo.as_ref().map(|_| ConfigFile::Settings);
         settings

@@ -61,10 +61,9 @@ fn peek_reports_freshness_without_io() {
 
     let old = Utc::now() - chrono::Duration::seconds(CACHE_TTL_SECONDS + 10);
     cache.entries.insert(
-        "/repo/stale".into(),
+        ("/repo/stale".into(), Scope::Mine),
         Cached {
             issues: vec![issue],
-            scope: Scope::Mine,
             fetched_at: old,
         },
     );
@@ -182,7 +181,22 @@ fn the_cache_answers_only_for_the_scope_it_was_fetched_for() {
 
     cache.store_if_current(cache.generation, "/repo/scoped", Scope::All, &[], true);
     assert!(cache.peek("/repo/scoped", Scope::All).is_some());
-    assert!(cache.peek("/repo/scoped", Scope::Mine).is_none());
+}
+
+/// Both scopes are held side by side: Start work listing `all` must not
+/// evict the `mine` list the repository pane shows. Invalidating a path
+/// drops both.
+#[test]
+fn the_cache_holds_both_scopes_of_a_path() {
+    let mut cache = IssueCache::default();
+    cache.store_if_current(cache.generation, "/repo/both", Scope::Mine, &[], true);
+    cache.store_if_current(cache.generation, "/repo/both", Scope::All, &[], true);
+    assert!(cache.peek("/repo/both", Scope::Mine).is_some());
+    assert!(cache.peek("/repo/both", Scope::All).is_some());
+
+    cache.invalidate("/repo/both");
+    assert!(cache.peek("/repo/both", Scope::Mine).is_none());
+    assert!(cache.peek("/repo/both", Scope::All).is_none());
 }
 
 /// `mine` keeps the two lists it always asked for; `all` asks once, with no

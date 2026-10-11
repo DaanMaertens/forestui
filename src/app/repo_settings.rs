@@ -9,8 +9,7 @@
 
 use super::App;
 use crate::event::{AppEvent, Severity};
-use crate::modal::Modal;
-use crate::models::{PartialStartWork, StartWorkSettings};
+use crate::models::{PartialStartWork, Scope, StartWorkSettings};
 use crate::repo_settings::{self, ConfigFile, PROMPTS_DIR, RepoKey};
 use crate::services::{github, settings as settings_service};
 use std::path::PathBuf;
@@ -97,13 +96,8 @@ impl App {
             };
         }
         self.load_overrides(&path);
-        // The flow may be beneath its confirm screen by now.
-        for modal in &mut self.modals {
-            if let Modal::StartWork(flow) = modal
-                && flow.repo_path == path
-            {
-                flow.set_github(repo.is_some());
-            }
+        for flow in self.start_work_flows(&path) {
+            flow.set_github(repo.is_some());
         }
         self.settings_changed(&path, &before);
         // Only a GitHub repository has PRs to ask for, and only for the
@@ -114,23 +108,49 @@ impl App {
         }
     }
 
-    /// Fetch `pr-review`'s list for an open Start work, for the scope in
-    /// effect.
-    fn fetch_pull_requests(&mut self, path: &str) {
-        let open = self
-            .modals
-            .iter()
-            .any(|m| matches!(m, Modal::StartWork(flow) if flow.repo_path == path));
-        if !open {
+    /// The scope an open Start work for `path` lists, if one is open.
+    fn flow_scope(&mut self, path: &str) -> Option<Scope> {
+        self.start_work_flows(path).next().map(|flow| flow.scope)
+    }
+
+    /// Fetch `pr-review`'s list for an open Start work, for the scope it
+    /// lists.
+    pub(super) fn fetch_pull_requests(&mut self, path: &str) {
+        let Some(scope) = self.flow_scope(path) else {
             return;
-        }
+        };
         let tx = self.tx.clone();
-        let scope = self.start_work_for(path).scope;
         let path = path.to_string();
         tokio::spawn(async move {
             let (prs, viewer) = github::list_pull_requests(&path, scope).await;
-            tx.send(AppEvent::PullRequests { path, prs, viewer });
+            tx.send(AppEvent::PullRequests {
+                path,
+                scope,
+                prs,
+                viewer,
+            });
         });
+    }
+
+    /// Fill an open Start work's lists for the scope it now lists: the
+    /// cached issues at once, refreshed behind when stale, and the PRs —
+    /// which are never cached — from `gh`.
+    pub(super) fn list_for_flow(&mut self, path: &str) {
+        let Some(scope) = self.flow_scope(path) else {
+            return;
+        };
+        let cached = github::peek_issues(path, scope);
+        if let Some((issues, _)) = &cached {
+            for flow in self.start_work_flows(path) {
+                flow.set_issues(scope, issues.clone());
+            }
+        }
+        if !matches!(cached, Some((_, true))) {
+            self.fetch_issues_scoped(path.to_string(), scope);
+        }
+        if matches!(self.repo_key(path), Some(Some(_))) {
+            self.fetch_pull_requests(path);
+        }
     }
 
     /// Re-read a checkout's repository settings, and follow whatever that
@@ -169,13 +189,9 @@ impl App {
             return;
         }
         let mut flow_open = false;
-        for modal in &mut self.modals {
-            if let Modal::StartWork(flow) = modal
-                && flow.repo_path == path
-            {
-                flow.set_start_work(after.clone());
-                flow_open = true;
-            }
+        for flow in self.start_work_flows(path) {
+            flow.set_start_work(after.clone());
+            flow_open = true;
         }
         if after.scope == before.scope {
             return;
@@ -191,8 +207,7 @@ impl App {
         }
         // The flow dropped both lists, fetched for the old scope.
         if flow_open {
-            self.fetch_issues_for(path.to_string());
-            self.fetch_pull_requests(path);
+            self.list_for_flow(path);
         }
     }
 

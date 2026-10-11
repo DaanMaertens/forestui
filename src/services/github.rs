@@ -33,13 +33,15 @@ impl AuthStatus {
 
 struct Cached {
     issues: Vec<GitHubIssue>,
-    /// Whose issues these are. A list fetched for the other scope answers a
-    /// different question, so it is never served as this one.
-    scope: Scope,
     fetched_at: DateTime<Utc>,
 }
 
-/// The cache is keyed by the repository *path* — the one identifier the app
+/// The cache is keyed by the repository *path* and the scope: a list
+/// fetched for the other scope answers a different question, so it is never
+/// served as this one, and the two are held side by side because the
+/// repository pane and an open Start work can each show a different one.
+///
+/// The path is the one identifier the app
 /// holds synchronously. Keying by `owner/repo` made every lookup pay a
 /// `gh repo view` subprocess before it could even ask the cache, which is why
 /// the issues panel flashed "Loading…" on every selection change (#29).
@@ -50,7 +52,7 @@ struct Cached {
 /// its own store landed.
 #[derive(Default)]
 struct IssueCache {
-    entries: HashMap<String, Cached>,
+    entries: HashMap<(String, Scope), Cached>,
     /// Bumped by every invalidation. A fetch that started before an
     /// invalidation must not store its result afterwards — it would re-stamp
     /// pre-invalidation data as fresh and silently undo the refresh.
@@ -60,7 +62,7 @@ struct IssueCache {
 impl IssueCache {
     /// `Some((issues, fresh))` when a fetch has completed, `None` otherwise.
     fn peek(&self, path: &str, scope: Scope) -> Option<(Vec<GitHubIssue>, bool)> {
-        let cached = self.entries.get(path).filter(|c| c.scope == scope)?;
+        let cached = self.entries.get(&(path.to_string(), scope))?;
         let fresh = (Utc::now() - cached.fetched_at).num_seconds() < CACHE_TTL_SECONDS;
         Some((cached.issues.clone(), fresh))
     }
@@ -85,10 +87,9 @@ impl IssueCache {
             Utc::now() - chrono::Duration::seconds(CACHE_TTL_SECONDS)
         };
         self.entries.insert(
-            path.to_string(),
+            (path.to_string(), scope),
             Cached {
                 issues: issues.to_vec(),
-                scope,
                 fetched_at,
             },
         );
@@ -98,7 +99,7 @@ impl IssueCache {
     /// whole cache made the next selection change on every other repository a
     /// guaranteed cold miss, which was half of #29.
     fn invalidate(&mut self, path: &str) {
-        self.entries.remove(path);
+        self.entries.retain(|(cached, _), _| cached != path);
         // Fence out any fetch already in flight for the old contents.
         self.generation += 1;
     }
@@ -264,14 +265,10 @@ pub fn seed_cache_for_test(
     fetched_at: DateTime<Utc>,
 ) {
     if let Ok(mut guard) = state().lock() {
-        guard.issues.entries.insert(
-            path.to_string(),
-            Cached {
-                issues,
-                scope,
-                fetched_at,
-            },
-        );
+        guard
+            .issues
+            .entries
+            .insert((path.to_string(), scope), Cached { issues, fetched_at });
     }
 }
 
@@ -459,7 +456,6 @@ impl Clone for Cached {
     fn clone(&self) -> Self {
         Self {
             issues: self.issues.clone(),
-            scope: self.scope,
             fetched_at: self.fetched_at,
         }
     }

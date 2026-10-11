@@ -152,7 +152,34 @@ JSON
           *) echo "[]" ;;
         esac
         ;;
-      *) echo "[]" ;;
+      # No filter is the `all` scope, which only Start work's "Not just
+      # mine" asks for (UC-99): every open issue in beta, which adds #412,
+      # neither assigned to nor opened by the sweep user.
+      *)
+        case "$PWD" in
+          */beta)
+            cat <<'JSON'
+[{"number":326,"title":"Fansly conversation discovery has no backoff","state":"OPEN",
+  "url":"https://example.invalid/326","createdAt":"2026-08-01T10:00:00Z",
+  "updatedAt":"2026-08-02T10:00:00Z","author":{"login":"sweep-user"},
+  "assignees":[{"login":"sweep-user"}],"labels":[{"name":"bug","color":"ff0000"}]},
+ {"number":298,"title":"Proactive metrics: coalesced FIRE rows overcount","state":"OPEN",
+  "url":"https://example.invalid/298","createdAt":"2026-07-20T10:00:00Z",
+  "updatedAt":"2026-07-21T10:00:00Z","author":{"login":"sweep-user"},
+  "assignees":[],"labels":[{"name":"metrics","color":"00ff00"},{"name":"p2","color":"0000ff"}]},
+ {"number":77,"title":"Dark mode for the dashboard","state":"OPEN",
+  "url":"https://example.invalid/77","createdAt":"2026-07-10T10:00:00Z",
+  "updatedAt":"2026-07-11T10:00:00Z","author":{"login":"sweep-user"},
+  "assignees":[],"labels":[{"name":"enhancement","color":"a2eeef"}]},
+ {"number":412,"title":"Someone else's flaky export","state":"OPEN",
+  "url":"https://example.invalid/412","createdAt":"2026-07-05T10:00:00Z",
+  "updatedAt":"2026-07-06T10:00:00Z","author":{"login":"someone-else"},
+  "assignees":[],"labels":[]}]
+JSON
+            ;;
+          *) echo "[]" ;;
+        esac
+        ;;
     esac
     exit 0 ;;
   # beta alone has PRs, for Start work's pr-review mode (UC-104): one
@@ -733,6 +760,15 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-99 start-work-mode
   press Enter; await "#298"; sleep 0.8
   capture UC-99 start-work-item
+  assert UC-99 lists-only-mine "no" "$(screen_has '#412')"
+  # Show blocked, then Not just mine: the list widens for this pick alone,
+  # and unticking it brings back the cached list of the user's own.
+  press Tab; press Tab; press Enter; await "#412"; sleep 0.8
+  capture UC-99 start-work-item-all
+  assert UC-99 not-just-mine-ticked "yes" "$(screen_has '\[x\] Not just mine')"
+  press Space; await "\[ \] Not just mine"; sleep 0.5
+  assert UC-99 unticked-lists-only-mine "no" "$(screen_has '#412')"
+  press Shift+Tab; press Shift+Tab; sleep 0.3
   type_ "metrics"; sleep 0.5; press Enter
   await "Launch"; sleep 0.8
   capture UC-99 start-work-confirm
