@@ -147,14 +147,30 @@ Claude stops:
 - **Ctrl+Z** suspends Claude to a prompt; `fg` resumes it.
 - **A crash or a refused launch** leaves a prompt with the command in your
   history, so the up arrow retries it.
-- **A clean exit** — Ctrl+D twice, Ctrl+C twice or `/exit` — closes the
-  window and returns you to forestui.
+- **A clean exit** — Ctrl+D twice, Ctrl+C twice or `/exit` — ends the
+  session and closes its window. tmux then shows the window you were in
+  before, which is not necessarily forestui.
 
 Your shell starts the same way an interactive shell always does, with your
 own startup files. zsh, bash and the POSIX shells (sh, dash, ksh, mksh,
 ash, yash) get this directly. Other shells, such as fish, get the command
 typed into them instead, and their window drops to a prompt when Claude
 exits.
+
+#### Going back to forestui without stopping Claude
+
+Ctrl+D quits Claude; it never sends it to the background. To leave a session
+working and go back to forestui, switch tmux windows instead. forestui is
+the first window of its tmux session, so press your tmux prefix and then `0`
+(`Ctrl+B 0` by default; `1` if your tmux sets `base-index 1`). Claude keeps
+running in its own window. `Ctrl+B l` goes back to the window you came from,
+`Ctrl+B w` picks one from a list, and `Ctrl+B d` detaches tmux altogether,
+leaving forestui and every session running; start `forestui` again to
+reattach.
+
+To return to a running session from forestui, press **Claude** on its card,
+which shows `● live in <window>`. forestui offers to switch to that window
+instead of starting a second Claude on the same conversation.
 
 ## Usage
 
