@@ -1183,11 +1183,11 @@ pub struct StartWorkConfirmModal {
     /// Launch with the built-in YOLO flag. Off on every open: trusting one
     /// task must not become the default for the next.
     pub yolo: bool,
-    /// The prompt as an editor left it, in place of the filled-in template.
     /// The prompt template as resolved when the screen opened — its file if
     /// there is one, else the default. Read once here: the prompt is filled
     /// on every frame, and that must not mean a file read per repaint.
     template: String,
+    /// The prompt as an editor left it, in place of the filled-in template.
     /// Held here and nowhere else, so the edit applies to this launch only.
     pub edited_prompt: Option<String>,
     /// An editor is open on the prompt; a second one would race the first.

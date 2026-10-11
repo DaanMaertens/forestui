@@ -91,24 +91,25 @@ pub struct Resolved {
 /// user wrote that file and expects it to be used.
 pub fn resolve(dir: &Path, template: Template) -> Resolved {
     let path = dir.join(template.file_name());
-    let fallback = |why: String| Resolved {
-        text: template.default_text().to_string(),
-        warning: Some(format!(
-            "Prompt template {} {why}; using the built-in default",
-            path.display()
-        )),
+    let why = match std::fs::read_to_string(&path) {
+        Ok(text) if text.trim().is_empty() => Some("is empty".to_string()),
+        Ok(text) => {
+            return Resolved {
+                text,
+                warning: None,
+            };
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => Some(format!("could not be read ({e})")),
     };
-    match std::fs::read_to_string(&path) {
-        Ok(text) if text.trim().is_empty() => fallback("is empty".to_string()),
-        Ok(text) => Resolved {
-            text,
-            warning: None,
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Resolved {
-            text: template.default_text().to_string(),
-            warning: None,
-        },
-        Err(e) => fallback(format!("could not be read ({e})")),
+    Resolved {
+        text: template.default_text().to_string(),
+        warning: why.map(|why| {
+            format!(
+                "Prompt template {} {why}; using the built-in default",
+                path.display()
+            )
+        }),
     }
 }
 
