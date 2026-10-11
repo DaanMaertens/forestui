@@ -19,8 +19,8 @@ pub use keys::BINDINGS;
 pub use mouse::{Direction, Hit, HitTarget, ModalClick, ScrollbarGeom};
 
 use crate::event::{AppEvent, DetailMeta, EventTx, Severity};
-use crate::modal::Modal;
-use crate::models::{ClaudeSession, GitHubIssue, Settings};
+use crate::modal::{Modal, StartWorkModal};
+use crate::models::{ClaudeSession, GitHubIssue, Scope, Settings};
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use crate::state::AppState;
 use crate::ui::widgets::TextInput;
@@ -907,6 +907,19 @@ impl App {
         }
     }
 
+    /// Every open Start work for the checkout at `path`, wherever it sits on
+    /// the modal stack: a flow beneath its confirm screen still wants the
+    /// answers that come back for it, and Back shows them.
+    pub(super) fn start_work_flows<'a>(
+        &'a mut self,
+        path: &'a str,
+    ) -> impl Iterator<Item = &'a mut StartWorkModal> + 'a {
+        self.modals.iter_mut().filter_map(move |modal| match modal {
+            Modal::StartWork(flow) if flow.repo_path == path => Some(flow.as_mut()),
+            _ => None,
+        })
+    }
+
     /// Show the repository pane's issues for `path`: the cached list for the
     /// scope in effect, refreshed behind it when stale or missing.
     fn load_issues(&mut self, path: &str) {
@@ -935,9 +948,15 @@ impl App {
     /// Fetch the issues for one repository's checkout. The result folds into
     /// whichever of the pane and an open Start work still want that path.
     pub(super) fn fetch_issues_for(&mut self, path: String) {
-        // One fetch per path at a time — each one is a chain of gh
-        // subprocesses and possibly a network call for an identical result.
         let scope = self.start_work_for(&path).scope;
+        self.fetch_issues_scoped(path, scope);
+    }
+
+    /// Fetch one scope's issues, which may not be the setting's: an open
+    /// Start work can be listing the other.
+    pub(super) fn fetch_issues_scoped(&mut self, path: String, scope: Scope) {
+        // One fetch per path and scope at a time — each one is a chain of gh
+        // subprocesses and possibly a network call for an identical result.
         if !self.issues_in_flight.insert((path.clone(), scope)) {
             return;
         }
@@ -1233,17 +1252,15 @@ impl App {
                 issues,
             } => {
                 self.issues_in_flight.remove(&(path.clone(), scope));
-                // Listed for a scope the repository's settings have since
-                // replaced; the refetch for the new one is on its way.
-                if scope != self.start_work_for(&path).scope {
-                    return;
+                // A flow takes only its own scope's list.
+                for flow in self.start_work_flows(&path) {
+                    flow.set_issues(scope, issues.clone());
                 }
-                if let Some(Modal::StartWork(flow)) = self.modals.last_mut()
-                    && flow.repo_path == path
-                {
-                    flow.set_issues(issues.clone());
-                }
-                if self.state.selection.is_repository()
+                // The pane follows the setting: a list for the other scope
+                // was the flow's, or listed for a scope the repository's
+                // settings have since replaced.
+                if scope == self.start_work_for(&path).scope
+                    && self.state.selection.is_repository()
                     && Some(path.as_str())
                         == self
                             .state
@@ -1253,14 +1270,14 @@ impl App {
                     self.issues = Some(issues);
                 }
             }
-            AppEvent::PullRequests { path, prs, viewer } => {
-                // The flow may be beneath its confirm screen by now.
-                for modal in &mut self.modals {
-                    if let Modal::StartWork(flow) = modal
-                        && flow.repo_path == path
-                    {
-                        flow.set_pull_requests(prs.clone(), viewer.clone());
-                    }
+            AppEvent::PullRequests {
+                path,
+                scope,
+                prs,
+                viewer,
+            } => {
+                for flow in self.start_work_flows(&path) {
+                    flow.set_pull_requests(scope, prs.clone(), viewer.clone());
                 }
             }
             AppEvent::GitHubChecked {

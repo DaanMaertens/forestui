@@ -19,6 +19,7 @@ mod repaint;
 mod repository_settings;
 mod sessions;
 mod start_work;
+mod start_work_scope;
 mod update_notice;
 mod worktrees;
 
@@ -114,6 +115,19 @@ fn app_with_issues(issues: Vec<crate::models::GitHubIssue>) -> (tempfile::TempDi
         chrono::Utc::now(),
     );
     (dir, app, path)
+}
+
+/// An open PR, as `gh pr list` returns it.
+fn open_pr(number: i64, title: &str, author: &str, head: &str) -> crate::models::GitHubPullRequest {
+    serde_json::from_value(serde_json::json!({
+        "number": number,
+        "title": title,
+        "author": {"login": author},
+        "isDraft": false,
+        "headRefName": head,
+        "createdAt": "2026-01-01T00:00:00Z",
+    }))
+    .expect("pull request fixture")
 }
 
 fn confirm_number(confirm: &crate::modal::StartWorkConfirmModal) -> Option<i64> {

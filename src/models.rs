@@ -369,6 +369,16 @@ pub enum Scope {
     All,
 }
 
+impl Scope {
+    /// The other scope: what Start work's "Not just mine" flips to.
+    pub fn toggled(self) -> Self {
+        match self {
+            Scope::Mine => Scope::All,
+            Scope::All => Scope::Mine,
+        }
+    }
+}
+
 /// How one work mode names its worktree and branch.
 ///
 /// `name_pattern` is the worktree name, with `{number}` and `{slug}` (the

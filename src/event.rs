@@ -112,11 +112,12 @@ pub enum AppEvent {
         scope: crate::models::Scope,
         issues: Vec<GitHubIssue>,
     },
-    /// Start work's `pr-review` list finished loading: the open PRs that are
-    /// mine, and the login `gh` is authenticated as, which decides each
+    /// Start work's `pr-review` list finished loading: the open PRs in
+    /// `scope`, and the login `gh` is authenticated as, which decides each
     /// one's review kind.
     PullRequests {
         path: String,
+        scope: crate::models::Scope,
         prs: Vec<crate::models::GitHubPullRequest>,
         viewer: Option<String>,
     },

@@ -232,6 +232,7 @@ impl App {
                 });
             }
             ModalEffect::ShowBlockedIssues(show) => self.set_show_blocked_issues(show),
+            ModalEffect::ListScope(path) => self.list_for_flow(&path),
             ModalEffect::EditTemplate(template) => self.edit_template(template),
             ModalEffect::EditRepositoryFile(key, file) => self.edit_repository_file(key, file),
             ModalEffect::Fetch(repo_path) => {
