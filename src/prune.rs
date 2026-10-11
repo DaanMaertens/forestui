@@ -1,13 +1,17 @@
 //! Prune: remove a finished worktree together with its local branch,
 //! unless that would lose work.
 //!
-//! The routine knows nothing about the App, so the repository pane's
-//! **Prune finished** and a command-line prune (issue #16) can run the same
-//! steps and word their outcome the same way. Which worktrees are finished is
-//! not decided here — the caller passes the ones it judged finished.
+//! [`prune_worktree`] knows nothing about the App, so the repository pane's
+//! **Prune finished** and `forestui prune` run the same steps and word their
+//! outcome the same way. It does not decide which worktrees are finished —
+//! the caller passes the ones it judged finished. The rest of the module is
+//! the command line's side: [`prune_forest`] judges them with the same check
+//! the App's sidebar marks come from.
 
 use crate::event::Severity;
 use crate::services::git;
+use crate::state::AppState;
+use uuid::Uuid;
 
 /// What pruning one worktree came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +162,131 @@ fn reason(skip: &Skip) -> String {
 fn sentence(message: &str) -> String {
     let flat = message.split_whitespace().collect::<Vec<_>>().join(" ");
     flat.trim_end_matches('.').to_string()
+}
+
+/// Prune tracked worktrees one after another, without the App: each one git
+/// removed leaves `state`, which persists it with the atomic writer. The
+/// App does not use this — its removals go through `WorktreeSync`.
+///
+/// A forestui running on the same forest is a second writer of the state
+/// file, which this cannot coordinate with. That is tolerable rather than
+/// safe: the App's next save puts the pruned entries back, and its next
+/// worktree scan drops them again, because their directories are gone.
+pub async fn prune_tracked(state: &mut AppState, worktree_ids: &[Uuid]) -> Vec<(String, Outcome)> {
+    let mut outcomes = Vec::with_capacity(worktree_ids.len());
+    for &worktree_id in worktree_ids {
+        let Some((repo, worktree)) = state.find_worktree(worktree_id) else {
+            continue;
+        };
+        let (repo_path, name) = (repo.source_path.clone(), worktree.name.clone());
+        let (path, branch) = (worktree.path.clone(), worktree.branch.clone());
+        let outcome = prune_worktree(&repo_path, &path, &branch).await;
+        if matches!(outcome, Outcome::Removed { .. }) {
+            state.remove_worktree(worktree_id);
+        }
+        outcomes.push((name, outcome));
+    }
+    outcomes
+}
+
+/// One repository's share of a forest-wide prune.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryPrune {
+    pub name: String,
+    /// Empty when nothing in it was finished.
+    pub outcomes: Vec<(String, Outcome)>,
+}
+
+/// `forestui prune`: every repository in the forest, brought in step with
+/// git the way a worktree scan would, then its finished worktrees pruned.
+///
+/// Finished is judged by the same check the sidebar marks come from, so a
+/// worktree nobody could answer for — `gh` signed out, no remote default
+/// branch — is left alone, as it would be unmarked in the App.
+pub async fn prune_forest(state: &mut AppState) -> Vec<RepositoryPrune> {
+    let repo_ids: Vec<Uuid> = state.repositories().iter().map(|repo| repo.id).collect();
+    let mut results = Vec::with_capacity(repo_ids.len());
+    for repo_id in repo_ids {
+        let Some(source) = state
+            .find_repository(repo_id)
+            .map(|repo| repo.source_path.clone())
+        else {
+            continue;
+        };
+        // A branch switched since the App last scanned would otherwise have
+        // the wrong branch deleted. A listing git cannot give leaves the
+        // config as it is, as in the App.
+        if let Ok(listed) = git::list_worktrees(&source).await {
+            state.reconcile_worktrees(repo_id, &listed, &Default::default());
+        }
+        let Some(repo) = state.find_repository(repo_id) else {
+            continue;
+        };
+        let name = repo.name.clone();
+        let verdicts =
+            crate::app::finished::check(&source, &crate::app::finished::linked(repo)).await;
+        let finished: Vec<Uuid> = repo
+            .worktrees
+            .iter()
+            .map(|worktree| worktree.id)
+            .filter(|id| verdicts.get(id) == Some(&true))
+            .collect();
+        let outcomes = prune_tracked(state, &finished).await;
+        results.push(RepositoryPrune { name, outcomes });
+    }
+    results
+}
+
+/// Whether worktrees linked to an issue or pull request went unchecked
+/// because `gh` is missing or signed out. Without saying so, the command
+/// line would report "No finished worktrees." about a check that never ran.
+pub async fn links_unchecked(state: &AppState) -> bool {
+    use crate::models::WorkItemLink;
+    let has_gh_links = state.repositories().iter().any(|repo| {
+        repo.worktrees.iter().any(|worktree| {
+            matches!(
+                worktree.work_item,
+                Some(WorkItemLink::Issue { .. } | WorkItemLink::PullRequest { .. })
+            )
+        })
+    });
+    // The status is cached, so this asks `gh` no second time.
+    has_gh_links
+        && crate::services::github::get_auth_status().await.0
+            != crate::services::github::AuthStatus::Authenticated
+}
+
+/// What `forestui prune` prints, and whether it exits non-zero.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Summary {
+    pub lines: Vec<String>,
+    /// A worktree that could not be pruned. A skip is not a failure: it is
+    /// the routine declining to lose work, which is what it is for.
+    pub failed: bool,
+}
+
+pub fn summary(repositories: &[RepositoryPrune]) -> Summary {
+    let mut lines = Vec::new();
+    let mut failed = false;
+    for repository in repositories {
+        if repository.outcomes.is_empty() {
+            continue;
+        }
+        failed |= repository
+            .outcomes
+            .iter()
+            .any(|(_, outcome)| matches!(outcome, Outcome::Failed(_)));
+        lines.extend(
+            report(&repository.outcomes)
+                .lines
+                .into_iter()
+                .map(|line| format!("{}: {line}", repository.name)),
+        );
+    }
+    if lines.is_empty() {
+        lines.push("No finished worktrees.".to_string());
+    }
+    Summary { lines, failed }
 }
 
 #[cfg(test)]

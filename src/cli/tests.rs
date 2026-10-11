@@ -25,6 +25,7 @@ fn self_command_quotes_and_carries_flags() {
         no_hover: true,
         no_focus_events: false,
         claude_plugin: None,
+        command: None,
     };
     let command = self_command(&args, Path::new("/usr/local/bin/forestui"));
     assert!(command.starts_with("/usr/local/bin/forestui"));
@@ -55,6 +56,7 @@ fn each_flag_declines_only_its_own_mode() {
         no_hover,
         no_focus_events,
         claude_plugin: None,
+        command: None,
     };
 
     assert_eq!(
@@ -87,12 +89,14 @@ fn a_one_shot_action_is_not_carried_into_the_re_exec() {
         no_hover: false,
         no_focus_events: false,
         claude_plugin: Some(ClaudePluginAction::Install),
+        command: Some(Command::Prune { forest_path: None }),
     };
     let command = self_command(&args, Path::new("/usr/local/bin/forestui"));
     assert!(
         !command.contains("claude-plugin"),
         "the re-exec would run the action again: {command}"
     );
+    assert!(!command.contains("prune"), "nor a subcommand: {command}");
 }
 
 #[test]
@@ -105,7 +109,34 @@ fn self_command_quotes_paths_with_spaces_in_the_program() {
         no_hover: false,
         no_focus_events: false,
         claude_plugin: None,
+        command: None,
     };
     let command = self_command(&args, Path::new("/tmp/my dir/forestui"));
     assert_eq!(command, "'/tmp/my dir/forestui'");
+}
+
+/// `prune` takes the same forest argument as the app, and claiming the word
+/// for a subcommand does not take the bare forest path away.
+#[test]
+fn prune_parses_with_and_without_a_forest() {
+    let args = Args::try_parse_from(["forestui", "prune", "/tmp/work"]).unwrap();
+    assert_eq!(
+        args.command,
+        Some(Command::Prune {
+            forest_path: Some("/tmp/work".into())
+        })
+    );
+    assert_eq!(args.forest_path, None);
+
+    let args = Args::try_parse_from(["forestui", "prune"]).unwrap();
+    assert_eq!(args.command, Some(Command::Prune { forest_path: None }));
+
+    assert!(
+        Args::try_parse_from(["forestui", "/tmp/work", "prune"]).is_err(),
+        "the outer forest path is the app's; prune would ignore it and prune ~/forest"
+    );
+
+    let args = Args::try_parse_from(["forestui", "/tmp/work"]).unwrap();
+    assert_eq!(args.command, None);
+    assert_eq!(args.forest_path.as_deref(), Some("/tmp/work"));
 }

@@ -232,6 +232,23 @@ forestui ~/personal  # Uses ~/personal/.forestui-config.json
 User preferences (editor, theme, branch prefix, custom Claude buttons) are
 stored globally in `~/.config/forestui/settings.json`.
 
+### Pruning finished worktrees
+
+A worktree whose issue is closed, whose pull request is merged or closed, or
+whose free-text branch is merged into the default branch is *finished*. The
+repository pane's **Prune finished (N)** removes those worktrees together with
+their local branches. The same prune runs from a shell, over every repository
+in a forest, without tmux:
+
+```bash
+forestui prune          # ~/forest
+forestui prune ~/work
+```
+
+Worktrees with uncommitted changes or commits on no remote branch are skipped
+and listed. The exit status is non-zero only when a worktree could not be
+pruned, not when one was skipped.
+
 ### Themes
 
 Settings → Theme opens a picker over 32 named palettes — Dracula, Nord,

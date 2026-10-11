@@ -33,6 +33,9 @@ fn main() -> anyhow::Result<()> {
     if let Some(action) = args.claude_plugin {
         return run_claude_plugin_action(action);
     }
+    if let Some(cli::Command::Prune { forest_path }) = &args.command {
+        return run_prune(forest_path.as_deref());
+    }
 
     // Re-executes into tmux and never returns when we are outside one.
     cli::ensure_tmux(&args)?;
@@ -125,6 +128,46 @@ fn run_claude_plugin_action(action: cli::ClaudePluginAction) -> anyhow::Result<(
     // closes the pipe, and `println!` turns that into a panic.
     let _ = std::io::stdout().write_all(out.as_bytes());
     result.map_err(|e| anyhow::anyhow!(e))
+}
+
+/// `forestui prune [forest]`: the repository pane's prune over the whole
+/// forest, from a shell. Never touches tmux, so it runs anywhere — a cron
+/// job, a plain terminal, a session with no tmux server at all.
+fn run_prune(forest_path: Option<&str>) -> anyhow::Result<()> {
+    services::settings::set_forest_path(forest_path);
+    let forest = services::settings::get_forest_path();
+    // `AppState::load` creates the directory, which is right for the app and
+    // wrong for a mistyped path handed to a one-shot command.
+    if !forest.is_dir() {
+        anyhow::bail!("no forest at {}", forest.display());
+    }
+    let mut state = state::AppState::load();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let (results, unchecked) = runtime.block_on(async {
+        let results = prune::prune_forest(&mut state).await;
+        (results, prune::links_unchecked(&state).await)
+    });
+    let summary = prune::summary(&results);
+    if unchecked {
+        eprintln!(
+            "Warning: gh is not signed in, so worktrees linked to issues or pull requests were not checked."
+        );
+    }
+
+    let mut out = summary.lines.join("\n");
+    out.push('\n');
+    // Dropped on error for the same reason as the plugin action's output.
+    let _ = std::io::stdout().write_all(out.as_bytes());
+
+    if let Some(error) = state.take_save_error() {
+        anyhow::bail!("could not save {}: {error}", forest.display());
+    }
+    if summary.failed {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 async fn run(self_update: bool, modes: terminal::InputModes) -> anyhow::Result<()> {
