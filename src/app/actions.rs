@@ -404,6 +404,7 @@ impl App {
             ConfirmAction::ForceDeleteWorktree(worktree_id) => {
                 self.spawn_worktree_removal(worktree_id, true);
             }
+            ConfirmAction::PruneFinished(worktree_ids) => self.spawn_prune(&worktree_ids),
             ConfirmAction::DeleteClaudeSession {
                 path,
                 session_id,
@@ -490,6 +491,76 @@ impl App {
             }
             .map_err(|error| error.to_string());
             tx.send(AppEvent::WorktreeRemoveResult { change, outcome });
+        });
+    }
+
+    /// Ask before pruning, naming every worktree that would go.
+    fn action_prune_finished(&mut self) {
+        let Some(repo_id) = self.state.selection.repository_id else {
+            return;
+        };
+        let finished = self.finished_worktrees(repo_id);
+        if finished.is_empty() {
+            return;
+        }
+        let names: Vec<String> = finished
+            .iter()
+            .map(|(_, name)| format!("  {}", crate::util::truncate(name, 40)))
+            .collect();
+        let message = format!(
+            "Remove these finished worktrees and their local branches?\n{}\nAny with uncommitted or unpushed work is skipped.",
+            names.join("\n")
+        );
+        self.modals.push(Modal::Confirm(ConfirmModal::new(
+            "Prune Finished Worktrees",
+            message,
+            ConfirmAction::PruneFinished(finished.into_iter().map(|(id, _)| id).collect()),
+        )));
+    }
+
+    /// Prune `worktree_ids` in one background task. Each removal starts
+    /// through `WorktreeSync` like any other, and the task hands every
+    /// ticket back in one result, so the user hears about the whole prune
+    /// once. A worktree with a change already running is not touched.
+    fn spawn_prune(&mut self, worktree_ids: &[Uuid]) {
+        let mut jobs = Vec::new();
+        let mut busy = Vec::new();
+        let mut repo_path = None;
+        for &worktree_id in worktree_ids {
+            let Some((repo, worktree)) = self.state.find_worktree(worktree_id) else {
+                continue;
+            };
+            let (repo_id, name) = (repo.id, worktree.name.clone());
+            let (path, branch) = (worktree.path.clone(), worktree.branch.clone());
+            repo_path.get_or_insert_with(|| repo.source_path.clone());
+            match self.worktree_sync.begin_removal(repo_id, worktree_id) {
+                Some(change) => jobs.push((change, name, path, branch)),
+                None => busy.push(name),
+            }
+        }
+        let Some(repo_path) = repo_path.filter(|_| !jobs.is_empty()) else {
+            // Nothing to run, but the user still hears why.
+            if !busy.is_empty() {
+                self.on_worktrees_pruned(Vec::new(), busy);
+            }
+            return;
+        };
+        let count = jobs.len();
+        self.notify(
+            format!(
+                "Pruning {count} worktree{}…",
+                if count == 1 { "" } else { "s" }
+            ),
+            Severity::Information,
+        );
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let mut removals = Vec::with_capacity(jobs.len());
+            for (change, name, path, branch) in jobs {
+                let outcome = crate::prune::prune_worktree(&repo_path, &path, &branch).await;
+                removals.push((change, name, outcome));
+            }
+            tx.send(AppEvent::WorktreesPruned { removals, busy });
         });
     }
 
@@ -1068,6 +1139,7 @@ impl App {
                     self.start_work_on_issue(repo_id, issue, mode);
                 }
             }
+            Action::PruneFinished => self.action_prune_finished(),
             Action::RemoveRepository | Action::Delete => self.action_delete(),
             Action::Archive | Action::Unarchive => self.action_toggle_archive(),
         }

@@ -78,3 +78,13 @@ PASS UC-72     dirty-names-the-change                         expected=yes      
 PASS UC-72     dirty-dir-removed                              expected=no                           actual=no
 PASS UC-72     dirty-entry-removed                            expected=False                        actual=False
 PASS UC-72     dirty-git-forgot-it                            expected=no                           actual=no
+PASS UC-106    control-shows-the-count                        expected=yes                          actual=yes
+PASS UC-106    confirm-lists-the-worktree                     expected=yes                          actual=yes
+PASS UC-106    unpushed-named                                 expected=yes                          actual=yes
+PASS UC-106    unpushed-reason                                expected=yes                          actual=yes
+PASS UC-106    unpushed-kept                                  expected=yes                          actual=yes
+PASS UC-106    unpushed-still-tracked                         expected=True                         actual=True
+PASS UC-106    dir-removed                                    expected=no                           actual=no
+PASS UC-106    git-forgot-it                                  expected=no                           actual=no
+PASS UC-106    branch-deleted                                 expected=no                           actual=no
+PASS UC-106    control-gone                                   expected=no                           actual=no

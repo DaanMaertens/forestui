@@ -293,6 +293,50 @@ pub async fn force_remove_worktree(repo_path: &str, worktree_path: &str) -> GitR
     Err(GitError(format!("Failed to remove worktree: {stderr}")))
 }
 
+/// What would be lost by removing the tree at `dir`: `None` when it is
+/// clean, a summary like "2 modified" when it is not. A status git cannot
+/// read is an error, never clean.
+pub async fn uncommitted_changes(dir: &str) -> GitResult<Option<String>> {
+    match tree_state(&expand(dir)).await {
+        TreeState::Clean => Ok(None),
+        TreeState::Dirty(summary) => Ok(Some(summary)),
+        TreeState::Unreadable(reason) => Err(GitError(format!(
+            "cannot verify the worktree is clean: {reason}"
+        ))),
+    }
+}
+
+/// How many commits reachable from any of `revs` are on no remote-tracking
+/// branch — work that exists only here. Any remote branch counts, so a branch whose
+/// own remote branch was deleted after its PR merged is still pushed: its
+/// commits are on the default branch.
+pub async fn unpushed_commits(dir: &str, revs: &[&str]) -> GitResult<u64> {
+    let mut args = vec!["rev-list", "--count"];
+    args.extend_from_slice(revs);
+    args.extend(["--not", "--remotes"]);
+    let (code, stdout, stderr) = run_git(&args, Some(&expand(dir))).await?;
+    if code != 0 {
+        return Err(GitError(format!(
+            "Failed to count unpushed commits: {stderr}"
+        )));
+    }
+    stdout
+        .trim()
+        .parse()
+        .map_err(|_| GitError(format!("Unexpected rev-list output: {stdout}")))
+}
+
+/// Delete a local branch whatever its merge state — for after the caller
+/// has checked nothing on it is unpushed. A squash-merged branch is never
+/// "merged" to git, so `-d` would refuse every one of them.
+pub async fn delete_branch(repo_path: &str, branch: &str) -> GitResult<()> {
+    let (code, _out, stderr) = run_git(&["branch", "-D", branch], Some(&expand(repo_path))).await?;
+    if code != 0 {
+        return Err(GitError(stderr));
+    }
+    Ok(())
+}
+
 /// What `git status` said about a tree that refused a plain removal.
 enum TreeState {
     Clean,

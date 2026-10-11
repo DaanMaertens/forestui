@@ -14,6 +14,7 @@ mod mouse;
 mod navigation;
 mod pr_review;
 mod prompt_templates;
+mod prune;
 mod repaint;
 mod repository_settings;
 mod sessions;

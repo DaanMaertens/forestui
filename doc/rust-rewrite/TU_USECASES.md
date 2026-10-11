@@ -1751,6 +1751,28 @@ repository's worktree are unit-tested.
 **Fails if:** the ✓ never appears, an open item's worktree is marked, the
 mark is not dimmed, or a `finished` key reaches `.forestui-config.json`.
 
+### UC-106 — Prune finished worktrees
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** after UC-72 (last in the sweep: it gives beta a remote, which would
+change the Git Pull label in every frame before it), click beta's sidebar row,
+click **Prune finished (1)**, then `y`. Push pr-45's branch to a new `origin`
+for beta and fetch, then click **Prune finished (1)** and `y` again.
+**Expected:** the repository pane's top row carries `Prune finished (1)` — the
+one finished worktree since UC-105 — and alpha's pane, with none finished, has
+no such control. The confirmation, `Prune Finished Worktrees`, lists
+`pr-45-retry-uploads-with-backoff` by name. The first prune skips it: beta has
+no remote, so nothing on it was ever pushed, and the notification reads
+`Pruned nothing. Skipped 'pr-45-retry-uploads-with-backoff' (no remote to push
+to).` with the worktree, its directory and its config entry intact. After
+the push the second prune removes the directory, git's record of the worktree
+and the local `fix/retry-backoff` branch, drops the config entry, says
+`Pruned 'pr-45-retry-uploads-with-backoff'.`, and the control is gone. Skipping
+uncommitted changes, a change already in flight (named as `still being
+changed`), a branch git will not delete, and the fold are unit-tested.
+**Fails if:** the control shows with nothing finished or with the wrong count,
+the confirmation omits a worktree, unpushed or uncommitted work is removed, a
+skip goes unnamed, or the branch survives a prune that removed its worktree.
+
 ---
 
 ## Known visual divergences (accepted, not defects)

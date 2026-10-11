@@ -6,9 +6,9 @@
 └─ wt-a-renamed [feat/wt-a-v2]    │  Branch:     main
 ▼ beta                            │  Commit:     <sha> (<rel>)
 ├─ ✓ pr-45-retry-uploads-with-back│
-├─ feat-try-a-quick-spike-on-cachi│  ┌────────────┐ ┌────────────────────────┐ ┌──────────────┐
-├─ feat-77-dark-mode-for-the-dashb│  │ Start work │ │ ↓ Git Pull (No remote) │ │ Add Worktree │
-└─ issue-298-proactive-metrics-coa│  └────────────┘ └────────────────────────┘ └──────────────┘
+├─ feat-try-a-quick-spike-on-cachi│  ┌────────────┐ ┌────────────────────────┐ ┌──────────────┐ ┌────────────────────┐
+├─ feat-77-dark-mode-for-the-dashb│  │ Start work │ │ ↓ Git Pull (No remote) │ │ Add Worktree │ │ Prune finished (1) │
+└─ issue-298-proactive-metrics-coa│  └────────────┘ └────────────────────────┘ └──────────────┘ └────────────────────┘
 ▼ gamma                           │
 └─ gamma-imported [feat/imported] │  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                   │

@@ -126,6 +126,9 @@ pub enum ConfirmAction {
     /// Second-step confirm: the worktree was seen to hold uncommitted work.
     ForceDeleteWorktree(Uuid),
     RemoveRepository(Uuid),
+    /// Prune the listed finished worktrees — exactly the ones the dialog
+    /// named, not whatever is finished by the time it is confirmed.
+    PruneFinished(Vec<Uuid>),
     /// Permanently delete a Claude session's transcript. No undo — the dialog
     /// says so, and that is the design: a trash can nobody empties is clutter.
     DeleteClaudeSession {
@@ -163,6 +166,7 @@ impl ConfirmAction {
             ConfirmAction::DeleteWorktree(_)
             | ConfirmAction::RemoveRepository(_)
             | ConfirmAction::DeleteClaudeSession { .. } => "Delete",
+            ConfirmAction::PruneFinished(_) => "Prune",
             ConfirmAction::SwitchToWindow { .. } => "Switch",
             ConfirmAction::ForceResume { .. } => "Resume anyway",
         }
