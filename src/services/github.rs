@@ -358,7 +358,13 @@ pub async fn list_pull_requests(
 ) -> Result<PullRequests, PullRequestsError> {
     let (auth, viewer) = get_auth_status().await;
     if let Some(error) = PullRequestsError::from_auth(auth) {
-        return Err(error);
+        // A killed probe reads as signed out but is never cached: `gh` did
+        // not say so, and telling a signed-in user to log in would be false.
+        return Err(if auth_answered() {
+            error
+        } else {
+            PullRequestsError::Failed
+        });
     }
     const JSON_FIELDS: &str = "number,title,author,isDraft,headRefName,isCrossRepository,createdAt";
     let mut answers = Vec::new();
@@ -370,9 +376,12 @@ pub async fn list_pull_requests(
         answers.push((code == 0).then_some(stdout));
     }
     let answers: Vec<Option<&str>> = answers.iter().map(Option::as_deref).collect();
-    let mut prs = merge_pull_requests(&answers)?;
-    prs.viewer = viewer;
-    Ok(prs)
+    merge_pull_requests(&answers, viewer)
+}
+
+/// Whether `gh` gave an authentication answer, which is cached once given.
+fn auth_answered() -> bool {
+    state().lock().is_ok_and(|guard| guard.auth.is_some())
 }
 
 /// `pr-review`'s list as `gh` answered it.
@@ -419,8 +428,11 @@ impl PullRequestsError {
 /// The PRs of several `gh pr list` answers, each listed once, newest first.
 /// `None` is a query that exited non-zero; an answer that does not parse
 /// failed as surely. Some failing marks the list incomplete; all failing
-/// is an error.
-fn merge_pull_requests(answers: &[Option<&str>]) -> Result<PullRequests, PullRequestsError> {
+/// is an error. `viewer` is carried onto the list.
+fn merge_pull_requests(
+    answers: &[Option<&str>],
+    viewer: Option<String>,
+) -> Result<PullRequests, PullRequestsError> {
     let mut prs: Vec<GitHubPullRequest> = Vec::new();
     let mut failed = 0;
     for answer in answers {
@@ -442,7 +454,7 @@ fn merge_pull_requests(answers: &[Option<&str>]) -> Result<PullRequests, PullReq
     prs.sort_by_key(|pr| std::cmp::Reverse(pr.created_at));
     Ok(PullRequests {
         prs,
-        viewer: None,
+        viewer,
         incomplete: failed > 0,
     })
 }

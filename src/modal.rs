@@ -951,20 +951,24 @@ impl StartWorkModal {
         if scope != self.scope || self.pull_requests.is_some() {
             return false;
         }
-        self.pull_requests = Some(result.map(|answer| {
-            self.viewer = answer.viewer;
-            answer.prs
-        }));
+        self.pull_requests = Some(match result {
+            Ok(answer) => {
+                self.viewer = answer.viewer;
+                Ok(answer.prs)
+            }
+            Err(error) => Err(error),
+        });
         if self.mode == WorkMode::PrReview {
             self.fill_picker();
         }
         true
     }
 
-    /// Why `pr-review`'s list could not be loaded, once that is known.
+    /// Why the list on screen could not be loaded: only `pr-review`'s
+    /// list can fail this way.
     pub fn pull_requests_error(&self) -> Option<PullRequestsError> {
         match &self.pull_requests {
-            Some(Err(error)) => Some(*error),
+            Some(Err(error)) if self.mode == WorkMode::PrReview => Some(*error),
             _ => None,
         }
     }

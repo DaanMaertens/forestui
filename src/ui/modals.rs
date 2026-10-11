@@ -809,9 +809,7 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     // A list that could not be fetched is not an empty one: it says why
     // instead, so a failure never reads as "you have no PRs".
     let (empty, empty_style) = match modal.pull_requests_error() {
-        Some(error) if modal.mode == WorkMode::PrReview => {
-            (error.message().to_string(), theme::warning())
-        }
+        Some(error) => (error.message().to_string(), theme::warning()),
         _ => (format!("{empty}{mine}"), theme::muted()),
     };
     column.line(frame, widgets::section(section));
