@@ -10,7 +10,7 @@ use crate::event::Severity;
 use crate::event::{AppEvent, BranchList, BranchTarget, EventTx};
 use crate::modal::{
     AddWorktreeModal, Clash, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult,
-    StartWorkConfirmModal, StartWorkModal,
+    PromptTemplatesModal, StartWorkConfirmModal, StartWorkModal,
 };
 use crate::modal::{IntegrationAction, ModalOutcome};
 use crate::models::{CustomClaudeButton, GitHubIssue, Repository, WorkItemLink, Worktree};
@@ -233,6 +233,7 @@ impl App {
             }
             ModalEffect::ShowBlockedIssues(show) => self.set_show_blocked_issues(show),
             ModalEffect::EditTemplate(template) => self.edit_template(template),
+            ModalEffect::EditRepositoryFile(key, file) => self.edit_repository_file(key, file),
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
                 let tx = self.tx.clone();
@@ -534,8 +535,9 @@ impl App {
             Some(Modal::StartWork(_)) => true,
             Some(_) => return,
         };
+        let layers = self.prompt_layers_for(&repo.source_path);
         let template = crate::prompt::resolve(
-            &settings_service::prompts_dir(),
+            &layers.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
             start.item.template(start.mode),
         );
         let modal = StartWorkConfirmModal::new(
@@ -582,9 +584,13 @@ impl App {
             self.jump_to_worktree(repo_id, worktree_id, Some(notice));
             return;
         }
+        let Some(repo) = self.state.find_repository(repo_id) else {
+            return;
+        };
+        let start_work = self.start_work_for(&repo.source_path);
         self.pending_start = Some(PendingStart {
             mode,
-            names: work::names(&self.settings.start_work, mode, issue.number, &issue.title),
+            names: work::names(&start_work, mode, issue.number, &issue.title),
             item: WorkItem::from_issue(&issue),
         });
         self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
@@ -624,9 +630,13 @@ impl App {
             self.jump_to_worktree(repo_id, worktree_id, Some(notice));
             return;
         }
+        let Some(repo) = self.state.find_repository(repo_id) else {
+            return;
+        };
+        let start_work = self.start_work_for(&repo.source_path);
         let names = work::WorktreeNames {
             branch: head_branch.clone(),
-            ..work::names(&self.settings.start_work, WorkMode::PrReview, number, title)
+            ..work::names(&start_work, WorkMode::PrReview, number, title)
         };
         let start = PendingStart {
             mode: WorkMode::PrReview,
@@ -645,7 +655,8 @@ impl App {
         let Some(repo) = self.state.find_repository(repo_id) else {
             return;
         };
-        let Some(names) = work::free_text_names(&self.settings.start_work, &description) else {
+        let start_work = self.start_work_for(&repo.source_path);
+        let Some(names) = work::free_text_names(&start_work, &description) else {
             return;
         };
         let worktrees = &repo.worktrees;
@@ -777,40 +788,38 @@ impl App {
             return;
         };
         let path = repo.source_path.clone();
-        let cached = github::peek_issues(&path, self.settings.start_work.scope);
+        // The settings as last known, re-read so an edit since counts; the
+        // probe below corrects them if the repository turns out different.
+        self.reread_repository_settings(&path);
+        let Some(repo) = self.state.selected_repository() else {
+            return;
+        };
+        let start_work = self.start_work_for(&path);
+        let cached = github::peek_issues(&path, start_work.scope);
         let modal = StartWorkModal::new(
             repo,
             cached.as_ref().map(|(issues, _)| issues.clone()),
-            self.settings.start_work.clone(),
+            start_work,
             self.settings.show_blocked_issues,
         );
         self.modals.push(Modal::StartWork(Box::new(modal)));
-        // Asked on every open rather than cached: a remote can be added or
-        // `gh repo set-default` run between two opens, and nobody waits on
-        // the answer — the modes stay usable until it says otherwise.
-        let tx = self.tx.clone();
-        let probe_path = path.clone();
-        let scope = self.settings.start_work.scope;
-        tokio::spawn(async move {
-            let is_github = github::get_repo_info(&probe_path).await.is_some();
-            tx.send(AppEvent::GitHubChecked {
-                path: probe_path.clone(),
-                is_github,
-            });
-            // Only a GitHub repository has PRs to ask for. Fetched on every
-            // open, like the probe: a review requested a minute ago belongs
-            // in the list.
-            if is_github {
-                let (prs, viewer) = github::list_pull_requests(&probe_path, scope).await;
-                tx.send(AppEvent::PullRequests {
-                    path: probe_path,
-                    prs,
-                    viewer,
-                });
-            }
-        });
+        // Nobody waits on the answer: the modes stay usable until it says
+        // otherwise, and the PRs are fetched once it is in.
+        self.probe_github(path.clone(), true);
         if !matches!(cached, Some((_, true))) {
             self.fetch_issues_for(path);
+        }
+    }
+
+    /// Open the selected repository's settings chooser: its settings file or
+    /// one of its templates. Without a key there is nothing to open; the
+    /// control is drawn disabled then, and the pane says why.
+    pub(super) fn action_repository_settings(&mut self) {
+        if let Some(repo) = self.state.selected_repository()
+            && let Some(Some(key)) = self.repo_key(&repo.source_path)
+        {
+            let picker = PromptTemplatesModal::for_repository(key.clone());
+            self.modals.push(Modal::PromptTemplates(picker));
         }
     }
 
@@ -985,6 +994,7 @@ impl App {
         match action {
             Action::Sync => self.sync(path),
             Action::StartWork => self.action_start_work(),
+            Action::RepositorySettings => self.action_repository_settings(),
             Action::AddWorktree => self.action_add_worktree(),
             Action::Editor => self.open_in_editor(&path),
             Action::Terminal => self.open_in_terminal(&path),
@@ -1050,7 +1060,11 @@ impl App {
                 if let Some(repo_id) = self.state.selection.repository_id
                     && let Some(issue) = self.issues.as_ref().and_then(|i| i.get(index)).cloned()
                 {
-                    let mode = work::mode_for(&issue, &self.settings.start_work.feature_labels);
+                    let labels = self
+                        .state
+                        .find_repository(repo_id)
+                        .map(|repo| self.start_work_for(&repo.source_path).feature_labels);
+                    let mode = work::mode_for(&issue, &labels.unwrap_or_default());
                     self.start_work_on_issue(repo_id, issue, mode);
                 }
             }
@@ -1164,7 +1178,7 @@ impl App {
     /// starts on the text in use. Nothing is read back: the file is the
     /// template, and the next confirm screen reads it afresh.
     fn edit_template(&mut self, template: crate::prompt::Template) {
-        match crate::prompt::ensure_file(&settings_service::prompts_dir(), template) {
+        match crate::prompt::ensure_file(&settings_service::prompts_dir(), template, &[]) {
             Ok(path) => self.open_in_editor_as(
                 &format!("prompts/{}", template.file_name()),
                 &path.to_string_lossy(),
@@ -1202,7 +1216,7 @@ impl App {
 
     /// Open `path` — a directory or a single file — in the default editor:
     /// a terminal editor in an `edit:<name>` window, anything else detached.
-    fn open_in_editor_as(&mut self, name: &str, path: &str) {
+    pub(super) fn open_in_editor_as(&mut self, name: &str, path: &str) {
         let editor = self.settings.default_editor.clone();
 
         if tmux::is_inside_tmux()

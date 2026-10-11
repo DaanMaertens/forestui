@@ -74,10 +74,12 @@ forestui/
 │   │   ├── detail.rs         # Detail-pane content walk (single source of truth)
 │   │   ├── keys.rs           # Keyboard input and the rename fields
 │   │   ├── mouse.rs          # Hit testing, hover, wheel routing, scrollbar
+│   │   ├── repo_settings.rs  # Per-checkout GitHub key and settings overrides
 │   │   └── actions.rs        # What activating a control does; spawned flows
 │   ├── event.rs              # AppEvent + the single event channel
 │   ├── modal.rs              # Modal stack: state, focus model, key handling
 │   ├── models.rs             # Serde models (config file schemas)
+│   ├── repo_settings.rs      # Repository settings: key, merge, pre-filled files
 │   ├── state.rs              # Persisted repositories (.forestui-config.json)
 │   ├── theme.rs              # Colour palette and shared styles
 │   ├── util.rs               # Paths, slugs, relative times, fuzzy branch search
@@ -578,6 +580,16 @@ able to produce a torn file.
 1. Update `Settings` in `src/models.rs` (keep `#[serde(default)]`)
 2. Update `SettingsModal` in `src/modal.rs` and its rendering in `src/ui/modals.rs`
 3. Settings are persisted to `~/.config/forestui/settings.json`
+
+Start work settings and prompt templates can also be overridden per
+repository, under `~/.config/forestui/repos/<owner>/<name>/` (a
+`settings.json` read only for its `start_work` section, plus a `prompts/`
+directory) — never inside a checkout. The key is the `owner/name` `gh`
+resolves, learned in the background, so code that needs Start work settings
+asks `App::start_work_for(path)` and template lookups go through
+`App::prompt_layers_for(path)` (repository, then global, then built-in),
+never `settings.start_work` or `prompts_dir()` directly. A repository with no
+GitHub repository has no key and uses the global settings.
 
 ## Testing
 

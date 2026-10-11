@@ -359,7 +359,7 @@ where
 }
 
 /// Whose issues and PRs Start work lists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     /// Issues assigned to or opened by me; PRs with a review requested from
@@ -389,11 +389,17 @@ impl Naming {
     }
 
     /// `self` with whatever `partial` sets laid over it, so a mode written
-    /// with only a prefix keeps its default pattern, and the other way round.
-    fn overlaid(self, partial: PartialNaming) -> Self {
+    /// with only a prefix keeps its pattern, and the other way round.
+    fn overlaid(&self, partial: &PartialNaming) -> Self {
         Self {
-            branch_prefix: partial.branch_prefix.unwrap_or(self.branch_prefix),
-            name_pattern: partial.name_pattern.unwrap_or(self.name_pattern),
+            branch_prefix: partial
+                .branch_prefix
+                .clone()
+                .unwrap_or_else(|| self.branch_prefix.clone()),
+            name_pattern: partial
+                .name_pattern
+                .clone()
+                .unwrap_or_else(|| self.name_pattern.clone()),
         }
     }
 }
@@ -440,47 +446,61 @@ impl Default for StartWorkSettings {
     }
 }
 
-/// The `start_work` section as a file holds it: any key may be missing.
-#[derive(Default, Deserialize)]
-#[serde(default)]
-struct PartialStartWork {
-    scope: Option<Scope>,
-    feature_labels: Option<Vec<String>>,
-    issue: PartialNaming,
-    feature: PartialNaming,
-    free_feature: PartialNaming,
-    pr_review: PartialPrReviewNaming,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default)]
-struct PartialNaming {
-    branch_prefix: Option<String>,
-    name_pattern: Option<String>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default)]
-struct PartialPrReviewNaming {
-    name_pattern: Option<String>,
-}
-
-impl From<PartialStartWork> for StartWorkSettings {
-    fn from(partial: PartialStartWork) -> Self {
-        let base = Self::default();
+impl StartWorkSettings {
+    /// `self` with whatever `partial` sets laid over it. A key the partial
+    /// leaves out, down to one half of a mode's naming, keeps `self`'s value.
+    ///
+    /// The one merge rule for both layers: a global file over the defaults,
+    /// and a repository's settings over the global ones.
+    pub fn overlaid(&self, partial: &PartialStartWork) -> Self {
         Self {
-            scope: partial.scope.unwrap_or(base.scope),
-            feature_labels: partial.feature_labels.unwrap_or(base.feature_labels),
-            issue: base.issue.overlaid(partial.issue),
-            feature: base.feature.overlaid(partial.feature),
-            free_feature: base.free_feature.overlaid(partial.free_feature),
+            scope: partial.scope.unwrap_or(self.scope),
+            feature_labels: partial
+                .feature_labels
+                .clone()
+                .unwrap_or_else(|| self.feature_labels.clone()),
+            issue: self.issue.overlaid(&partial.issue),
+            feature: self.feature.overlaid(&partial.feature),
+            free_feature: self.free_feature.overlaid(&partial.free_feature),
             pr_review: PrReviewNaming {
                 name_pattern: partial
                     .pr_review
                     .name_pattern
-                    .unwrap_or(base.pr_review.name_pattern),
+                    .clone()
+                    .unwrap_or_else(|| self.pr_review.name_pattern.clone()),
             },
         }
+    }
+}
+
+/// The `start_work` section as a file holds it: any key may be missing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct PartialStartWork {
+    pub scope: Option<Scope>,
+    pub feature_labels: Option<Vec<String>>,
+    pub issue: PartialNaming,
+    pub feature: PartialNaming,
+    pub free_feature: PartialNaming,
+    pub pr_review: PartialPrReviewNaming,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct PartialNaming {
+    pub branch_prefix: Option<String>,
+    pub name_pattern: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct PartialPrReviewNaming {
+    pub name_pattern: Option<String>,
+}
+
+impl From<PartialStartWork> for StartWorkSettings {
+    fn from(partial: PartialStartWork) -> Self {
+        Self::default().overlaid(&partial)
     }
 }
 

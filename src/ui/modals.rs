@@ -1516,11 +1516,17 @@ fn theme_picker(frame: &mut Frame, modal: &ThemePickerModal, area: Rect, hits: &
 // ------------------------------------------------------- Prompt templates
 
 fn prompt_templates(frame: &mut Frame, modal: &PromptTemplatesModal, area: Rect, hits: &mut Hits) {
-    let templates = crate::prompt::Template::ALL;
+    let rows = modal.rows();
     // Where the files are, a gap, the list, a gap, and the hint.
-    let rect = widgets::centered_rect(68, CHROME + templates.len() as u16 + 4, area);
-    let mut column = dialog(frame, rect, "Prompt Templates", theme::title());
-    let dir = crate::services::settings::prompts_dir();
+    let rect = widgets::centered_rect(68, CHROME + rows.len() as u16 + 4, area);
+    let (title, dir) = match &modal.repo {
+        Some(key) => (
+            "Repository Settings",
+            key.dir(&crate::services::settings::repos_dir()),
+        ),
+        None => ("Prompt Templates", crate::services::settings::prompts_dir()),
+    };
+    let mut column = dialog(frame, rect, title, theme::title());
     let dir = match dir.strip_prefix(crate::util::home_dir()) {
         Ok(relative) => format!("~/{}", relative.display()),
         Err(_) => dir.display().to_string(),
@@ -1528,7 +1534,7 @@ fn prompt_templates(frame: &mut Frame, modal: &PromptTemplatesModal, area: Rect,
     column.text(frame, format!("Files in {dir}"), theme::muted());
     column.gap();
 
-    for (row, template) in templates.iter().enumerate() {
+    for (row, file) in rows.iter().enumerate() {
         let Some(line_rect) = column.take(1) else {
             break;
         };
@@ -1538,16 +1544,24 @@ fn prompt_templates(frame: &mut Frame, modal: &PromptTemplatesModal, area: Rect,
         } else {
             theme::secondary()
         };
+        // A repository's templates sit in `prompts/`; the global list is
+        // already inside it.
+        let file_name = match (&modal.repo, file) {
+            (None, crate::repo_settings::ConfigFile::Template(template)) => {
+                template.file_name().to_string()
+            }
+            _ => file.relative_path(),
+        };
         let label = format!(
             "{:<width$}",
-            template.label(),
+            file.label(),
             // One column spare, so the file name never touches the border.
-            width = (line_rect.width as usize).saturating_sub(4 + template.file_name().len())
+            width = (line_rect.width as usize).saturating_sub(4 + file_name.len())
         );
         let line = Line::from(vec![
             Span::styled(if selected { " ▸ " } else { "   " }.to_string(), style),
             Span::styled(label, style),
-            Span::styled(template.file_name(), style.patch(theme::muted())),
+            Span::styled(file_name, style.patch(theme::muted())),
         ]);
         frame.render_widget(Paragraph::new(line), line_rect);
         hits.push((line_rect, row, ModalClick::Activate));
@@ -1555,7 +1569,10 @@ fn prompt_templates(frame: &mut Frame, modal: &PromptTemplatesModal, area: Rect,
     column.gap();
     column.text(
         frame,
-        "↑/↓ choose · Enter edit, from the default if new · Esc back",
+        match modal.repo {
+            Some(_) => "↑/↓ choose · Enter edit, from the global one if new · Esc back",
+            None => "↑/↓ choose · Enter edit, from the default if new · Esc back",
+        },
         theme::muted(),
     );
 }

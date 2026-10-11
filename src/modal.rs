@@ -15,6 +15,7 @@ use crate::models::{
 };
 use crate::picker::SearchPicker;
 use crate::prompt::{self, Template};
+use crate::repo_settings::{ConfigFile, RepoKey};
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
 use crate::util;
 use crate::work::{self, ItemEntry, WorkItem, WorkMode, WorktreeNames};
@@ -80,6 +81,9 @@ pub enum ModalEffect {
     /// Open a global prompt template in an editor, writing it from its
     /// default first if it has no file yet.
     EditTemplate(Template),
+    /// Open one of a repository's settings files in an editor, writing it
+    /// from the global version first if it has no file yet.
+    EditRepositoryFile(RepoKey, ConfigFile),
 }
 
 /// What the integration dialog can do, given what is currently on disk.
@@ -860,6 +864,24 @@ impl StartWorkModal {
             self.issues = Some(issues);
             self.fill_picker();
         }
+    }
+
+    /// Take the settings in effect once the repository's own are known. A
+    /// different scope makes the loaded lists the wrong ones, so they are
+    /// dropped for the refetch to fill; different feature labels re-split
+    /// the issues already here. The same settings change nothing, so a
+    /// half-typed query survives the usual answer.
+    pub fn set_start_work(&mut self, start_work: StartWorkSettings) {
+        if start_work == self.start_work {
+            return;
+        }
+        if start_work.scope != self.start_work.scope {
+            self.issues = None;
+            self.pull_requests = None;
+        }
+        self.start_work = start_work;
+        self.picker = None;
+        self.fill_picker();
     }
 
     /// Fill `pr-review`'s list once the PRs have loaded; kept, like the
@@ -1716,13 +1738,17 @@ impl Default for ThemePickerModal {
 
 // ------------------------------------------------------- Prompt templates
 
-/// The global prompt templates, one row each. Enter opens the highlighted
-/// one in an editor and the list stays up, so several can be edited in one
-/// visit; the files are saved by the editor, not by the Settings dialog.
+/// The settings files a picker opens, one row each: the global prompt
+/// templates from Settings, or — for a repository — its settings file and
+/// its templates. Enter opens the highlighted one in an editor and the list
+/// stays up, so several can be edited in one visit; the files are saved by
+/// the editor, not by a dialog.
 #[derive(Debug, Default)]
 pub struct PromptTemplatesModal {
-    /// Highlighted row, an index into [`Template::ALL`].
+    /// Highlighted row, an index into [`Self::rows`].
     pub index: usize,
+    /// The repository whose files are listed; `None` for the global ones.
+    pub repo: Option<RepoKey>,
 }
 
 impl PromptTemplatesModal {
@@ -1730,26 +1756,50 @@ impl PromptTemplatesModal {
         Self::default()
     }
 
-    pub fn selected(&self) -> Template {
-        Template::ALL[self.index]
+    /// The chooser behind a repository's **Repository settings** control.
+    pub fn for_repository(repo: RepoKey) -> Self {
+        Self {
+            index: 0,
+            repo: Some(repo),
+        }
+    }
+
+    /// The files listed, in order. The global settings are edited in the
+    /// Settings dialog itself, so only a repository lists a settings file.
+    pub fn rows(&self) -> Vec<ConfigFile> {
+        let settings = self.repo.as_ref().map(|_| ConfigFile::Settings);
+        settings
+            .into_iter()
+            .chain(Template::ALL.map(ConfigFile::Template))
+            .collect()
+    }
+
+    pub fn selected(&self) -> ConfigFile {
+        let rows = self.rows();
+        rows.get(self.index).copied().unwrap_or(rows[0])
     }
 
     pub fn select(&mut self, index: usize) {
-        self.index = index.min(Template::ALL.len() - 1);
+        self.index = index.min(self.rows().len() - 1);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> ModalOutcome {
         if is_escape(key) {
             return ModalOutcome::Close;
         }
-        let len = Template::ALL.len();
+        let len = self.rows().len();
         match key.code {
             KeyCode::Up | KeyCode::BackTab => self.select(wrap_dec(self.index, len)),
             KeyCode::Down | KeyCode::Tab => self.select((self.index + 1) % len),
             KeyCode::Home => self.select(0),
             KeyCode::End => self.select(len - 1),
             KeyCode::Enter => {
-                return ModalOutcome::Effect(ModalEffect::EditTemplate(self.selected()));
+                let effect = match (&self.repo, self.selected()) {
+                    (Some(repo), file) => ModalEffect::EditRepositoryFile(repo.clone(), file),
+                    (None, ConfigFile::Template(template)) => ModalEffect::EditTemplate(template),
+                    (None, ConfigFile::Settings) => return ModalOutcome::None,
+                };
+                return ModalOutcome::Effect(effect);
             }
             _ => {}
         }
