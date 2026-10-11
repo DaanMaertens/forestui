@@ -17,7 +17,10 @@ forestui brings Git worktree management to the terminal with a TUI built on
 - **Session Management**: See which sessions are live in a tmux window,
   rename, pin, and delete sessions, and read each conversation's branch,
   token totals, and estimated cost off its card
-- **GitHub Issues**: Create a worktree straight from an issue assigned to you
+- **Start work**: Go from an issue, a pull request or a one-line idea to a
+  worktree with Claude already running in it, primed with a prompt
+- **Finished worktrees**: See which worktrees' issues or PRs are done, and
+  prune them with their branches in one go
 - **Multi-Forest Support**: Manage multiple forest directories via CLI argument
 - **tmux Native**: Runs inside tmux for a cohesive terminal experience
 - **Single Binary**: No runtime, no virtualenv — one static executable
@@ -232,6 +235,57 @@ forestui ~/personal  # Uses ~/personal/.forestui-config.json
 User preferences (editor, theme, branch prefix, custom Claude buttons) are
 stored globally in `~/.config/forestui/settings.json`.
 
+### Start work
+
+`s` (or **Start work** at the top of a repository's pane) starts a piece of
+work in three steps:
+
+1. **Pick a work mode**: `issue`, `feature` or `pr-review`. Open issues
+   carrying a feature label (`enhancement` by default) are listed under
+   `feature`, every other open issue under `issue`.
+2. **Pick a work item** from a fuzzy-searchable list. By default it holds
+   only your items: issues assigned to or opened by you, PRs with a review
+   requested from you or opened by you. Tick **Not just mine** to list every
+   open one for this pick. The top of the `feature` list starts a
+   **free-text feature** instead, from a description you type. It stays
+   local and never creates a GitHub issue.
+3. **Confirm** the worktree name, branch, base branch (with **Pull repo
+   before creating**) and the filled-in prompt. **Edit prompt** opens the
+   prompt in `$EDITOR` for this launch only, and **YOLO** skips permission
+   prompts. **Launch** creates the worktree and starts Claude in it with the
+   prompt as its first message.
+
+Each worktree remembers the work item it was started for. Picking that item
+again goes to the existing worktree, and to its running Claude window if it
+has one, rather than creating a second one. A `pr-review` worktree checks out
+the PR's own branch. Someone else's PR gets a review-and-report prompt; your
+own gets a self-review that waits for your go-ahead before fixing anything.
+
+The issue cards' **Start work** opens the same flow with that issue already
+picked. A repository without a GitHub remote offers free-text features only.
+
+#### Prompt templates
+
+Each prompt comes from a Markdown template, with `{number}`, `{title}`,
+`{branch}`, `{worktree}` and `{repo}` filled in. A free-text feature also gets
+`{body}`, the text you typed. Issue and PR prompts tell Claude to read the
+item with `gh` instead, so it sees the current text and comments. The
+templates are `issue.md`, `feature.md`, `free-feature.md`,
+`pr-review-others.md` and `pr-review-own.md`. Each one that has no file yet
+uses the built-in default. Settings → **Edit Prompt Templates...** lists them;
+picking one opens it in your editor under `~/.config/forestui/prompts/`,
+writing the default first.
+
+#### Repository settings
+
+A repository's **Repository settings** control overrides the Start work
+settings and templates for that repository alone, in
+`~/.config/forestui/repos/<owner>/<name>/` (a `settings.json` read only for
+its `start_work` section, plus a `prompts/` directory). Nothing is written
+inside a checkout. The key is the `owner/name` that `gh` resolves for the
+clone (see `gh repo set-default`). Each file is created from the global
+version on first use.
+
 ### Pruning finished worktrees
 
 A worktree whose issue is closed, whose pull request is merged or closed, or
@@ -292,6 +346,7 @@ Press `S` in the app to open the settings modal.
 
 - `scope` — `mine` lists issues assigned to or opened by you and PRs with a
   review requested from you or opened by you; `all` lists every open one.
+  The picker's **Not just mine** checkbox switches it for a single pick.
 - `feature_labels` — an issue carrying any of these (case-insensitive) is a
   `feature`; every other open issue is an `issue`.
 - Per work mode, the worktree is named by `name_pattern` with `{number}` and
