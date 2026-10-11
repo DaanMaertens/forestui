@@ -11,14 +11,20 @@ forestui brings Git worktree management to the terminal with a TUI built on
 ## Features
 
 - **Repository Management**: Add and track multiple Git repositories
-- **Worktree Operations**: Create, rename, archive, and delete worktrees
+- **Worktree Operations**: Create, rename, archive, and delete worktrees;
+  worktrees made outside forestui (`git worktree add`) show up on their own
 - **TUI Editor Integration**: Opens TUI editors (vim, nvim, helix, etc.) in tmux windows
-- **Claude Code Integration**: Track and resume Claude Code sessions per worktree
-- **Session Management**: See which sessions are live in a tmux window,
-  rename, pin, and delete sessions, and read each conversation's branch,
+- **Claude Code Integration**: Track and resume Claude Code sessions per
+  worktree. Each one runs inside your shell, so Ctrl-Z, a crash or a refused
+  launch leaves a prompt instead of a dead window
+- **Session Management**: See which sessions are live, in a tmux window
+  or elsewhere on the machine; rename, pin, and delete sessions, and read each conversation's branch,
   token totals, and estimated cost off its card
 - **Start work**: Go from an issue, a pull request or a one-line idea to a
-  worktree with Claude already running in it, primed with a prompt
+  worktree with Claude already running in it, primed with a prompt — or
+  just make a plain worktree
+- **Blocked issues**: Issues blocked by another open issue stay out of
+  Start work's lists until you ask for them
 - **Finished worktrees**: See which worktrees' issues or PRs are done, and
   prune them with their branches in one go
 - **Multi-Forest Support**: Manage multiple forest directories via CLI argument
@@ -132,6 +138,23 @@ Claude Code has its own *Enable Remote Control for all sessions* in
 `/config`; that one reaches every `claude` on the machine, this one only the
 sessions forestui starts.
 
+### Claude runs inside your shell
+
+A tmux window forestui opens for Claude runs your shell, and Claude is a job
+of that shell rather than the window's only process. So nothing is lost when
+Claude stops:
+
+- **Ctrl-Z** suspends Claude to a prompt; `fg` resumes it.
+- **A crash or a refused launch** leaves a prompt with the command in your
+  history, so the up arrow retries it.
+- **A clean exit** — Ctrl-D twice, Ctrl-C twice or `/exit` — closes the
+  window and returns you to forestui.
+
+Your shell starts the same way an interactive shell always does, with your
+own startup files. zsh, bash and POSIX shells (sh, dash, ksh) get this
+directly; other shells, such as fish, get the command typed into them
+instead, and their window drops to a prompt when Claude exits.
+
 ## Usage
 
 ```bash
@@ -159,6 +182,7 @@ pane, `↑`/`↓` move and `Enter` activates.
 |-----|--------|
 | `Tab` | Switch focus between sidebar and detail pane |
 | `↑` / `↓` | Move within the focused pane |
+| `PgUp` / `PgDn` | Page the sidebar, or scroll the detail pane |
 | `Enter` | Select a row / activate the focused control |
 | `a` | Add repository |
 | `s` | Start work (an issue, a feature, a PR review, or a plain worktree) |
@@ -172,7 +196,8 @@ pane, `↑`/`↓` move and `Enter` activates.
 | `d` | Delete |
 | `S` | Settings |
 | `r` | Refresh |
-| `q` | Quit |
+| `q` / `Ctrl+C` | Quit |
+| `K` / `J` | Move a pinned session up or down (cursor on its card) |
 
 In modals: `Tab` / `Shift+Tab` move between fields, `Enter` activates, `Esc`
 cancels. Confirmation dialogs also accept `y` and `n`. The custom-buttons
@@ -191,6 +216,8 @@ crosses them, so what is clickable is visible rather than guessed at:
 - **The scroll wheel** scrolls whichever pane the pointer is over, whether or
   not it holds the keyboard focus.
 - **The scrollbar** can be dragged, and clicking its track pages to that point.
+- **Hovering a sidebar row** too long for the sidebar shows its full text in
+  a box over the detail pane.
 
 ### If tmux's prefix key stops working
 
@@ -211,6 +238,19 @@ can be turned off:
 back on exit, including after a run that was killed before it could — but if
 your own tmux config turns it on, it stays on and the flag cannot help with
 that half.
+
+### Worktrees
+
+git, not forestui's config, decides which worktrees exist. forestui compares
+each repository against `git worktree list` on startup, when you select it,
+when you come back to its window and every 30 seconds, so a worktree made
+or removed outside forestui — by hand or by an agent — shows up or goes away
+on its own. The config only remembers what forestui adds: names, the
+archived flag and the order.
+
+Deleting a worktree with uncommitted changes asks a second time, showing
+what would be lost (`3 modified, 1 untracked`), behind an explicit **Delete
+anyway**.
 
 ### TUI Editor Integration
 
@@ -239,9 +279,11 @@ stored globally in `~/.config/forestui/settings.json`.
 `s` (or **Start work** at the top of a repository's pane) starts a piece of
 work in three steps:
 
-1. **Pick a work mode**: `issue`, `feature` or `pr-review`. Open issues
-   carrying a feature label (`enhancement` by default) are listed under
-   `feature`, every other open issue under `issue`.
+![Start work's issue picker, with one blocked issue hidden](doc/screenshot_start_work.png)
+
+1. **Pick a work mode**: `issue`, `feature`, `pr-review` or `worktree`. Open
+   issues carrying a feature label (`enhancement` by default) are listed
+   under `feature`, every other open issue under `issue`.
 2. **Pick a work item** from a fuzzy-searchable list. By default it holds
    only your items: issues assigned to or opened by you, PRs with a review
    requested from you or opened by you. Tick **Not just mine** to list every
@@ -260,9 +302,22 @@ has one, rather than creating a second one. A `pr-review` worktree checks out
 the PR's own branch. Someone else's PR gets a review-and-report prompt; your
 own gets a self-review that waits for your go-ahead before fixing anything.
 
+The `worktree` mode skips the work item and the prompt: it asks for a
+worktree name and a new or existing branch, creates the worktree, and starts
+nothing in it. It needs no GitHub remote.
+
 Selecting a repository fetches its open issues in the background, so the
 `issue` and `feature` lists are usually filled by the time you open them. A
-repository without a GitHub remote offers free-text features only.
+repository without a GitHub remote offers free-text features and plain
+worktrees only.
+
+#### Blocked issues
+
+An issue that GitHub records as blocked by another *open* issue is hidden
+from the `issue` and `feature` lists, and the count line above the list says
+how many were left out (`2 blocked hidden`). Tick **Show blocked** to list
+them, each marked with what blocks it (`blocked by #12`). The choice is
+remembered across runs as `show_blocked_issues`.
 
 #### Prompt templates
 
@@ -329,6 +384,7 @@ Settings are stored in `~/.config/forestui/settings.json`:
     }
   ],
   "remote_control": true,
+  "show_blocked_issues": false,
   "start_work": {
     "scope": "mine",
     "feature_labels": ["enhancement"],
