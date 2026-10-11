@@ -158,7 +158,7 @@ fn a_failed_edit_still_removes_the_file() {
 fn without_a_file_every_template_is_its_built_in_default() {
     let dir = tempfile::tempdir().unwrap();
     for template in Template::ALL {
-        let resolved = resolve(dir.path(), template);
+        let resolved = resolve(&[dir.path()], template);
         assert_eq!(resolved.text, template.default_text(), "{template:?}");
         assert_eq!(resolved.warning, None, "{template:?}");
     }
@@ -169,12 +169,12 @@ fn a_template_file_is_used_instead_of_the_default() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("issue.md"), "Fix #{number} my way").unwrap();
 
-    let resolved = resolve(dir.path(), Template::Issue);
+    let resolved = resolve(&[dir.path()], Template::Issue);
     assert_eq!(resolved.text, "Fix #{number} my way");
     assert_eq!(resolved.warning, None);
     // Each template has its own file: the others keep their defaults.
     assert_eq!(
-        resolve(dir.path(), Template::Feature).text,
+        resolve(&[dir.path()], Template::Feature).text,
         FEATURE_TEMPLATE
     );
 }
@@ -203,7 +203,7 @@ fn an_unreadable_file_falls_back_to_the_default_with_a_warning() {
     std::fs::create_dir(dir.path().join("issue.md")).unwrap();
 
     for template in [Template::Feature, Template::Issue] {
-        let resolved = resolve(dir.path(), template);
+        let resolved = resolve(&[dir.path()], template);
         assert_eq!(resolved.text, template.default_text(), "{template:?}");
         let warning = resolved.warning.expect("a warning");
         assert!(warning.contains(template.file_name()), "{warning}");
@@ -217,7 +217,7 @@ fn an_empty_file_falls_back_to_the_default_with_a_warning() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("pr-review-own.md"), " \n\n").unwrap();
 
-    let resolved = resolve(dir.path(), Template::PrReviewOwn);
+    let resolved = resolve(&[dir.path()], Template::PrReviewOwn);
     assert_eq!(resolved.text, PR_REVIEW_OWN_TEMPLATE);
     assert!(resolved.warning.is_some());
 }
@@ -227,7 +227,7 @@ fn ensuring_a_file_creates_it_from_the_default_and_its_directory() {
     let dir = tempfile::tempdir().unwrap();
     let prompts = dir.path().join("prompts");
 
-    let path = ensure_file(&prompts, Template::FreeFeature).unwrap();
+    let path = ensure_file(&prompts, Template::FreeFeature, &[]).unwrap();
     assert_eq!(path, prompts.join("free-feature.md"));
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
@@ -241,6 +241,57 @@ fn ensuring_a_file_never_overwrites_one_that_exists() {
     let path = dir.path().join("issue.md");
     std::fs::write(&path, "mine").unwrap();
 
-    assert_eq!(ensure_file(dir.path(), Template::Issue).unwrap(), path);
+    assert_eq!(ensure_file(dir.path(), Template::Issue, &[]).unwrap(), path);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "mine");
+}
+
+#[test]
+fn a_repository_template_overrides_the_global_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (repo, global) = (dir.path().join("repo"), dir.path().join("global"));
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&global).unwrap();
+    std::fs::write(repo.join("issue.md"), "repo issue").unwrap();
+    std::fs::write(global.join("issue.md"), "global issue").unwrap();
+    std::fs::write(global.join("feature.md"), "global feature").unwrap();
+    let layers = [repo.as_path(), global.as_path()];
+
+    assert_eq!(resolve(&layers, Template::Issue).text, "repo issue");
+    // A template the repository leaves alone is the global one, then the
+    // built-in default.
+    assert_eq!(resolve(&layers, Template::Feature).text, "global feature");
+    assert_eq!(
+        resolve(&layers, Template::PrReviewOwn).text,
+        PR_REVIEW_OWN_TEMPLATE
+    );
+}
+
+#[test]
+fn an_unusable_repository_template_falls_back_to_the_global_one_with_a_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let (repo, global) = (dir.path().join("repo"), dir.path().join("global"));
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&global).unwrap();
+    std::fs::write(repo.join("issue.md"), "").unwrap();
+    std::fs::write(global.join("issue.md"), "global issue").unwrap();
+
+    let resolved = resolve(&[repo.as_path(), global.as_path()], Template::Issue);
+    assert_eq!(resolved.text, "global issue");
+    let warning = resolved.warning.expect("a warning");
+    assert!(warning.contains("repo/issue.md"), "{warning}");
+    assert!(
+        warning.contains("global/issue.md"),
+        "names the one used: {warning}"
+    );
+}
+
+#[test]
+fn ensuring_a_file_prefills_it_from_the_layers_below() {
+    let dir = tempfile::tempdir().unwrap();
+    let (repo, global) = (dir.path().join("repo"), dir.path().join("global"));
+    std::fs::create_dir_all(&global).unwrap();
+    std::fs::write(global.join("issue.md"), "global issue").unwrap();
+
+    let path = ensure_file(&repo, Template::Issue, &[global.as_path()]).unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "global issue");
 }

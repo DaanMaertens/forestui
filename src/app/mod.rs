@@ -10,6 +10,7 @@ mod actions;
 pub mod detail;
 mod keys;
 mod mouse;
+mod repo_settings;
 pub mod worktree_sync;
 
 pub use detail::{Action, DetailItem, Field};
@@ -146,7 +147,11 @@ pub struct App {
     /// changes arrive far faster than the subprocess chains behind these
     /// panels; without the guard, bouncing across the sidebar stacks
     /// concurrent duplicate fetches for identical results.
-    issues_in_flight: std::collections::HashSet<String>,
+    issues_in_flight: std::collections::HashSet<(String, crate::models::Scope)>,
+    /// What is known of each checkout's repository settings, by path.
+    repos: std::collections::HashMap<String, repo_settings::RepoLookup>,
+    /// Paths a selection has asked `gh` about and not had an answer for.
+    repo_probes: std::collections::HashSet<String>,
     sessions_in_flight: std::collections::HashSet<String>,
     /// Worktree scans and the changes they must not undo; see
     /// [`worktree_sync`].
@@ -284,6 +289,8 @@ impl App {
             last_issue_refresh: Instant::now(),
             should_quit: false,
             issues_in_flight: std::collections::HashSet::new(),
+            repos: std::collections::HashMap::new(),
+            repo_probes: std::collections::HashSet::new(),
             sessions_in_flight: std::collections::HashSet::new(),
             worktree_sync: worktree_sync::WorktreeSync::default(),
             last_worktree_scan: Instant::now(),
@@ -845,15 +852,30 @@ impl App {
         self.scan_live_sessions();
 
         if is_repository {
-            match github::peek_issues(&path, self.settings.start_work.scope) {
-                // Fresh enough to stand on its own; the 300s tick refreshes.
-                Some((issues, true)) => self.issues = Some(issues),
-                // Stale content beats a spinner: render it and refresh behind.
-                Some((issues, false)) => {
-                    self.issues = Some(issues);
-                    self.fetch_issues();
-                }
-                None => self.fetch_issues(),
+            // Read before the issues, whose scope they may set.
+            if self.repo_key(&path).is_some() {
+                self.reread_repository_settings(&path);
+            } else {
+                self.probe_github(path.clone(), false);
+            }
+            self.load_issues(&path);
+        }
+    }
+
+    /// Show the repository pane's issues for `path`: the cached list for the
+    /// scope in effect, refreshed behind it when stale or missing.
+    fn load_issues(&mut self, path: &str) {
+        match github::peek_issues(path, self.start_work_for(path).scope) {
+            // Fresh enough to stand on its own; the 300s tick refreshes.
+            Some((issues, true)) => self.issues = Some(issues),
+            // Stale content beats a spinner: render it and refresh behind.
+            Some((issues, false)) => {
+                self.issues = Some(issues);
+                self.fetch_issues_for(path.to_string());
+            }
+            None => {
+                self.issues = None;
+                self.fetch_issues_for(path.to_string());
             }
         }
     }
@@ -870,14 +892,18 @@ impl App {
     pub(super) fn fetch_issues_for(&mut self, path: String) {
         // One fetch per path at a time — each one is a chain of gh
         // subprocesses and possibly a network call for an identical result.
-        if !self.issues_in_flight.insert(path.clone()) {
+        let scope = self.start_work_for(&path).scope;
+        if !self.issues_in_flight.insert((path.clone(), scope)) {
             return;
         }
         let tx = self.tx.clone();
-        let scope = self.settings.start_work.scope;
         tokio::spawn(async move {
             let issues = github::list_issues(&path, ISSUE_LIMIT, scope).await;
-            tx.send(AppEvent::Issues { path, issues });
+            tx.send(AppEvent::Issues {
+                path,
+                scope,
+                issues,
+            });
         });
     }
 
@@ -1155,8 +1181,17 @@ impl App {
                     Severity::Error,
                 ),
             },
-            AppEvent::Issues { path, issues } => {
-                self.issues_in_flight.remove(&path);
+            AppEvent::Issues {
+                path,
+                scope,
+                issues,
+            } => {
+                self.issues_in_flight.remove(&(path.clone(), scope));
+                // Listed for a scope the repository's settings have since
+                // replaced; the refetch for the new one is on its way.
+                if scope != self.start_work_for(&path).scope {
+                    return;
+                }
                 if let Some(Modal::StartWork(flow)) = self.modals.last_mut()
                     && flow.repo_path == path
                 {
@@ -1182,16 +1217,11 @@ impl App {
                     }
                 }
             }
-            AppEvent::GitHubChecked { path, is_github } => {
-                // The flow may be beneath its confirm screen by now.
-                for modal in &mut self.modals {
-                    if let Modal::StartWork(flow) = modal
-                        && flow.repo_path == path
-                    {
-                        flow.set_github(is_github);
-                    }
-                }
-            }
+            AppEvent::GitHubChecked {
+                path,
+                repo,
+                for_start_work,
+            } => self.on_github_checked(path, repo, for_start_work),
             AppEvent::Meta(meta) => {
                 if meta.path == self.meta.path {
                     self.meta = *meta;
@@ -1445,6 +1475,13 @@ impl App {
                 self.refresh_visible_sessions();
                 self.scan_live_sessions();
                 self.scan_all_worktrees();
+                // The editor may have just saved this repository's settings.
+                if self.state.selection.is_repository()
+                    && let Some(path) = self.state.selected_path()
+                    && self.repo_key(&path).is_some()
+                {
+                    self.reread_repository_settings(&path);
+                }
             }
             _ => {}
         }

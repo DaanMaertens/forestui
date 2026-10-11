@@ -103,8 +103,12 @@ pub enum AppEvent {
         result: Result<(), String>,
     },
     /// GitHub issues for a repository finished loading.
+    /// `scope` is the one they were listed for: a repository's own settings
+    /// can change it while the fetch runs, and the list is then not the one
+    /// wanted.
     Issues {
         path: String,
+        scope: crate::models::Scope,
         issues: Vec<GitHubIssue>,
     },
     /// Start work's `pr-review` list finished loading: the open PRs that are
@@ -115,9 +119,16 @@ pub enum AppEvent {
         prs: Vec<crate::models::GitHubPullRequest>,
         viewer: Option<String>,
     },
-    /// Start work asked `gh` whether a checkout resolves to a GitHub
-    /// repository; without one, only a free-text feature can be started.
-    GitHubChecked { path: String, is_github: bool },
+    /// `gh` was asked which GitHub repository a checkout resolves to:
+    /// `repo` keys its repository settings, and without one only a
+    /// free-text feature can be started. `for_start_work` when Start work
+    /// asked, which then wants the PRs for the scope that turns out to be in
+    /// effect.
+    GitHubChecked {
+        path: String,
+        repo: Option<crate::repo_settings::RepoKey>,
+        for_start_work: bool,
+    },
     /// Detail-pane header data finished loading.
     Meta(Box<DetailMeta>),
     /// Branch and remote lists finished loading.

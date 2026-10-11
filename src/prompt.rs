@@ -83,44 +83,54 @@ pub struct Resolved {
     pub warning: Option<String>,
 }
 
-/// `template` as `dir` has it, or its built-in default.
+/// `template` from the first of `layers` with a usable file for it — a
+/// repository's prompts, then the global ones — or its built-in default.
 ///
 /// A missing file is the normal case and says nothing. A file that is there
-/// but unusable — unreadable, not UTF-8, or blank — also gives the default,
-/// since a broken template must not stop a launch, but with a warning: the
-/// user wrote that file and expects it to be used.
-pub fn resolve(dir: &Path, template: Template) -> Resolved {
-    let path = dir.join(template.file_name());
-    let why = match std::fs::read_to_string(&path) {
-        Ok(text) if text.trim().is_empty() => Some("is empty".to_string()),
-        Ok(text) => {
-            return Resolved {
-                text,
-                warning: None,
-            };
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => Some(format!("could not be read ({e})")),
-    };
+/// but unusable — unreadable, not UTF-8, or blank — falls through to the
+/// next layer too, since a broken template must not stop a launch, but with
+/// a warning: the user wrote that file and expects it to be used.
+pub fn resolve(layers: &[&Path], template: Template) -> Resolved {
+    let mut problems = Vec::new();
+    for dir in layers {
+        let path = dir.join(template.file_name());
+        let why = match std::fs::read_to_string(&path) {
+            Ok(text) if text.trim().is_empty() => "is empty".to_string(),
+            Ok(text) => {
+                return Resolved {
+                    warning: warning(&problems, &path.display().to_string()),
+                    text,
+                };
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => format!("could not be read ({e})"),
+        };
+        problems.push(format!("{} {why}", path.display()));
+    }
     Resolved {
         text: template.default_text().to_string(),
-        warning: why.map(|why| {
-            format!(
-                "Prompt template {} {why}; using the built-in default",
-                path.display()
-            )
-        }),
+        warning: warning(&problems, "the built-in default"),
     }
 }
 
-/// The path of `template`'s file in `dir`, written from the default first
-/// if it is not there yet — so the editor opens on the text in use rather
-/// than on an empty file. A file that exists is never touched.
-pub fn ensure_file(dir: &Path, template: Template) -> std::io::Result<PathBuf> {
+fn warning(problems: &[String], used: &str) -> Option<String> {
+    (!problems.is_empty()).then(|| format!("Prompt template {}; using {used}", problems.join(", ")))
+}
+
+/// The path of `template`'s file in `dir`, written first if it is not there
+/// yet with the text `fallbacks` give it — the global template for a
+/// repository's, the built-in default for a global one — so the editor
+/// opens on the text in use rather than on an empty file. A file that
+/// exists is never touched.
+pub fn ensure_file(
+    dir: &Path,
+    template: Template,
+    fallbacks: &[&Path],
+) -> std::io::Result<PathBuf> {
     let path = dir.join(template.file_name());
     if !path.exists() {
         std::fs::create_dir_all(dir)?;
-        crate::util::write_atomically(&path, template.default_text())?;
+        crate::util::write_atomically(&path, &resolve(fallbacks, template).text)?;
     }
     Ok(path)
 }

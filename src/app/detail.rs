@@ -44,6 +44,8 @@ pub enum Action {
     /// An issue card's Start work: the confirm screen for that issue, by its
     /// position in the whole loaded list — hidden issues included.
     StartWorkOnIssue(usize),
+    /// Choose one of the repository's settings files to open in an editor.
+    RepositorySettings,
     RemoveRepository,
     Archive,
     Unarchive,
@@ -265,13 +267,37 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
 
     nodes.push(DetailNode::Rule);
     nodes.push(DetailNode::Section("MANAGE"));
+    // Settings are keyed by the GitHub repository, so without one the
+    // control has nothing to open; it keeps its slot, drawn disabled, and
+    // the line above says why.
+    let settings = match app.repo_key(path) {
+        Some(Some(key)) => {
+            text(nodes, format!("Settings for {key}"), theme::muted());
+            ControlSpec::new(
+                Action::RepositorySettings,
+                "Repository settings",
+                theme::Variant::Normal,
+            )
+        }
+        known => {
+            let why = match known {
+                Some(_) => "No GitHub repository: the global settings apply",
+                None => "Looking up the GitHub repository...",
+            };
+            text(nodes, why, theme::muted());
+            ControlSpec::disabled(Action::RepositorySettings, "Repository settings")
+        }
+    };
     controls(
         nodes,
-        vec![ControlSpec::new(
-            Action::RemoveRepository,
-            "Remove Repository",
-            theme::Variant::Destructive,
-        )],
+        vec![
+            settings,
+            ControlSpec::new(
+                Action::RemoveRepository,
+                "Remove Repository",
+                theme::Variant::Destructive,
+            ),
+        ],
     );
     bottom_padding(nodes);
 }
@@ -638,7 +664,13 @@ fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
     let show_blocked = app.settings.show_blocked_issues;
     nodes.push(DetailNode::Blank);
     nodes.push(DetailNode::IssuesHeader {
-        title: issues_header(app.settings.start_work.scope),
+        title: issues_header(
+            app.state
+                .selected_repository()
+                .map_or(app.settings.start_work.scope, |repo| {
+                    app.start_work_for(&repo.source_path).scope
+                }),
+        ),
         glyph: match app.issues {
             Some(_) => '↻',
             None => SPINNER[app.spinner_index % SPINNER.len()],

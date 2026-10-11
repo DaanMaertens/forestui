@@ -71,6 +71,22 @@ pub fn prompts_dir() -> PathBuf {
         .join("prompts")
 }
 
+/// Where repository settings live: `repos/<owner>/<name>/` beside the
+/// settings file. Never inside a repository — see [`crate::repo_settings`].
+pub fn repos_dir() -> PathBuf {
+    #[cfg(test)]
+    return std::env::temp_dir().join(format!(
+        "forestui-test-repos-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    #[cfg(not(test))]
+    crate::util::home_dir()
+        .join(".config")
+        .join("forestui")
+        .join("repos")
+}
+
 /// Load settings, falling back to defaults for a missing or unreadable file.
 pub fn load_settings() -> Settings {
     load_settings_from(&settings_path())
