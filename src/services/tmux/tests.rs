@@ -624,9 +624,11 @@ fn the_remembered_line_is_the_newest_history_entry() {
         std::fs::write(&rc.0, rc.1).expect("rc");
 
         // Claude's stand-in: another window's shell exits mid-session and
-        // appends its own line to the shared history file.
+        // appends its own line to the shared history file. It then fails,
+        // as a suspended or crashed Claude does: a clean exit closes the
+        // shell, and there is no up arrow left to test.
         let running = format!(
-            "printf '%s\\n' {} >> {}",
+            "printf '%s\\n' {} >> {}; (exit 148)",
             sh_quote(other),
             sh_quote(history.to_str().expect("utf-8"))
         );
@@ -742,4 +744,85 @@ fn the_startup_file_stamps_before_it_launches() {
         "out of order: {tail:?}"
     );
     assert!(tail.contains("@claude_birth_name 'yolo:wt'"));
+}
+
+/// A Claude that exits cleanly — Ctrl-D twice, Ctrl-C twice, `/exit`, all
+/// status 0 — takes its shell with it, so the window closes and the user is
+/// back in forestui. Anything else — Ctrl-Z (148), a crash, a launch Claude
+/// refused — keeps the shell, where `fg` or the up arrow gets back in.
+/// Driven through the real shells, since it is the shell that exits; a
+/// shell that is not installed is skipped. zsh is not among them: without a
+/// terminal it refuses `set -m` and abandons the rest of the file, so a pipe
+/// cannot show what it does in a window. The `tu` playbook covers it.
+#[test]
+fn only_a_clean_exit_closes_the_shell() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    for shell in ["bash", "sh"] {
+        let Some(path) = std::env::var_os("PATH").and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|dir| dir.join(shell))
+                .find(|candidate| candidate.is_file())
+        }) else {
+            eprintln!("{shell} is not installed; skipping");
+            continue;
+        };
+        for (claude, stays) in [("true", false), ("(exit 148)", true), ("false", true)] {
+            let home = tempfile::tempdir().expect("tempdir");
+            let root = home.path();
+            // The startup file stamps the window through tmux. A stub
+            // answers instead, so this can never reach a real server.
+            let bin = root.join("bin");
+            std::fs::create_dir(&bin).expect("bin dir");
+            crate::test_support::write_executable(&bin.join("tmux"), "#!/bin/sh\nexit 0\n");
+            let launch = root.join("launch");
+            let home_env = ShellHome {
+                home: root.to_str().expect("utf-8").into(),
+                zdotdir: None,
+                env_file: None,
+            };
+            let startup = startup_for(
+                path.to_str().expect("utf-8"),
+                &launch,
+                &home_env,
+                "claude:wt",
+                "sess-1",
+                claude,
+                "claude -r 'sess-1'",
+            )
+            .expect("a known shell");
+            std::fs::create_dir(&launch).expect("launch dir");
+            for (file, contents) in &startup.files {
+                std::fs::write(file, contents).expect("startup file");
+            }
+
+            let mut child = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&startup.command)
+                .env_clear()
+                .env("HOME", root)
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("TMUX_TMPDIR", root)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("the shell starts");
+            // A shell that already exited closed its stdin: ignore the
+            // broken pipe, the output says what happened.
+            let _ = child
+                .stdin
+                .take()
+                .expect("stdin")
+                .write_all(b"echo STILL-HERE\nexit\n");
+            let out = child.wait_with_output().expect("the shell exits");
+            let listed = String::from_utf8_lossy(&out.stdout);
+            assert_eq!(
+                listed.contains("STILL-HERE"),
+                stays,
+                "{shell} after `{claude}`: {listed:?}"
+            );
+        }
+    }
 }
