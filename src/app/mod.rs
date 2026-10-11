@@ -1273,11 +1273,19 @@ impl App {
             AppEvent::PullRequests {
                 path,
                 scope,
-                prs,
-                viewer,
+                result,
             } => {
+                let mut taken = false;
                 for flow in self.start_work_flows(&path) {
-                    flow.set_pull_requests(scope, prs.clone(), viewer.clone());
+                    taken |= flow.set_pull_requests(scope, result.clone());
+                }
+                // A failure is said in the list itself; a partial answer
+                // looks like a whole one there, so it is said here.
+                if taken && result.as_ref().is_ok_and(|prs| prs.incomplete) {
+                    self.notify(
+                        "Some PRs could not be loaded: the list may be incomplete",
+                        Severity::Warning,
+                    );
                 }
             }
             AppEvent::GitHubChecked {

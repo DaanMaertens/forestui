@@ -148,7 +148,10 @@ fn pull_request_lists_parse_and_merge() {
        "url":"https://github.com/DaanMaertens/forestui/pull/31"}
     ]"#;
 
-    let prs = merge_pull_requests(&[review_requested, authored]);
+    let prs = merge_pull_requests(&[Some(review_requested), Some(authored)], None)
+        .expect("both queries answered");
+    assert!(!prs.incomplete);
+    let prs = prs.prs;
 
     let numbers: Vec<i64> = prs.iter().map(|pr| pr.number).collect();
     assert_eq!(numbers, vec![32, 31, 30]);
@@ -160,14 +163,59 @@ fn pull_request_lists_parse_and_merge() {
     assert!(!prs[0].is_draft);
 }
 
-/// A query that failed or printed nothing contributes nothing, rather than
-/// emptying the list the other one returned.
+/// One query that failed — a non-zero exit, or an answer that does not
+/// parse — leaves the other's PRs listed, but marks the list incomplete so
+/// it is not read as all there is.
 #[test]
-fn an_unreadable_pull_request_list_is_skipped() {
+fn one_failed_pull_request_query_marks_the_list_incomplete() {
     let ok = r#"[{"author":{"login":"alice"},"createdAt":"2026-10-09T08:00:00Z",
       "headRefName":"b","isDraft":false,"number":3,"title":"T"}]"#;
-    let prs = merge_pull_requests(&["", "not json", ok]);
-    assert_eq!(prs.len(), 1);
+    for failed in [None, Some(""), Some("not json")] {
+        let prs = merge_pull_requests(&[failed, Some(ok)], None).expect("one query answered");
+        assert_eq!(prs.prs.len(), 1);
+        assert!(prs.incomplete, "{failed:?}");
+    }
+}
+
+/// Every query failing is a failure, not an empty list: "no open PRs"
+/// would be a claim nobody checked.
+#[test]
+fn every_pull_request_query_failing_is_an_error() {
+    assert_eq!(
+        merge_pull_requests(&[None, Some("not json")], None).map(|prs| prs.prs.len()),
+        Err(PullRequestsError::Failed)
+    );
+}
+
+/// An empty answer is an answer: `gh` prints `[]` for no PRs.
+#[test]
+fn an_empty_pull_request_answer_is_an_empty_list() {
+    let prs =
+        merge_pull_requests(&[Some("[]"), Some("[]")], Some("daan".into())).expect("answered");
+    assert!(prs.prs.is_empty());
+    assert!(!prs.incomplete);
+    assert_eq!(prs.viewer.as_deref(), Some("daan"));
+}
+
+/// Without a signed-in `gh` nothing was asked, and the list says why.
+#[test]
+fn an_unusable_gh_is_its_own_error() {
+    assert_eq!(
+        PullRequestsError::from_auth(AuthStatus::NotAuthenticated),
+        Some(PullRequestsError::NotAuthenticated)
+    );
+    assert_eq!(
+        PullRequestsError::from_auth(AuthStatus::NotInstalled),
+        Some(PullRequestsError::NotInstalled)
+    );
+    assert_eq!(
+        PullRequestsError::from_auth(AuthStatus::Authenticated),
+        None
+    );
+    assert_eq!(
+        PullRequestsError::NotAuthenticated.message(),
+        "gh is not logged in"
+    );
 }
 
 /// A list fetched for one scope is never served for the other: switching

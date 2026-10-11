@@ -118,6 +118,18 @@ fn app_with_issues(issues: Vec<crate::models::GitHubIssue>) -> (tempfile::TempDi
     (dir, app, path)
 }
 
+/// `gh`'s whole answer for `pr-review`: these PRs, listed for `viewer`.
+fn pr_answer(
+    prs: Vec<crate::models::GitHubPullRequest>,
+    viewer: Option<String>,
+) -> crate::services::github::PullRequests {
+    crate::services::github::PullRequests {
+        prs,
+        viewer,
+        incomplete: false,
+    }
+}
+
 /// An open PR, as `gh pr list` returns it.
 fn open_pr(number: i64, title: &str, author: &str, head: &str) -> crate::models::GitHubPullRequest {
     serde_json::from_value(serde_json::json!({

@@ -122,12 +122,11 @@ impl App {
         let tx = self.tx.clone();
         let path = path.to_string();
         tokio::spawn(async move {
-            let (prs, viewer) = github::list_pull_requests(&path, scope).await;
+            let result = github::list_pull_requests(&path, scope).await;
             tx.send(AppEvent::PullRequests {
                 path,
                 scope,
-                prs,
-                viewer,
+                result,
             });
         });
     }

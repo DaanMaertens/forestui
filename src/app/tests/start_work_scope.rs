@@ -103,16 +103,14 @@ async fn the_scope_toggle_relists_the_pull_requests() {
     app.handle_event(AppEvent::PullRequests {
         path: path.clone(),
         scope: Scope::Mine,
-        prs: vec![pr(7)],
-        viewer: Some("daan".into()),
+        result: Ok(pr_answer(vec![pr(7)], Some("daan".into()))),
     });
     assert!(start_work(&app).picker.is_none(), "the old scope's list");
 
     app.handle_event(AppEvent::PullRequests {
         path,
         scope: Scope::All,
-        prs: vec![pr(7), pr(8)],
-        viewer: Some("daan".into()),
+        result: Ok(pr_answer(vec![pr(7), pr(8)], Some("daan".into()))),
     });
     let listed: Vec<i64> = start_work(&app)
         .picker

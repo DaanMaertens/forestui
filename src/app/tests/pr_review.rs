@@ -19,15 +19,11 @@ fn two_prs() -> Vec<crate::models::GitHubPullRequest> {
 
 /// `s`, then `pr-review`, with the PR list already back from `gh`.
 fn open_pr_review(app: &mut App, path: &str) {
-    app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Enter));
+    choose_pr_review(app);
     app.handle_event(AppEvent::PullRequests {
         scope: Scope::Mine,
         path: path.to_string(),
-        prs: two_prs(),
-        viewer: Some("daan".into()),
+        result: Ok(pr_answer(two_prs(), Some("daan".into()))),
     });
 }
 
@@ -59,8 +55,7 @@ async fn pr_review_lists_the_pull_requests_once_they_load() {
     app.handle_event(AppEvent::PullRequests {
         scope: Scope::Mine,
         path: path.clone(),
-        prs: two_prs(),
-        viewer: Some("daan".into()),
+        result: Ok(pr_answer(two_prs(), Some("daan".into()))),
     });
 
     assert_eq!(listed_prs(&app), vec![30, 31]);
@@ -241,8 +236,10 @@ async fn a_pr_whose_branch_is_checked_out_jumps_there() {
     app.handle_event(AppEvent::PullRequests {
         scope: Scope::Mine,
         path,
-        prs: vec![open_pr(31, "Mine", "daan", &branch)],
-        viewer: Some("daan".into()),
+        result: Ok(pr_answer(
+            vec![open_pr(31, "Mine", "daan", &branch)],
+            Some("daan".into()),
+        )),
     });
     app.handle_key(key(KeyCode::Enter));
 
@@ -278,8 +275,7 @@ async fn a_fork_pr_is_not_matched_by_branch_name() {
     app.handle_event(AppEvent::PullRequests {
         scope: Scope::Mine,
         path,
-        prs: vec![fork],
-        viewer: Some("daan".into()),
+        result: Ok(pr_answer(vec![fork], Some("daan".into()))),
     });
     app.handle_key(key(KeyCode::Enter));
 
@@ -295,11 +291,102 @@ async fn a_stray_pull_request_list_is_ignored() {
     app.handle_event(AppEvent::PullRequests {
         scope: Scope::Mine,
         path: "/somewhere/else".into(),
-        prs: two_prs(),
-        viewer: None,
+        result: Ok(pr_answer(two_prs(), None)),
     });
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
     assert!(start_work(&app).picker.is_none(), "still loading");
+}
+
+/// `s`, then `pr-review`, before `gh` has answered.
+fn choose_pr_review(app: &mut App) {
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Enter));
+}
+
+/// A list that could not be fetched says why, and never reads as "you have
+/// no PRs".
+#[tokio::test]
+async fn a_failed_pull_request_list_says_so_rather_than_empty() {
+    use crate::services::github::PullRequestsError;
+    for (error, said) in [
+        (PullRequestsError::NotAuthenticated, "gh is not logged in"),
+        (PullRequestsError::NotInstalled, "gh is not installed"),
+        (
+            PullRequestsError::Failed,
+            "Could not load the PRs from GitHub",
+        ),
+    ] {
+        let (_dir, mut app, path) = app_with_issues(Vec::new());
+        choose_pr_review(&mut app);
+        app.handle_event(AppEvent::PullRequests {
+            scope: Scope::Mine,
+            path,
+            result: Err(error),
+        });
+
+        assert!(listed_prs(&app).is_empty());
+        let screen = rendered(&mut app);
+        assert!(screen.contains(said), "{error:?}: {screen}");
+        assert!(!screen.contains("No open PRs"), "{error:?}: {screen}");
+    }
+}
+
+/// An empty answer is still the empty state.
+#[tokio::test]
+async fn an_empty_pull_request_list_reads_as_empty() {
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    choose_pr_review(&mut app);
+    app.handle_event(AppEvent::PullRequests {
+        scope: Scope::Mine,
+        path,
+        result: Ok(pr_answer(Vec::new(), Some("daan".into()))),
+    });
+
+    let screen = rendered(&mut app);
+    assert!(
+        screen.contains("No open PRs awaiting your review or opened by you"),
+        "{screen}"
+    );
+}
+
+/// When one of the two queries failed, the other's PRs are listed and a
+/// notification says there may be more.
+#[tokio::test]
+async fn a_partial_pull_request_list_is_listed_and_flagged() {
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    choose_pr_review(&mut app);
+    let mut answer = pr_answer(two_prs(), Some("daan".into()));
+    answer.incomplete = true;
+    app.handle_event(AppEvent::PullRequests {
+        scope: Scope::Mine,
+        path,
+        result: Ok(answer),
+    });
+
+    assert_eq!(listed_prs(&app), vec![30, 31]);
+    assert!(
+        notified(&app)
+            .iter()
+            .any(|n| n.contains("may be incomplete")),
+        "{:?}",
+        notified(&app)
+    );
+}
+
+/// A partial list nobody is waiting for is not announced.
+#[tokio::test]
+async fn a_stray_partial_list_is_not_announced() {
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    let mut answer = pr_answer(two_prs(), None);
+    answer.incomplete = true;
+    app.handle_event(AppEvent::PullRequests {
+        scope: Scope::Mine,
+        path,
+        result: Ok(answer),
+    });
+    assert!(notified(&app).is_empty(), "{:?}", notified(&app));
 }
