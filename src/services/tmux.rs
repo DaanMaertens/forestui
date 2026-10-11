@@ -649,10 +649,19 @@ fn startup_tail(window_name: &str, session_id: &str, line: &str) -> String {
     // The session-id stamp rides along for the same reason as the birth name:
     // written from inside the window, ahead of the command, it cannot lose a
     // race to anything reading window options once Claude is up.
+    //
+    // A clean exit takes the shell with it, so the window closes and the user
+    // is back in forestui. Claude exits 0 for Ctrl-D twice, Ctrl-C twice and
+    // `/exit` alike — the status cannot tell them apart — while Ctrl-Z leaves
+    // 148 and a crash or a refused launch something else non-zero: those keep
+    // the shell, which is what it is there for. A separate line rather than
+    // `&& exit`, so a custom command with its own `;` cannot change what the
+    // test applies to.
     format!(
         "tmux set-option -w @claude_birth_name {} >/dev/null 2>&1\n\
          tmux set-option -w @claude_session_id {} >/dev/null 2>&1\n\
-         set -m\n{line}\n",
+         set -m\n{line}\n\
+         [ $? -eq 0 ] && exit\n",
         sh_quote(window_name),
         sh_quote(session_id)
     )
