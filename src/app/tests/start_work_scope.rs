@@ -65,23 +65,6 @@ async fn the_scope_toggle_waits_for_its_own_list() {
     assert_eq!(listed(&app), vec![1, 3]);
 }
 
-/// A wider list fetched for the flow never lands on the pane, whose cards
-/// follow the setting.
-#[tokio::test]
-async fn a_wider_list_stays_out_of_the_pane() {
-    let (_dir, mut app, path) = app_with_issues(vec![open_issue(1, "Mine")]);
-    app.issues = Some(vec![open_issue(1, "Mine")]);
-    open_issue_list_on_the_scope_toggle(&mut app);
-    app.handle_key(key(KeyCode::Enter));
-    app.handle_event(AppEvent::Issues {
-        path,
-        scope: Scope::All,
-        issues: vec![open_issue(1, "Mine"), open_issue(3, "Unassigned")],
-    });
-    let pane: Vec<i64> = app.issues.iter().flatten().map(|i| i.number).collect();
-    assert_eq!(pane, vec![1]);
-}
-
 /// `pr-review` offers the toggle too, and a PR list for the scope the flow
 /// has left is not taken.
 #[tokio::test]

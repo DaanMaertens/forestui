@@ -1,9 +1,7 @@
 use super::*;
 use crate::app::{Action, DetailItem, Field};
 use crate::event;
-use crate::models::{
-    ClaudeSession, CustomClaudeButton, GitHubIssue, Repository, Settings, Worktree,
-};
+use crate::models::{ClaudeSession, CustomClaudeButton, Repository, Settings, Worktree};
 use crate::services::settings as settings_service;
 use crate::state::AppState;
 use chrono::Utc;
@@ -55,16 +53,6 @@ fn a_session() -> ClaudeSession {
         tokens: Default::default(),
         model: None,
     }
-}
-
-fn an_issue() -> GitHubIssue {
-    serde_json::from_str(
-        r#"{"number":42,"title":"Fix login bug","state":"OPEN","url":"u",
-                "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z",
-                "author":{"login":"me"},"assignees":[],
-                "labels":[{"name":"bug","color":"ff0000"}]}"#,
-    )
-    .expect("issue fixture parses")
 }
 
 /// One frame into a throwaway terminal. `crate::ui::draw` is what clears
@@ -130,23 +118,6 @@ fn buffer_text(buffer: &Buffer) -> String {
         .join("\n")
 }
 
-/// Under scope `all` the list is everyone's, and the header stops calling
-/// it mine.
-#[tokio::test]
-async fn the_issues_header_says_whose_issues_they_are() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let mut app = test_app(&dir);
-    with_repository(&mut app);
-    app.sessions = Some(vec![]);
-    app.issues = Some(vec![]);
-    assert!(render(&mut app).contains("MY OPEN GITHUB ISSUES"));
-
-    app.settings.start_work.scope = crate::models::Scope::All;
-    let screen = render(&mut app);
-    assert!(screen.contains("OPEN GITHUB ISSUES"), "{screen}");
-    assert!(!screen.contains("MY OPEN GITHUB ISSUES"), "{screen}");
-}
-
 /// Textual put a `Rule()` between the major sections, and the pane read as
 /// one flat list without them.
 #[tokio::test]
@@ -156,7 +127,6 @@ async fn sections_are_separated_by_rules() {
     with_repository(&mut app);
     // Loaded but empty, so the whole pane fits on screen unscrolled.
     app.sessions = Some(vec![]);
-    app.issues = Some(vec![]);
 
     /// Whether a rule sits between two lines. A rule is the only line that is
     /// nothing but the horizontal glyph; a card's edges start with a corner.
@@ -178,13 +148,23 @@ async fn sections_are_separated_by_rules() {
     assert!(rule_between(&screen, "LOCATION", "OPEN IN"), "{screen}");
     assert!(rule_between(&screen, "OPEN IN", "CLAUDE"), "{screen}");
     assert!(
-        rule_between(&screen, "RECENT SESSIONS", "MY OPEN GITHUB ISSUES"),
+        rule_between(&screen, "RECENT SESSIONS", "MANAGE"),
         "{screen}"
     );
-    assert!(
-        rule_between(&screen, "MY OPEN GITHUB ISSUES", "MANAGE"),
-        "{screen}"
-    );
+    // Nothing sits between the sessions and MANAGE any more, so one rule,
+    // not the two the issues section left behind when it went.
+    let rows: Vec<&str> = screen.lines().collect();
+    let row_of = |needle: &str| {
+        rows.iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} is not on screen:\n{screen}"))
+    };
+    let rules = rows[row_of("RECENT SESSIONS")..row_of("MANAGE")]
+        .iter()
+        .filter(|row| row.trim().starts_with("──"))
+        .count();
+    assert_eq!(rules, 1, "{screen}");
+    assert!(!screen.contains("GITHUB ISSUES"), "{screen}");
     // CLAUDE ran straight into RECENT SESSIONS there, and does here too.
     assert!(
         !rule_between(&screen, "CLAUDE", "RECENT SESSIONS"),
@@ -202,10 +182,10 @@ async fn sections_are_separated_by_rules() {
     assert!(rule_between(&screen, "Branch name", "MANAGE"), "{screen}");
 }
 
-/// Sessions and issues were `.session-item` / `.issue-row` boxes, not bare
-/// lines: a border in the border colour over an elevated background.
+/// Sessions were `.session-item` boxes, not bare lines: a border in the
+/// border colour over an elevated background.
 #[tokio::test]
-async fn session_and_issue_items_render_as_cards() {
+async fn sessions_render_as_cards() {
     // This test compares rendered colours against the active theme, so it
     // pins the theme for its whole render-and-assert window.
     let _guard = crate::theme::test_lock();
@@ -214,58 +194,43 @@ async fn session_and_issue_items_render_as_cards() {
     let mut app = test_app(&dir);
     with_repository(&mut app);
     app.sessions = Some(vec![a_session()]);
-    app.issues = Some(vec![an_issue()]);
     let buffer = render_buffer(&mut app, 100, TALL);
     // The pane is inset by its own padding and the card keeps a right margin
     // inside that, so the card's edge lands short of the screen edge.
     let right = buffer.area.width - PANE_PAD_X - RIGHT_MARGIN - 1;
 
-    // A session card is unpadded — its name carries the separation instead,
-    // so its top border sits directly above the name — while an issue card
-    // keeps `padding: 1` and a blank row between the two.
-    for (label, padded) in [
-        ("Refactor the detail pane", false),
-        ("#42 Fix login bug", true),
-    ] {
-        let (x, y) = find_cell(&buffer, label);
-        let cell = |x: u16, y: u16| {
-            buffer
-                .cell((x, y))
-                .unwrap_or_else(|| panic!("{label}: no cell at {x},{y}"))
-        };
+    // A session card is unpadded — its name carries the separation
+    // instead, so its top border sits directly above the name.
+    let label = "Refactor the detail pane";
+    let (x, y) = find_cell(&buffer, label);
+    let cell = |x: u16, y: u16| {
+        buffer
+            .cell((x, y))
+            .unwrap_or_else(|| panic!("{label}: no cell at {x},{y}"))
+    };
 
-        let left = x - CARD_INSET;
-        let top = if padded { y - 2 } else { y - 1 };
-        assert_eq!(cell(left, top).symbol(), "┌", "{label}: top left");
-        assert_eq!(cell(right, top).symbol(), "┐", "{label}: top right");
-        if padded {
-            assert_eq!(cell(left, y - 1).symbol(), "│", "{label}: padding row");
-            assert_eq!(
-                cell(x, y - 1).bg,
-                theme::active().bg_elevated,
-                "{label}: padding row is filled",
-            );
-        }
-        assert_eq!(cell(left, y).symbol(), "│", "{label}: left border");
-        assert_eq!(cell(right, y).symbol(), "│", "{label}: right border");
+    let left = x - CARD_INSET;
+    assert_eq!(cell(left, y - 1).symbol(), "┌", "{label}: top left");
+    assert_eq!(cell(right, y - 1).symbol(), "┐", "{label}: top right");
+    assert_eq!(cell(left, y).symbol(), "│", "{label}: left border");
+    assert_eq!(cell(right, y).symbol(), "│", "{label}: right border");
+    assert_eq!(
+        cell(left, y).fg,
+        theme::active().border,
+        "{label}: border colour"
+    );
+    // The background has to reach past the text, or the card is a frame
+    // around the page colour rather than a filled box. Probed just
+    // after the label rather than at the far edge: on a session card
+    // the right side of the title row is a floating button, whose box
+    // carries its own fill.
+    let past_label = x + as_u16(label.chars().count()) + 2;
+    for probe in [x, past_label] {
         assert_eq!(
-            cell(left, y).fg,
-            theme::active().border,
-            "{label}: border colour"
+            cell(probe, y).bg,
+            theme::active().bg_elevated,
+            "{label}: background at {probe}",
         );
-        // The background has to reach past the text, or the card is a frame
-        // around the page colour rather than a filled box. Probed just
-        // after the label rather than at the far edge: on a session card
-        // the right side of the title row is a floating button, whose box
-        // carries its own fill.
-        let past_label = x + as_u16(label.chars().count()) + 2;
-        for probe in [x, past_label] {
-            assert_eq!(
-                cell(probe, y).bg,
-                theme::active().bg_elevated,
-                "{label}: background at {probe}",
-            );
-        }
     }
 }
 
@@ -491,18 +456,14 @@ async fn rendered_controls_match_detail_items() {
 
     with_repository(&mut app);
     for sessions in [None, Some(vec![]), Some(vec![a_session(), a_session()])] {
-        for issues in [None, Some(vec![]), Some(vec![an_issue()])] {
-            app.sessions = sessions.clone();
-            app.issues = issues.clone();
-            let pane = build(&app, 100).expect("repository pane");
-            assert_eq!(
-                pane.items.len(),
-                app.detail_items().len(),
-                "repository, {} sessions, {} issues",
-                app.sessions.as_ref().map_or(-1, |s| s.len() as i64),
-                app.issues.as_ref().map_or(-1, |i| i.len() as i64),
-            );
-        }
+        app.sessions = sessions.clone();
+        let pane = build(&app, 100).expect("repository pane");
+        assert_eq!(
+            pane.items.len(),
+            app.detail_items().len(),
+            "repository, {} sessions",
+            app.sessions.as_ref().map_or(-1, |s| s.len() as i64),
+        );
     }
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -526,7 +487,6 @@ async fn focused_item_is_scrolled_into_view() {
     let mut app = test_app(&dir);
     with_repository(&mut app);
     app.sessions = Some(vec![a_session(), a_session(), a_session()]);
-    app.issues = Some(vec![an_issue(), an_issue()]);
     app.focus = Focus::Detail;
     app.detail_index = app.detail_items().len() - 1;
 
@@ -552,7 +512,6 @@ async fn drawing_the_pane_snapshots_what_it_drew() {
     let mut app = test_app(&dir);
     with_repository(&mut app);
     app.sessions = Some(vec![a_session()]);
-    app.issues = Some(vec![an_issue()]);
     app.drawn_items.clear();
 
     render_buffer(&mut app, 100, TALL);
@@ -565,22 +524,21 @@ async fn drawing_the_pane_snapshots_what_it_drew() {
     );
 }
 
-/// The pane shrinks under the cursor whenever the issue auto-refresh comes
-/// back with fewer issues than last time. An index left past the end is a
+/// The pane shrinks under the cursor whenever a session scan comes back
+/// with fewer sessions than last time. An index left past the end is a
 /// focus ring that vanishes and an Enter that does nothing.
 #[tokio::test]
 async fn a_shrinking_pane_pulls_the_cursor_back_into_it() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut app = test_app(&dir);
     with_repository(&mut app);
-    app.sessions = Some(vec![a_session()]);
-    app.issues = Some(vec![an_issue(), an_issue(), an_issue()]);
+    app.sessions = Some(vec![a_session(), a_session(), a_session()]);
     app.focus = Focus::Detail;
     app.detail_index = app.detail_items().len() - 1;
     render_buffer(&mut app, 100, TALL);
 
-    // One issue was closed on GitHub since the last refresh.
-    app.issues = Some(vec![an_issue()]);
+    // Two transcripts were deleted elsewhere since the last scan.
+    app.sessions = Some(vec![a_session()]);
     render_buffer(&mut app, 100, TALL);
 
     assert!(
@@ -603,7 +561,6 @@ async fn the_pane_scrolls_while_the_sidebar_has_focus() {
     let mut app = test_app(&dir);
     with_repository(&mut app);
     app.sessions = Some(vec![a_session(), a_session(), a_session()]);
-    app.issues = Some(vec![an_issue(), an_issue()]);
     app.focus = Focus::Sidebar;
 
     app.detail_scroll = 6;
@@ -678,7 +635,6 @@ async fn a_control_is_three_rows_and_clickable_on_its_border() {
     let mut app = test_app(&dir);
     with_repository(&mut app);
     app.sessions = Some(vec![]);
-    app.issues = Some(vec![]);
     let buffer = render_buffer(&mut app, 100, TALL);
 
     let (x, y) = find_cell(&buffer, "Start work");
@@ -717,7 +673,6 @@ async fn every_focusable_item_is_clickable_when_visible() {
         command: "claude --model opus".into(),
     }];
     app.sessions = Some(vec![a_session()]);
-    app.issues = Some(vec![an_issue()]);
 
     with_worktree(&mut app);
     // Tall and wide enough that nothing is scrolled or clipped away.

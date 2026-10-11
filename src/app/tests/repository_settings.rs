@@ -170,31 +170,24 @@ async fn a_repository_template_fills_the_confirm_screens_prompt() {
     assert_eq!(confirm_screen(&app).prompt(), "repository #42");
 }
 
-/// A repository's scope is learned with its key, after the pane listed the
-/// global one's issues: the list is fetched again for the new scope, and a
-/// list still arriving for the old one is not shown.
+/// A repository's scope is learned with its key, after the cache was
+/// warmed with the global one's issues: the new scope is prefetched too, so
+/// Start work's list is the one it will open on.
 #[tokio::test]
-async fn a_repository_scope_relists_the_issues() {
+async fn a_repository_scope_prefetches_its_issues() {
     use crate::models::Scope;
     let repos = ReposDir::new();
     repos.write("settings.json", r#"{"start_work": {"scope": "all"}}"#);
     let (_dir, mut app, path) = app_with_issues(vec![open_issue(1, "Mine")]);
     app.reload_detail();
-    assert!(app.issues.is_some(), "the mine list, from the cache");
+    assert!(
+        !app.issues_in_flight.contains(&(path.clone(), Scope::All)),
+        "nothing asked for the all list yet"
+    );
 
     on_github(&mut app, &path);
 
-    assert!(app.issues.is_none(), "the mine list is not the one wanted");
     assert!(app.issues_in_flight.contains(&(path.clone(), Scope::All)));
-    app.handle_event(AppEvent::Issues {
-        path: path.clone(),
-        scope: Scope::Mine,
-        issues: vec![open_issue(1, "Mine")],
-    });
-    assert!(app.issues.is_none(), "a late mine list is dropped");
-    let screen = rendered(&mut app);
-    assert!(screen.contains("OPEN GITHUB ISSUES"), "{screen}");
-    assert!(!screen.contains("MY OPEN GITHUB ISSUES"), "{screen}");
 }
 
 /// A settings file that does not parse overrides nothing, and is pointed
@@ -220,26 +213,6 @@ async fn a_broken_repository_settings_file_warns_once() {
     app.reload_detail();
     app.reload_detail();
     assert_eq!(warnings(&app), 1);
-}
-
-/// An issue card splits by the repository's feature labels, as the picker
-/// does.
-#[tokio::test]
-async fn the_issue_card_follows_the_repositorys_feature_labels() {
-    let repos = ReposDir::new();
-    repos.write(
-        "settings.json",
-        r#"{"start_work": {"feature_labels": ["kind/feature"]}}"#,
-    );
-    let (_dir, mut app, path) = app_with_issues(Vec::new());
-    on_github(&mut app, &path);
-    app.issues = Some(vec![labelled_issue(7, "Dark mode", &["kind/feature"])]);
-
-    app.run_action(Action::StartWorkOnIssue(0));
-    let loaded = branches_loaded(&app);
-    app.handle_event(loaded);
-
-    assert_eq!(confirm_screen(&app).mode, crate::work::WorkMode::Feature);
 }
 
 /// `gh` answers no when it fails, too; a key already known is kept, and the

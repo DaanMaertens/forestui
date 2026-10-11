@@ -79,8 +79,8 @@ pub enum ModalEffect {
     /// Open the confirm screen's prompt in an editor; the text comes back as
     /// [`crate::event::AppEvent::PromptEdited`].
     EditPrompt(String),
-    /// Start work's "Show blocked" was toggled: remember the choice, which
-    /// the issue cards share. The picker has already re-listed itself.
+    /// Start work's "Show blocked" was toggled: remember the choice. The
+    /// picker has already re-listed itself.
     ShowBlockedIssues(bool),
     /// Start work's "Not just mine" was toggled: list the items of the
     /// checkout at this path for the flow's new scope. The picker has
@@ -1349,8 +1349,7 @@ impl StartWorkModal {
 
 /// Start work's confirm screen: the worktree a work item will start in, the
 /// base it branches from, and the prompt Claude will be started with.
-///
-/// Also opened directly by an issue card's Start work, with nothing beneath it.
+/// Always opened over Start work's item step, which dismissing returns to.
 #[derive(Debug)]
 pub struct StartWorkConfirmModal {
     pub repo_id: Uuid,
@@ -1380,9 +1379,6 @@ pub struct StartWorkConfirmModal {
     pub is_editing: bool,
     pub is_fetching: bool,
     pub spinner_index: usize,
-    /// Opened from Start work's item step, which is still underneath: the
-    /// dismiss button goes back to it rather than cancelling.
-    pub has_parent: bool,
     /// One of the `FOCUS_*` constants; see [`StartWorkConfirmModal`].
     pub focus: usize,
 }
@@ -1441,7 +1437,6 @@ impl StartWorkConfirmModal {
     /// `names` are passed in rather than derived from `item`: a free-text
     /// feature's may carry a suffix the clash question chose. `template` is
     /// the text of `item.template(mode)`, read by the caller.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repo: &Repository,
         mode: WorkMode,
@@ -1450,7 +1445,6 @@ impl StartWorkConfirmModal {
         template: String,
         branches: BranchList,
         forest_dir: PathBuf,
-        has_parent: bool,
     ) -> Self {
         let base = default_base_branch(&branches);
         Self {
@@ -1471,7 +1465,6 @@ impl StartWorkConfirmModal {
             is_editing: false,
             is_fetching: false,
             spinner_index: 0,
-            has_parent,
             focus: Self::FOCUS_NAME,
         }
     }

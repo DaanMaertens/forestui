@@ -1136,8 +1136,6 @@ fn start_work_confirm(
     } else {
         disabled("Launch", StartWorkConfirmModal::FOCUS_LAUNCH)
     };
-    // Over Start work's item step, dismissing goes back to it.
-    let dismiss = if modal.has_parent { "Back" } else { "Cancel" };
     column.controls(
         frame,
         hits,
@@ -1152,8 +1150,9 @@ fn start_work_confirm(
                 StartWorkConfirmModal::FOCUS_YOLO,
             ),
             launch,
+            // Always over Start work's item step, so dismissing goes back.
             control(
-                dismiss,
+                "Back",
                 modal.focus == StartWorkConfirmModal::FOCUS_CANCEL,
                 theme::Variant::Normal,
                 StartWorkConfirmModal::FOCUS_CANCEL,

@@ -110,8 +110,8 @@ pub fn is_feature(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> bo
 
 /// The mode an issue belongs to: `feature` if it carries a feature label —
 /// which wins over anything else it carries, so a `bug` + `enhancement`
-/// issue is a feature — and `issue` otherwise. An issue card starts in it
-/// directly, and [`issues_for`] lists by it, so the two never disagree.
+/// issue is a feature — and `issue` otherwise. [`issues_for`] lists by it,
+/// and a picked issue starts in it, so the two never disagree.
 pub fn mode_for(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> WorkMode {
     if is_feature(issue, feature_labels) {
         WorkMode::Feature

@@ -1,5 +1,6 @@
 PASS UC-96     sessions-rendered                              expected=yes                          actual=yes
-PASS UC-96     issues-rendered                                expected=yes                          actual=yes
+PASS UC-96     manage-rendered                                expected=yes                          actual=yes
+PASS UC-96     no-issues-section                              expected=no                           actual=no
 PASS UC-96     no-empty-sections                              expected=yes                          actual=yes
 PASS UC-90     mouse-enabled                                  expected=on                           actual=on
 PASS UC-90     any-motion-for-hover                           expected=yes                          actual=yes
@@ -20,6 +21,7 @@ PASS UC-82     single-forestui-window                         expected=1        
 PASS UC-83     detail-follows-click                           expected=yes                          actual=yes
 PASS UC-84     terminal-window-opened                         expected=yes                          actual=yes
 PASS UC-86     modal-dismissed-by-click                       expected=no                           actual=no
+PASS UC-99     opens-already-filled                           expected=no                           actual=no
 PASS UC-99     lists-only-mine                                expected=no                           actual=no
 PASS UC-99     not-just-mine-ticked                           expected=yes                          actual=yes
 PASS UC-99     unticked-lists-only-mine                       expected=no                           actual=no
@@ -39,12 +41,6 @@ PASS UC-101    linked-item-marked                             expected=yes      
 PASS UC-101    switched-to-claude-window                      expected=yes                          actual=yes
 PASS UC-101    nothing-created                                expected=4                            actual=4
 PASS UC-101    worktree-selected                              expected=yes                          actual=yes
-PASS UC-102    card-offers-start-work                         expected=no                           actual=no
-PASS UC-102    straight-to-confirm                            expected=yes                          actual=yes
-PASS UC-102    mode-step-skipped                              expected=no                           actual=no
-PASS UC-102    cancel-closes-it                               expected=no                           actual=no
-PASS UC-102    started-card-jumps                             expected=yes                          actual=yes
-PASS UC-102    nothing-created                                expected=4                            actual=4
 PASS UC-103    titled-as-free-text                            expected=yes                          actual=yes
 PASS UC-103    prompt-carries-description                     expected=yes                          actual=yes
 PASS UC-103    prompt-reads-no-issue                          expected=no                           actual=no

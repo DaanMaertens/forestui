@@ -203,56 +203,22 @@ async fn a_feature_confirms_with_feat_names_and_the_feature_prompt() {
     assert!(prompt.contains("approved the plan"), "{prompt}");
 }
 
-/// Every issue card carries Start work, and Create WT is gone.
+/// The confirm screen only ever opens over Start work: closed while the
+/// branches loaded, the flow is over and nothing appears in its place.
 #[tokio::test]
-async fn the_issue_card_offers_start_work() {
-    let (_dir, mut app, _) = app_with_issues(Vec::new());
-    app.sessions = Some(Vec::new());
-    app.issues = Some(vec![
-        labelled_issue(42, "Fix login bug", &["bug"]),
-        labelled_issue(7, "Dark mode", &["enhancement"]),
-    ]);
+async fn closing_start_work_before_the_branches_land_drops_the_confirm() {
+    let (_dir, mut app, _) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(pending_number(&app), Some(42));
 
-    let items = app.detail_items();
-    assert!(items.contains(&DetailItem::Action(Action::StartWorkOnIssue(0))));
-    assert!(items.contains(&DetailItem::Action(Action::StartWorkOnIssue(1))));
-    let screen = rendered(&mut app);
-    assert!(!screen.contains("Create WT"), "{screen}");
-    // The pane's own Start work, then the first card's — the second card
-    // is below the fold of the test terminal.
-    assert_eq!(screen.matches("Start work").count(), 2, "{screen}");
-}
-
-/// The card skips the mode and item steps: the confirm screen opens on
-/// its own, in the mode the issue's labels put it in.
-#[tokio::test]
-async fn the_issue_card_opens_the_confirm_screen_in_its_mode() {
-    let (_dir, mut app, _) = app_with_issues(Vec::new());
-    app.issues = Some(vec![
-        labelled_issue(42, "Fix login bug", &["bug"]),
-        labelled_issue(7, "Dark mode", &["Enhancement"]),
-    ]);
-
-    app.run_action(Action::StartWorkOnIssue(1));
-    let loaded = branches_loaded(&app);
-    app.handle_event(loaded);
-
-    let confirm = confirm_screen(&app);
-    assert_eq!(confirm.mode, crate::work::WorkMode::Feature);
-    assert_eq!(confirm_number(confirm), Some(7));
-    assert_eq!(confirm.name.value(), "feat-7-dark-mode");
-    assert!(!confirm.has_parent, "nothing beneath to go back to");
-    assert_eq!(app.modals.len(), 1);
+    app.handle_key(key(KeyCode::Esc));
     app.handle_key(key(KeyCode::Esc));
     assert!(app.modals.is_empty());
-
-    app.run_action(Action::StartWorkOnIssue(0));
     let loaded = branches_loaded(&app);
     app.handle_event(loaded);
-
-    let confirm = confirm_screen(&app);
-    assert_eq!(confirm.mode, crate::work::WorkMode::Issue);
-    assert_eq!(confirm.name.value(), "issue-42-fix-login-bug");
+    assert!(app.modals.is_empty(), "{:?}", app.modals);
 }
 
 #[tokio::test]
@@ -296,7 +262,6 @@ async fn mode_then_item_then_confirm() {
         "the remote's default branch, not the checkout's develop"
     );
     assert!(confirm.pull_first, "pull first is on by default");
-    assert!(confirm.has_parent);
     let prompt = confirm.prompt();
     assert!(prompt.contains("#7: Crash on save"), "{prompt}");
     assert!(prompt.contains("`issue-7-crash-on-save`"), "{prompt}");

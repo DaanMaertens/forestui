@@ -260,8 +260,9 @@ has one, rather than creating a second one. A `pr-review` worktree checks out
 the PR's own branch. Someone else's PR gets a review-and-report prompt; your
 own gets a self-review that waits for your go-ahead before fixing anything.
 
-The issue cards' **Start work** opens the same flow with that issue already
-picked. A repository without a GitHub remote offers free-text features only.
+Selecting a repository fetches its open issues in the background, so the
+`issue` and `feature` lists are usually filled by the time you open them. A
+repository without a GitHub remote offers free-text features only.
 
 #### Prompt templates
 

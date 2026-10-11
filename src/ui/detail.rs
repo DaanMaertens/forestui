@@ -26,7 +26,7 @@ const FIELD_LABEL_WIDTH: usize = 14;
 const CARD_INSET: u16 = 2;
 
 /// Cells left clear on the right of a card or a rule, from the `margin: 0 2 1 0`
-/// Textual gave `.session-item` and `.issue-row` and the `margin: 1 2 1 0` it
+/// Textual gave `.session-item` and the `margin: 1 2 1 0` it
 /// gave `Rule.-horizontal`. Without it they run into the edge of the pane.
 /// Columns kept clear to the right of every card. Three rather than two so a
 /// card stops short of the scrollbar instead of running into it.
@@ -163,8 +163,8 @@ fn render_node(pane: &mut Pane, app: &App, node: DetailNode) {
         DetailNode::Blank => pane.blank(),
         DetailNode::Rule => pane.rule(),
         DetailNode::PathBox { path, style } => path_box(pane, path, style),
-        DetailNode::CardStart { padded } => {
-            pane.card_start(pane.width.saturating_sub(RIGHT_MARGIN), padded);
+        DetailNode::CardStart => {
+            pane.card_start(pane.width.saturating_sub(RIGHT_MARGIN));
         }
         DetailNode::CardEnd => pane.card_end(),
         DetailNode::Controls { lead, controls } => {
@@ -181,50 +181,7 @@ fn render_node(pane: &mut Pane, app: &App, node: DetailNode) {
             };
             rename_field(pane, label, input);
         }
-        DetailNode::IssuesHeader {
-            title,
-            glyph,
-            show_blocked,
-            hidden,
-        } => issues_header(pane, title, glyph, show_blocked, hidden.as_deref()),
     }
-}
-
-/// The issues header with its inline refresh control, then the "show
-/// blocked" checkbox and, while blocked issues are hidden, how many.
-fn issues_header(
-    pane: &mut Pane,
-    title: &'static str,
-    glyph: char,
-    show_blocked: bool,
-    hidden: Option<&str>,
-) {
-    let lit = |(focused, hovered): (bool, bool)| {
-        if focused || hovered {
-            theme::accent()
-        } else {
-            theme::secondary()
-        }
-    };
-    // `.refresh-btn { min-width: 3; width: 3 }` — the glyph is narrower than
-    // the control, and it is the control that takes the click.
-    let refresh_x = title.chars().count() + 1;
-    let refresh = lit(pane.claim(as_u16(refresh_x), 3, 1));
-    // One line like the refresh control, not a boxed button: a box would
-    // cost the header two more rows for a switch flipped now and then.
-    let checkbox = format!("[{}] show blocked", if show_blocked { 'x' } else { ' ' });
-    let toggle = lit(pane.claim(as_u16(refresh_x + 3), as_u16(checkbox.chars().count()), 1));
-    let mut spans = vec![
-        Span::styled(title, theme::section_header()),
-        Span::raw(" "),
-        Span::styled(glyph.to_string(), refresh),
-        Span::raw("  "),
-        Span::styled(checkbox, toggle),
-    ];
-    if let Some(hidden) = hidden {
-        spans.push(Span::styled(format!("  {hidden}"), theme::muted()));
-    }
-    pane.row(spans);
 }
 
 /// Where a focusable item landed. The line alone would not do: `Editor`,
@@ -274,14 +231,11 @@ fn control_box(control: &ControlSpec, focused: bool, hovered: bool) -> [Vec<Span
 }
 
 /// A card under construction — the bordered, elevated box Textual gave
-/// `.session-item`, `.issue-row` and `.path-display`.
+/// `.session-item` and `.path-display`. Neither pads its content
+/// vertically, so the box hugs what it holds.
 #[derive(Clone, Copy)]
 struct Card {
     width: u16,
-    /// Whether the card pads its content vertically. `.session-item` and
-    /// `.issue-row` had `padding: 1`; `.path-display` padded only horizontally,
-    /// so its box hugs the path.
-    padded: bool,
 }
 
 /// Content under construction: the lines to render plus the cells each
@@ -344,21 +298,15 @@ impl Pane {
     }
 
     /// Open a card. Lines pushed until [`Pane::card_end`] land inside it.
-    fn card_start(&mut self, width: u16, padded: bool) {
+    fn card_start(&mut self, width: u16) {
         self.lines.push(card_edge(width, '┌', '┐'));
-        self.card = Some(Card { width, padded });
-        if padded {
-            self.blank();
-        }
+        self.card = Some(Card { width });
     }
 
     fn card_end(&mut self) {
         let Some(card) = self.card else {
             return;
         };
-        if card.padded {
-            self.blank();
-        }
         self.card = None;
         self.lines.push(card_edge(card.width, '└', '┘'));
     }
@@ -678,7 +626,7 @@ fn path_box(pane: &mut Pane, path: String, style: Style) {
         path
     };
     let width = as_u16(path.chars().count()).saturating_add(2 * CARD_INSET);
-    pane.card_start(width, false);
+    pane.card_start(width);
     pane.text(path, style);
     pane.card_end();
 }
