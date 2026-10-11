@@ -743,3 +743,22 @@ fn the_startup_file_stamps_before_it_launches() {
     );
     assert!(tail.contains("@claude_birth_name 'yolo:wt'"));
 }
+
+#[test]
+fn an_editor_opens_a_directory_from_inside_it_and_a_file_from_its_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_string_lossy().into_owned();
+    assert_eq!(
+        editor_launch(dir.path(), "nvim"),
+        (root.clone(), "nvim .".to_string())
+    );
+
+    // A template path is the user's config dir, quoted like any other path
+    // that reaches a shell.
+    let file = dir.path().join("it's.md");
+    std::fs::write(&file, "x").unwrap();
+    assert_eq!(
+        editor_launch(&file, "nvim"),
+        (root, format!("nvim '{}/it'\\''s.md'", dir.path().display()))
+    );
+}

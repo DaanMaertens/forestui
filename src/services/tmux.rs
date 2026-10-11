@@ -438,18 +438,33 @@ fn new_window(name: &str, path: &str, shell_command: Option<&str>) -> Option<Str
     (!id.is_empty()).then_some(id)
 }
 
-/// Open the editor in a tmux window named `edit:<worktree_name>`, reusing an
-/// existing window with that name when one is already open.
-pub fn create_editor_window(worktree_name: &str, worktree_path: &str, editor: &str) -> bool {
+/// Open the editor in a tmux window named `edit:<name>`, reusing an existing
+/// window with that name when one is already open.
+///
+/// `path` is a directory, which the editor opens as `.` from inside it, or a
+/// single file, which it opens from the file's own directory.
+pub fn create_editor_window(name: &str, path: &str, editor: &str) -> bool {
     if current_session().is_none() {
         return false;
     }
-    let window_name = format!("edit:{worktree_name}");
+    let window_name = format!("edit:{name}");
 
     if let Some(existing) = find_window(&window_name) {
         return tmux(&["select-window", "-t", &existing]).is_some();
     }
-    new_window(&window_name, worktree_path, Some(&format!("{editor} ."))).is_some()
+    let (dir, command) = editor_launch(Path::new(path), editor);
+    new_window(&window_name, &dir, Some(&command)).is_some()
+}
+
+/// The directory an editor window starts in and the command it runs there.
+fn editor_launch(path: &Path, editor: &str) -> (String, String) {
+    match path.parent() {
+        Some(parent) if path.is_file() => (
+            parent.to_string_lossy().into_owned(),
+            format!("{editor} {}", sh_quote(&path.to_string_lossy())),
+        ),
+        _ => (path.to_string_lossy().into_owned(), format!("{editor} .")),
+    }
 }
 
 /// Open `file` in `editor` in a popup over forestui's own pane, returning once
@@ -458,8 +473,8 @@ pub fn create_editor_window(worktree_name: &str, worktree_path: &str, editor: &s
 /// A popup rather than a window: `display-popup -E` blocks its caller until
 /// the popup closes, which is the "editor closed, read the file" signal a
 /// window does not give, and it keeps the confirm screen in view around the
-/// edit. `title` is drawn in the popup's border. Call it off the UI thread.
-pub fn edit_in_popup(editor: &str, file: &Path, title: &str) -> Result<(), String> {
+/// edit. Call it off the UI thread.
+pub fn edit_in_popup(editor: &str, file: &Path) -> Result<(), String> {
     let pane = std::env::var("TMUX_PANE")
         .ok()
         .filter(|pane| !pane.is_empty())
@@ -475,7 +490,7 @@ pub fn edit_in_popup(editor: &str, file: &Path, title: &str) -> Result<(), Strin
         "-h",
         "90%",
         "-T",
-        &format!(" {title} "),
+        " Edit prompt ",
         "-t",
         &pane,
         &command,

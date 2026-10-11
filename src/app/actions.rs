@@ -219,7 +219,7 @@ impl App {
                 tokio::spawn(async move {
                     let result = tokio::task::spawn_blocking(move || {
                         crate::prompt::edit_via_file(&text, |file| {
-                            tmux::edit_in_popup(&editor, file, "Edit prompt")
+                            tmux::edit_in_popup(&editor, file)
                         })
                     })
                     .await
@@ -1159,39 +1159,24 @@ impl App {
         });
     }
 
-    /// Open a global prompt template in the prompt editor, writing it from
-    /// its default first so the editor starts on the text in use. Nothing
-    /// is read back: the file is the template, and the next confirm screen
-    /// reads it afresh.
+    /// Open a global prompt template in the default editor, the same way a
+    /// worktree is opened, writing it from its default first so the editor
+    /// starts on the text in use. Nothing is read back: the file is the
+    /// template, and the next confirm screen reads it afresh.
     fn edit_template(&mut self, template: crate::prompt::Template) {
-        let path = match crate::prompt::ensure_file(&settings_service::prompts_dir(), template) {
-            Ok(path) => path,
-            Err(error) => {
-                self.notify(
-                    format!(
-                        "Could not create the {} template: {error}",
-                        template.label()
-                    ),
-                    Severity::Error,
-                );
-                return;
-            }
-        };
-        let editor = self.prompt_editor();
-        let title = format!("Prompt template: {}", template.file_name());
-        let tx = self.tx.clone();
-        tokio::spawn(async move {
-            let result =
-                tokio::task::spawn_blocking(move || tmux::edit_in_popup(&editor, &path, &title))
-                    .await
-                    .unwrap_or_else(|_| Err("the editor task panicked".to_string()));
-            if let Err(error) = result {
-                tx.send(AppEvent::Notify(
-                    format!("Could not edit the template: {error}"),
-                    Severity::Error,
-                ));
-            }
-        });
+        match crate::prompt::ensure_file(&settings_service::prompts_dir(), template) {
+            Ok(path) => self.open_in_editor_as(
+                &format!("prompts/{}", template.file_name()),
+                &path.to_string_lossy(),
+            ),
+            Err(error) => self.notify(
+                format!(
+                    "Could not create the {} template: {error}",
+                    template.label()
+                ),
+                Severity::Error,
+            ),
+        }
     }
 
     /// The editor a prompt is edited in: the one the shell names, as git
@@ -1211,20 +1196,31 @@ impl App {
     }
 
     fn open_in_editor(&mut self, path: &str) {
+        let name = self.state.tmux_window_name(path);
+        self.open_in_editor_as(&name, path);
+    }
+
+    /// Open `path` — a directory or a single file — in the default editor:
+    /// a terminal editor in an `edit:<name>` window, anything else detached.
+    fn open_in_editor_as(&mut self, name: &str, path: &str) {
         let editor = self.settings.default_editor.clone();
 
-        if tmux::is_inside_tmux() && tmux::is_tui_editor(&editor) {
-            let name = self.state.tmux_window_name(path);
-            if tmux::create_editor_window(&name, path, &editor) {
-                self.notify(
-                    format!("Opened {editor} in edit:{name}"),
-                    Severity::Information,
-                );
-                return;
-            }
+        if tmux::is_inside_tmux()
+            && tmux::is_tui_editor(&editor)
+            && tmux::create_editor_window(name, path, &editor)
+        {
+            self.notify(
+                format!("Opened {editor} in edit:{name}"),
+                Severity::Information,
+            );
+            return;
         }
 
-        // GUI editor, or not inside tmux: spawn it detached.
+        // GUI editor, or not inside tmux: spawn it detached. Never from a
+        // unit test, which has no tmux and would start a real editor.
+        if cfg!(test) {
+            return;
+        }
         let mut parts = editor.split_whitespace();
         let Some(program) = parts.next() else {
             return;
