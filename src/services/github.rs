@@ -293,13 +293,11 @@ fn pull_request_filters(scope: Scope) -> &'static [&'static [&'static str]] {
 
 /// The fields an issue is fetched with. `blockedBy` comes along in the same
 /// call, so knowing which issues are blocked costs no `gh` call per issue.
-const ISSUE_FIELDS: &str =
-    "number,title,state,url,createdAt,updatedAt,author,assignees,labels,blockedBy";
+const ISSUE_FIELDS: &str = "number,title,state,url,createdAt,author,assignees,labels,blockedBy";
 
 /// [`ISSUE_FIELDS`] for a `gh` too old to know `blockedBy`, whose issues
 /// then all count as unblocked.
-const LEGACY_ISSUE_FIELDS: &str =
-    "number,title,state,url,createdAt,updatedAt,author,assignees,labels";
+const LEGACY_ISSUE_FIELDS: &str = "number,title,state,url,createdAt,author,assignees,labels";
 
 /// Whether `gh` refused a call because it does not know `blockedBy`. `gh`
 /// rejects the whole call over one unknown field, so without the retry this

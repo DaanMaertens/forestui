@@ -1688,11 +1688,6 @@ outside forestui's tmux session is named by pid instead.
 **Fails if:** the row is unmarked, the confirm screen opens, a second worktree
 appears in the config, or the window does not switch.
 
-### UC-102 — An issue card's Start work — ⬛ RETIRED
-The repository pane's issue cards were removed (issue #50); issues are picked
-only through Start work (UC-99, UC-100). The sweep no longer captures this
-case and its `baseline/rust/UC-102-*` frames are gone.
-
 ### UC-103 — Start work for a free-text feature
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
 **Steps:** after UC-101, click beta's sidebar row, `s` → `Down` `Enter` (mode
@@ -1822,11 +1817,12 @@ composite shows a difference not listed above, treat it as a regression.
 | Hand-driven, unscripted | 71–77 (77 retired) | 4 |
 | Flows & mouse | 78–89 | 8 |
 | Visual parity | 90–94 (93 retired) | 1 |
-| Start work | 99–106 (102 retired) | 7 |
+| Start work | 99–101, 103–106 | 7 |
 
-**104 numbered use cases written up here (UC-97 and 98 are assertions in
-`tu-sweep.sh` only), 3 retired with the `?` binding (UC-26, 59, 93), 1 with
-the Create-from-issue dialog (UC-77) and 1 with the issue cards (UC-102) —
+**103 numbered use cases written up here (UC-97 and 98 are assertions in
+`tu-sweep.sh` only; UC-102 was deleted with the issue cards), 3 retired with
+the `?` binding (UC-26, 59, 93) and 1 with the Create-from-issue dialog
+(UC-77) —
 99 active · 59 P0 · 81 executed live · 17 written from source only · 1 in
 progress (UC-94).**
 
