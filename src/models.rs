@@ -353,12 +353,11 @@ where
 }
 
 /// Whose issues and PRs Start work lists.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     /// Issues assigned to or opened by me; PRs with a review requested from
     /// me or opened by me.
-    #[default]
     Mine,
     /// Every open issue or PR.
     All,
@@ -393,98 +392,88 @@ impl Naming {
     }
 }
 
-#[derive(Deserialize)]
-struct PartialNaming {
-    #[serde(default)]
-    branch_prefix: Option<String>,
-    #[serde(default)]
-    name_pattern: Option<String>,
-}
-
-fn issue_naming() -> Naming {
-    Naming::new("fix/", "issue-{number}-{slug}")
-}
-
-fn feature_naming() -> Naming {
-    Naming::new("feat/", "feat-{number}-{slug}")
-}
-
-fn free_feature_naming() -> Naming {
-    Naming::new("feat/", "feat-{slug}")
-}
-
-fn partial_issue_naming<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Naming, D::Error> {
-    Ok(issue_naming().overlaid(PartialNaming::deserialize(d)?))
-}
-
-fn partial_feature_naming<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Naming, D::Error> {
-    Ok(feature_naming().overlaid(PartialNaming::deserialize(d)?))
-}
-
-fn partial_free_feature_naming<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Naming, D::Error> {
-    Ok(free_feature_naming().overlaid(PartialNaming::deserialize(d)?))
-}
-
 /// A `pr-review` worktree checks out the PR's own branch, so the mode names
 /// only the worktree and has no branch prefix to set.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PrReviewNaming {
-    #[serde(default = "default_pr_review_pattern")]
     pub name_pattern: String,
-}
-
-fn default_pr_review_pattern() -> String {
-    "pr-{number}-{slug}".into()
-}
-
-impl Default for PrReviewNaming {
-    fn default() -> Self {
-        Self {
-            name_pattern: default_pr_review_pattern(),
-        }
-    }
-}
-
-fn default_feature_labels() -> Vec<String> {
-    vec!["enhancement".into()]
 }
 
 /// Start work's global settings. Every field is defaulted to the behaviour
 /// that shipped before it was a setting, so a file without them changes
 /// nothing.
+///
+/// Read through [`PartialStartWork`], so the defaults live in one place —
+/// the `Default` impl — and a key the file leaves out, down to one half of
+/// a mode's naming, keeps its default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "PartialStartWork")]
 pub struct StartWorkSettings {
-    #[serde(default)]
     pub scope: Scope,
     /// An issue carrying any of these is a `feature`; every other open issue
     /// is an `issue`. Matched case-insensitively, as GitHub does.
-    #[serde(default = "default_feature_labels")]
     pub feature_labels: Vec<String>,
-    #[serde(default = "issue_naming", deserialize_with = "partial_issue_naming")]
     pub issue: Naming,
-    #[serde(
-        default = "feature_naming",
-        deserialize_with = "partial_feature_naming"
-    )]
     pub feature: Naming,
-    #[serde(
-        default = "free_feature_naming",
-        deserialize_with = "partial_free_feature_naming"
-    )]
     pub free_feature: Naming,
-    #[serde(default)]
     pub pr_review: PrReviewNaming,
 }
 
 impl Default for StartWorkSettings {
     fn default() -> Self {
         Self {
-            scope: Scope::default(),
-            feature_labels: default_feature_labels(),
-            issue: issue_naming(),
-            feature: feature_naming(),
-            free_feature: free_feature_naming(),
-            pr_review: PrReviewNaming::default(),
+            scope: Scope::Mine,
+            feature_labels: vec!["enhancement".into()],
+            issue: Naming::new("fix/", "issue-{number}-{slug}"),
+            feature: Naming::new("feat/", "feat-{number}-{slug}"),
+            free_feature: Naming::new("feat/", "feat-{slug}"),
+            pr_review: PrReviewNaming {
+                name_pattern: "pr-{number}-{slug}".into(),
+            },
+        }
+    }
+}
+
+/// The `start_work` section as a file holds it: any key may be missing.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct PartialStartWork {
+    scope: Option<Scope>,
+    feature_labels: Option<Vec<String>>,
+    issue: PartialNaming,
+    feature: PartialNaming,
+    free_feature: PartialNaming,
+    pr_review: PartialPrReviewNaming,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct PartialNaming {
+    branch_prefix: Option<String>,
+    name_pattern: Option<String>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct PartialPrReviewNaming {
+    name_pattern: Option<String>,
+}
+
+impl From<PartialStartWork> for StartWorkSettings {
+    fn from(partial: PartialStartWork) -> Self {
+        let base = Self::default();
+        Self {
+            scope: partial.scope.unwrap_or(base.scope),
+            feature_labels: partial.feature_labels.unwrap_or(base.feature_labels),
+            issue: base.issue.overlaid(partial.issue),
+            feature: base.feature.overlaid(partial.feature),
+            free_feature: base.free_feature.overlaid(partial.free_feature),
+            pr_review: PrReviewNaming {
+                name_pattern: partial
+                    .pr_review
+                    .name_pattern
+                    .unwrap_or(base.pr_review.name_pattern),
+            },
         }
     }
 }
