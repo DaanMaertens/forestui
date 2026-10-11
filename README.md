@@ -15,11 +15,11 @@ forestui brings Git worktree management to the terminal with a TUI built on
   worktrees made outside forestui (`git worktree add`) show up on their own
 - **TUI Editor Integration**: Opens TUI editors (vim, nvim, helix, etc.) in tmux windows
 - **Claude Code Integration**: Track and resume Claude Code sessions per
-  worktree. Each one runs inside your shell, so Ctrl-Z, a crash or a refused
+  worktree. Each one runs inside your shell, so Ctrl+Z, a crash or a refused
   launch leaves a prompt instead of a dead window
 - **Session Management**: See which sessions are live, in a tmux window
-  or elsewhere on the machine; rename, pin, and delete sessions, and read each conversation's branch,
-  token totals, and estimated cost off its card
+  or elsewhere on the machine; rename, pin, and delete sessions, and read
+  each conversation's branch, token totals, and estimated cost off its card
 - **Start work**: Go from an issue, a pull request or a one-line idea to a
   worktree with Claude already running in it, primed with a prompt — or
   just make a plain worktree
@@ -144,16 +144,17 @@ A tmux window forestui opens for Claude runs your shell, and Claude is a job
 of that shell rather than the window's only process. So nothing is lost when
 Claude stops:
 
-- **Ctrl-Z** suspends Claude to a prompt; `fg` resumes it.
+- **Ctrl+Z** suspends Claude to a prompt; `fg` resumes it.
 - **A crash or a refused launch** leaves a prompt with the command in your
   history, so the up arrow retries it.
-- **A clean exit** — Ctrl-D twice, Ctrl-C twice or `/exit` — closes the
+- **A clean exit** — Ctrl+D twice, Ctrl+C twice or `/exit` — closes the
   window and returns you to forestui.
 
 Your shell starts the same way an interactive shell always does, with your
-own startup files. zsh, bash and POSIX shells (sh, dash, ksh) get this
-directly; other shells, such as fish, get the command typed into them
-instead, and their window drops to a prompt when Claude exits.
+own startup files. zsh, bash and the POSIX shells (sh, dash, ksh, mksh,
+ash, yash) get this directly. Other shells, such as fish, get the command
+typed into them instead, and their window drops to a prompt when Claude
+exits.
 
 ## Usage
 
@@ -217,7 +218,7 @@ crosses them, so what is clickable is visible rather than guessed at:
   not it holds the keyboard focus.
 - **The scrollbar** can be dragged, and clicking its track pages to that point.
 - **Hovering a sidebar row** too long for the sidebar shows its full text in
-  a box over the detail pane.
+  a box over the pane beside it.
 
 ### If tmux's prefix key stops working
 
@@ -243,7 +244,7 @@ that half.
 
 git, not forestui's config, decides which worktrees exist. forestui compares
 each repository against `git worktree list` on startup, when you select it,
-when you come back to its window and every 30 seconds, so a worktree made
+when you come back to forestui and every 30 seconds, so a worktree made
 or removed outside forestui — by hand or by an agent — shows up or goes away
 on its own. The config only remembers what forestui adds: names, the
 archived flag and the order.
