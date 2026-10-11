@@ -85,83 +85,24 @@ async fn the_picker_toggle_keeps_the_query() {
     forget_saved_settings();
 }
 
-/// The choice is one preference: shown in the picker means shown on the
-/// cards, and hidden on the cards means hidden when Start work reopens.
+/// The choice is one preference: what the picker was left showing is what
+/// it shows when Start work reopens.
 #[tokio::test]
-async fn the_picker_and_the_cards_share_the_toggle() {
+async fn the_toggle_outlives_the_flow() {
     forget_saved_settings();
-    let issues = vec![open_issue(1, "Free"), blocked_issue(2, "Waits", &[9])];
-    let (_dir, mut app, _) = app_with_issues(issues.clone());
-    app.sessions = Some(Vec::new());
-    app.issues = Some(issues);
-    let card = DetailItem::Action(Action::StartWorkOnIssue(1));
-    assert!(!app.detail_items().contains(&card));
-
+    let (_dir, mut app, _) =
+        app_with_issues(vec![open_issue(1, "Free"), blocked_issue(2, "Waits", &[9])]);
     open_issue_list_on_the_toggle(&mut app);
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Esc));
     app.handle_key(key(KeyCode::Esc));
     assert!(app.modals.is_empty());
-    assert!(app.detail_items().contains(&card), "shown on the cards too");
 
-    app.run_action(Action::ToggleBlockedIssues);
-    assert!(!app.detail_items().contains(&card));
     app.handle_key(key(KeyCode::Char('s')));
     app.handle_key(key(KeyCode::Enter));
-    assert!(!start_work(&app).show_blocked);
-    assert_eq!(listed(&app), vec![1]);
+    assert!(start_work(&app).show_blocked);
+    assert_eq!(listed(&app), vec![1, 2]);
     forget_saved_settings();
-}
-
-/// The cards hide blocked issues and say how many; the header's checkbox
-/// shows them with their marker.
-#[tokio::test]
-async fn the_cards_hide_blocked_issues_behind_the_header_toggle() {
-    forget_saved_settings();
-    let (_dir, mut app, _) = app_with_issues(Vec::new());
-    app.sessions = Some(Vec::new());
-    app.issues = Some(vec![
-        blocked_issue(7, "Waits on nine", &[9]),
-        open_issue(42, "Fix login bug"),
-        blocked_issue(43, "Blockers all closed", &[]),
-    ]);
-    let items = app.detail_items();
-    assert!(items.contains(&DetailItem::Action(Action::ToggleBlockedIssues)));
-    assert!(!items.contains(&DetailItem::Action(Action::StartWorkOnIssue(0))));
-    assert!(items.contains(&DetailItem::Action(Action::StartWorkOnIssue(1))));
-    assert!(items.contains(&DetailItem::Action(Action::StartWorkOnIssue(2))));
-    let screen = rendered(&mut app);
-    assert!(
-        screen.contains("[ ] show blocked  1 blocked hidden"),
-        "{screen}"
-    );
-    assert!(!screen.contains("Waits on nine"), "{screen}");
-
-    app.run_action(Action::ToggleBlockedIssues);
-    assert!(saved_settings().show_blocked_issues);
-    let items = app.detail_items();
-    assert!(items.contains(&DetailItem::Action(Action::StartWorkOnIssue(0))));
-    let screen = rendered(&mut app);
-    assert!(screen.contains("[x] show blocked"), "{screen}");
-    assert!(!screen.contains("blocked hidden"), "{screen}");
-    assert!(screen.contains("Waits on nine"), "{screen}");
-    assert!(screen.contains("blocked by #9"), "{screen}");
-    forget_saved_settings();
-}
-
-/// A card's index is into the whole list, so hiding the blocked issue ahead
-/// of it does not make it start the wrong one.
-#[tokio::test]
-async fn a_card_behind_a_hidden_issue_starts_its_own_issue() {
-    let (_dir, mut app, _) = app_with_issues(Vec::new());
-    app.issues = Some(vec![
-        blocked_issue(7, "Waits on nine", &[9]),
-        open_issue(42, "Fix login bug"),
-    ]);
-    app.run_action(Action::StartWorkOnIssue(1));
-    let loaded = branches_loaded(&app);
-    app.handle_event(loaded);
-    assert_eq!(confirm_number(confirm_screen(&app)), Some(42));
 }
 
 /// A shown blocked issue is picked and confirmed like any other.
@@ -197,16 +138,5 @@ async fn the_feature_list_counts_only_its_own_hidden_issues() {
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(start_work(&app).hidden_blocked(), 1);
     let screen = rendered(&mut app);
-    assert!(screen.contains("1 blocked hidden"), "{screen}");
-}
-
-/// Every issue blocked and hidden: the cards say so instead of nothing.
-#[tokio::test]
-async fn cards_with_every_issue_hidden_say_so() {
-    let (_dir, mut app, _) = app_with_issues(Vec::new());
-    app.sessions = Some(Vec::new());
-    app.issues = Some(vec![blocked_issue(7, "Waits on nine", &[9])]);
-    let screen = rendered(&mut app);
-    assert!(screen.contains("No unblocked issues"), "{screen}");
     assert!(screen.contains("1 blocked hidden"), "{screen}");
 }

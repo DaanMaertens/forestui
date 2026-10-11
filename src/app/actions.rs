@@ -162,10 +162,10 @@ impl App {
         }
     }
 
-    /// Show or hide blocked issues, in Start work and on the issue cards
-    /// alike, and remember the choice. Saved here because the main loop is
-    /// the one writer of the settings file; only a failure is worth a toast,
-    /// since the lists changing is the confirmation.
+    /// Show or hide blocked issues in Start work, and remember the choice.
+    /// Saved here because the main loop is the one writer of the settings
+    /// file; only a failure is worth a toast, since the list changing is the
+    /// confirmation.
     fn set_show_blocked_issues(&mut self, show: bool) {
         if self.settings.show_blocked_issues == show {
             return;
@@ -611,14 +611,11 @@ impl App {
         let Some(repo) = self.state.find_repository(repo_id) else {
             return;
         };
-        // Opened over Start work's item step, or over nothing from an issue
-        // card. Anything else on top means the user moved on while the
-        // branches loaded.
-        let has_parent = match self.modals.last() {
-            None => false,
-            Some(Modal::StartWork(_)) => true,
-            Some(_) => return,
-        };
+        // Opened over Start work's item step. Anything else on top means the
+        // user moved on while the branches loaded.
+        if !matches!(self.modals.last(), Some(Modal::StartWork(_))) {
+            return;
+        }
         let layers = self.prompt_layers_for(&repo.source_path);
         let template = crate::prompt::resolve(
             &layers.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
@@ -632,7 +629,6 @@ impl App {
             template.text,
             list,
             settings_service::get_forest_path(),
-            has_parent,
         );
         self.modals.push(Modal::StartWorkConfirm(Box::new(modal)));
         if let Some(warning) = template.warning {
@@ -1110,40 +1106,6 @@ impl App {
             Action::RenameSession(index) => self.action_rename_session(index, &path),
             Action::TogglePinSession(index) => self.action_toggle_pin(index, &path),
             Action::DeleteSession(index) => self.action_delete_session(index, &path),
-            Action::RefreshIssues => {
-                // The cache is keyed by the *repository* path — `path` here is
-                // the selected path, which for a worktree row would be the
-                // worktree's directory and would invalidate nothing.
-                if let Some(repo) = self.state.selected_repository() {
-                    let repo_path = repo.source_path.clone();
-                    github::invalidate_cache(&repo_path);
-                    // The spinner is deliberate: the user asked for a refresh
-                    // and gets feedback.
-                    self.issues = None;
-                    self.fetch_issues();
-                }
-            }
-            Action::ToggleBlockedIssues => {
-                self.set_show_blocked_issues(!self.settings.show_blocked_issues);
-            }
-            Action::StartWorkOnIssue(index) => {
-                // The issue is captured here rather than looked up again when
-                // the branches land: `issues` is replaced wholesale by every
-                // refresh and by selecting another repository, so an index held
-                // across the branch load could resolve to a different issue —
-                // or to another repository's issue entirely, which then built a
-                // worktree in the wrong repository.
-                if let Some(repo_id) = self.state.selection.repository_id
-                    && let Some(issue) = self.issues.as_ref().and_then(|i| i.get(index)).cloned()
-                {
-                    let labels = self
-                        .state
-                        .find_repository(repo_id)
-                        .map(|repo| self.start_work_for(&repo.source_path).feature_labels);
-                    let mode = work::mode_for(&issue, &labels.unwrap_or_default());
-                    self.start_work_on_issue(repo_id, issue, mode);
-                }
-            }
             Action::PruneFinished => self.action_prune_finished(),
             Action::RemoveRepository | Action::Delete => self.action_delete(),
             Action::Archive | Action::Unarchive => self.action_toggle_archive(),

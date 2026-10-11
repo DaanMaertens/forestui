@@ -112,7 +112,6 @@ async fn clicking_a_sidebar_row_selects_it() {
 async fn clicking_a_detail_control_focuses_and_runs_it() {
     let (_dir, mut app) = app_with_fixture();
     app.sessions = Some(Vec::new());
-    app.issues = Some(Vec::new());
     snapshot_drawn(&mut app);
 
     let index = app
@@ -140,7 +139,6 @@ async fn clicking_a_detail_control_focuses_and_runs_it() {
 async fn a_disabled_control_does_not_activate() {
     let (_dir, mut app) = app_with_fixture();
     app.sessions = Some(Vec::new());
-    app.issues = Some(Vec::new());
     // The fixture has no remote, so the sync control renders disabled.
     assert!(!app.meta.has_remote);
     snapshot_drawn(&mut app);
@@ -170,10 +168,9 @@ async fn a_disabled_control_does_not_activate() {
 async fn a_click_resolves_against_the_drawn_frame_not_the_live_list() {
     let (_dir, mut app) = app_with_fixture();
     app.sessions = Some(Vec::new());
-    app.issues = Some(Vec::new());
     snapshot_drawn(&mut app);
 
-    // On the drawn frame (zero issues), this index is Remove Repository.
+    // On the drawn frame (no sessions), this index is Remove Repository.
     let index = app
         .detail_items()
         .iter()
@@ -181,34 +178,21 @@ async fn a_click_resolves_against_the_drawn_frame_not_the_live_list() {
         .expect("remove control present");
     app.push_hit(rect(40, 5, 20, 1), HitTarget::DetailItem(index));
 
-    // Issues finish loading before the click is handled; the live list
-    // grows and `index` would now point at the control before it.
-    let path = app
-        .state
-        .selected_repository()
-        .expect("repository selected")
-        .source_path
-        .clone();
-    app.handle_event(AppEvent::Issues {
-        path,
-        scope: crate::models::Scope::Mine,
-        issues: vec![
-            serde_json::from_str(
-                r#"{"number":1,"title":"t","createdAt":"2026-01-01T00:00:00Z",
-                        "updatedAt":"2026-01-01T00:00:00Z","labels":[]}"#,
-            )
-            .expect("issue fixture"),
-        ],
+    // Sessions finish loading before the click is handled; their card's
+    // controls land ahead of MANAGE, so `index` now points at another one.
+    app.handle_event(AppEvent::Sessions {
+        path: app.meta.path.clone(),
+        sessions: Some(vec![a_session("loaded")]),
     });
     assert_eq!(
         app.detail_items().get(index),
-        Some(&DetailItem::Action(Action::RepositorySettings)),
+        Some(&DetailItem::Action(Action::ResumeYolo(0))),
         "precondition: the live list did remap the index"
     );
 
     app.handle_mouse(click(45, 5));
-    // Remove Repository opens the confirm modal; Repository settings would
-    // instead have opened its chooser, or only notified.
+    // Remove Repository opens the confirm modal; resuming the session
+    // would instead have refused over the missing directory.
     assert!(
         matches!(app.modals.last(), Some(Modal::Confirm(_))),
         "the click fired the remapped control instead of the drawn one"

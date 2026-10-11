@@ -20,7 +20,7 @@ pub use mouse::{Direction, Hit, HitTarget, ModalClick, ScrollbarGeom};
 
 use crate::event::{AppEvent, DetailMeta, EventTx, Severity};
 use crate::modal::{Modal, StartWorkModal};
-use crate::models::{ClaudeSession, GitHubIssue, Scope, Settings};
+use crate::models::{ClaudeSession, Scope, Settings};
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use crate::state::AppState;
 use crate::ui::widgets::TextInput;
@@ -130,7 +130,6 @@ pub struct App {
 
     /// `None` while the background load is still running.
     pub sessions: Option<Vec<ClaudeSession>>,
-    pub issues: Option<Vec<GitHubIssue>>,
     pub meta: DetailMeta,
 
     pub gh_status: String,
@@ -284,7 +283,6 @@ impl App {
             sidebar_index: 0,
             detail_index: 0,
             sessions: None,
-            issues: None,
             meta: DetailMeta::default(),
             gh_status: "...".to_string(),
             pending_update: None,
@@ -821,7 +819,6 @@ impl App {
         self.detail_scroll = 0;
         self.detail_follow_focus = true;
         self.sessions = None;
-        self.issues = None;
         // Nothing of the new selection is on screen yet, and activating a
         // control from the previous pane against the new selection would act
         // on the wrong thing entirely.
@@ -903,7 +900,7 @@ impl App {
             if !matches!(self.repo_key(&path), Some(Some(_))) {
                 self.probe_github(path.clone(), false);
             }
-            self.load_issues(&path);
+            self.prefetch_issues(&path);
         }
     }
 
@@ -920,33 +917,21 @@ impl App {
         })
     }
 
-    /// Show the repository pane's issues for `path`: the cached list for the
-    /// scope in effect, refreshed behind it when stale or missing.
-    fn load_issues(&mut self, path: &str) {
-        match github::peek_issues(path, self.start_work_for(path).scope) {
-            // Fresh enough to stand on its own; the 300s tick refreshes.
-            Some((issues, true)) => self.issues = Some(issues),
-            // Stale content beats a spinner: render it and refresh behind.
-            Some((issues, false)) => {
-                self.issues = Some(issues);
-                self.fetch_issues_for(path.to_string());
-            }
-            None => {
-                self.issues = None;
-                self.fetch_issues_for(path.to_string());
-            }
+    /// Warm the issue cache for `path` in the background, so Start work's
+    /// issue list opens already filled. Nothing on screen waits on it: a
+    /// fresh cached list needs no fetch, and anything else is refreshed
+    /// silently.
+    pub(super) fn prefetch_issues(&mut self, path: &str) {
+        if !matches!(
+            github::peek_issues(path, self.start_work_for(path).scope),
+            Some((_, true))
+        ) {
+            self.fetch_issues_for(path.to_string());
         }
     }
 
-    fn fetch_issues(&mut self) {
-        let Some(repo) = self.state.selected_repository() else {
-            return;
-        };
-        self.fetch_issues_for(repo.source_path.clone());
-    }
-
-    /// Fetch the issues for one repository's checkout. The result folds into
-    /// whichever of the pane and an open Start work still want that path.
+    /// Fetch the issues for one repository's checkout. The result lands in
+    /// the cache, and folds into any open Start work for that path.
     pub(super) fn fetch_issues_for(&mut self, path: String) {
         let scope = self.start_work_for(&path).scope;
         self.fetch_issues_scoped(path, scope);
@@ -1020,7 +1005,7 @@ impl App {
     /// paints nothing at all rather than ten frames a second.
     fn on_tick(&mut self) {
         self.spinner_index = self.spinner_index.wrapping_add(1);
-        if self.issue_spinner_visible() || !self.sessions_refreshing.is_empty() {
+        if !self.sessions_refreshing.is_empty() {
             self.redraw = true;
         }
 
@@ -1070,28 +1055,20 @@ impl App {
 
         if self.last_issue_refresh.elapsed() >= ISSUE_REFRESH_INTERVAL {
             self.last_issue_refresh = Instant::now();
-            // Only while a repository pane is actually showing its issues —
-            // refreshing under a worktree pane would churn subprocesses (and
-            // destroy a warm cache) for content that is not on screen.
+            // Only while a repository is selected — the one whose Start work
+            // is a keypress away. Refreshing under a worktree pane would churn
+            // subprocesses (and destroy a warm cache) for nothing in reach.
             if self.state.selection.is_repository()
                 && let Some(repo) = self.state.selected_repository()
             {
                 // Invalidate only the repository being refreshed. Nuking the
                 // whole cache here made the next selection change on every
-                // other repository a guaranteed cold miss — spinner included.
+                // other repository a guaranteed cold miss.
                 let path = repo.source_path.clone();
                 github::invalidate_cache(&path);
-                // No repaint yet: nothing changes on screen until the result
-                // arrives, and that event pays for its own.
-                self.fetch_issues();
+                self.fetch_issues_for(path);
             }
         }
-    }
-
-    /// Whether the issue-refresh spinner — the only consumer of
-    /// `spinner_index` — is on screen this frame.
-    fn issue_spinner_visible(&self) -> bool {
-        self.modals.is_empty() && self.state.selection.is_repository() && self.issues.is_none()
     }
 
     // ------------------------------------------------------------------- events
@@ -1255,19 +1232,6 @@ impl App {
                 // A flow takes only its own scope's list.
                 for flow in self.start_work_flows(&path) {
                     flow.set_issues(scope, issues.clone());
-                }
-                // The pane follows the setting: a list for the other scope
-                // was the flow's, or listed for a scope the repository's
-                // settings have since replaced.
-                if scope == self.start_work_for(&path).scope
-                    && self.state.selection.is_repository()
-                    && Some(path.as_str())
-                        == self
-                            .state
-                            .selected_repository()
-                            .map(|r| r.source_path.as_str())
-                {
-                    self.issues = Some(issues);
                 }
             }
             AppEvent::PullRequests {

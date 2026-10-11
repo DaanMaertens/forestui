@@ -187,8 +187,8 @@ work arrives from `tokio::spawn`.
 
 **Never block the event loop.** For any operation that may take time (git, gh,
 scanning session files):
-1. Render immediately with a loading state (`app.sessions` / `app.issues` are
-   `Option`, where `None` means "still loading").
+1. Render immediately with a loading state (`app.sessions` is an `Option`,
+   where `None` means "still loading").
 2. `tokio::spawn` the work with a cloned `EventTx`.
 3. Send an `AppEvent` when it completes; `App::handle_event` folds it into state.
 
@@ -651,7 +651,7 @@ proactively, not only when asked.
 scenarios with exact keystrokes and expected output. The P0 cases are the
 regression suite — run the relevant ones after any behavioural change.
 
-UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–106,
+UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–101/103–106,
 and the guards UC-90/96 are automated —
 frames plus on-disk assertions (`ASSERTIONS.txt`). Capture a build and compare
 two builds with:

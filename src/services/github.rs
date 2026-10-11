@@ -39,12 +39,13 @@ struct Cached {
 /// The cache is keyed by the repository *path* and the scope: a list
 /// fetched for the other scope answers a different question, so it is never
 /// served as this one, and the two are held side by side because the
-/// repository pane and an open Start work can each show a different one.
+/// prefetch warms the setting's scope while an open Start work can be
+/// listing the other.
 ///
 /// The path is the one identifier the app
 /// holds synchronously. Keying by `owner/repo` made every lookup pay a
 /// `gh repo view` subprocess before it could even ask the cache, which is why
-/// the issues panel flashed "Loading…" on every selection change (#29).
+/// the issues list used to flash "Loading…" on every selection change (#29).
 ///
 /// Its own type rather than fields of [`State`] so tests can each hold one:
 /// the process-wide instance is shared by every test thread, and a test that

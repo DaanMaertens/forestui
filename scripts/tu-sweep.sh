@@ -134,10 +134,9 @@ exec sleep 600
 STUB
 chmod +x "$ROOT/bin/claude"
 
-# A `gh` that answers the four calls both builds make. Without it the GitHub
-# section renders "No issues found" on both sides and the issue rows — card,
-# title, labels, Start work button — go uncompared, which is exactly how the
-# session cards stayed unexamined for so long.
+# A `gh` that answers the four calls both builds make. Without it Start work's
+# issue lists, which the repository pane prefetches, would only ever show their
+# empty state, and the finished check would have nothing to mark.
 cat > "$ROOT/bin/gh" <<'GH'
 #!/bin/sh
 case "$1 $2" in
@@ -161,8 +160,8 @@ case "$1 $2" in
 JSON
         ;;
       # beta alone also has a feature issue, for Start work's feature mode
-      # (UC-100). No compared frame shows beta's issue rows, so the frozen
-      # Python frames are unaffected.
+      # (UC-100). Only Start work shows it, so the frozen Python frames are
+      # unaffected.
       *--author*)
         case "$PWD" in
           */beta)
@@ -380,7 +379,7 @@ text = re.sub(r"dev-\d{4}", "dev-<hhmm>", text)
 # that kept dirtying UC-82.
 text = re.sub(r"(forestui-[a-z0-9-]+?)-\d+\b", r"\1-<pid>", text)
 text = re.sub(r"\b[0-9a-f]{7}\b", "<sha>", text)
-# Bare or parenthesised: session cards and issue rows print "N days ago"
+# Bare or parenthesised: session cards print "N days ago"
 # with no parentheses, and an unmasked one rots the committed frames daily.
 text = re.sub(r"\b(\d+|an?) (seconds?|minutes?|hours?|days?|months?|years?) ago\b", "<rel>", text)
 text = re.sub(r"\ba moment ago\b", "<rel>", text)
@@ -442,7 +441,8 @@ capture UC-53 boot-repository-detail
 # UC-95/96: the fixture must actually exercise every section, and the capture
 # must be tall enough to show it. A section that falls back to its empty state —
 # or scrolls off the frame — is a section nobody is comparing. The session cards
-# went unexamined that way for days, and the issue rows right behind them.
+# went unexamined that way for days. MANAGE is the pane's last section, so
+# seeing it proves nothing below the sessions was cut off either.
 tu resize --name "$SESS" 140x140 >/dev/null 2>&1
 sleep 2.0
 capture UC-96 repository-pane-full-height
@@ -450,9 +450,10 @@ tall="$FRAMES/UC-96-repository-pane-full-height.txt"
 
 has_in_tall() { grep -qE "$1" "$tall" 2>/dev/null && echo yes || echo no; }
 assert UC-96 sessions-rendered "yes" "$(has_in_tall 'msgs')"
-assert UC-96 issues-rendered   "yes" "$(has_in_tall '#326|#298')"
+assert UC-96 manage-rendered   "yes" "$(has_in_tall 'Remove Repository')"
+assert UC-96 no-issues-section "no"  "$(has_in_tall 'GITHUB ISSUES|#326|#298')"
 assert UC-96 no-empty-sections "yes" \
-  "$(grep -qE 'No sessions found|No issues found|No repositories' "$tall" && echo no || echo yes)"
+  "$(grep -qE 'No sessions found|No repositories' "$tall" && echo no || echo yes)"
 
 tu resize --name "$SESS" 140x44 >/dev/null 2>&1
 sleep 1.5
@@ -793,7 +794,11 @@ if [ "$LABEL" = "rust" ]; then
   focus_app
   press s; await "Work Mode"; sleep 0.8
   capture UC-99 start-work-mode
-  press Enter; await "#298"; sleep 0.8
+  # Selecting beta prefetched its issues into the cache, so the list opens
+  # filled rather than on its loading line.
+  press Enter; await "Start Work: issue"
+  assert UC-99 opens-already-filled "no" "$(screen_has 'Loading issues')"
+  await "#298"; sleep 0.8
   capture UC-99 start-work-item
   assert UC-99 lists-only-mine "no" "$(screen_has '#412')"
   # Show blocked, then Not just mine: the list widens for this pick alone,
@@ -879,39 +884,9 @@ if [ "$LABEL" = "rust" ]; then
   assert UC-101 worktree-selected "yes" "$(screen_has 'Worktree: +feat-77')"
 fi
 
-# --- UC-102: an issue card's Start work ---------------------------------------
-#
-# Rust only, after UC-101. The cards sit below the fold, so the terminal grows
-# as in UC-96. Start work matches in screen order: the pane's own button
-# first, then one per card, newest issue first — #326, #298, #77.
-if [ "$LABEL" = "rust" ]; then
-  focus_app
-  tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
-  await "Repository: beta"
-  tu resize --name "$SESS" 140x80 >/dev/null 2>&1
-  await "#77 Dark mode"; sleep 1
-  worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
-  capture UC-102 issue-card-start-work
-  assert UC-102 card-offers-start-work "no" "$(screen_has 'Create WT')"
-  tu mouse click --name "$SESS" --on-text "Start work" --match-index 1 >/dev/null 2>&1
-  await "Launch"; sleep 0.8
-  capture UC-102 issue-card-confirm
-  assert UC-102 straight-to-confirm "yes" "$(screen_has 'Start Work: Issue #326')"
-  assert UC-102 mode-step-skipped "no" "$(screen_has 'Work Mode')"
-  press Escape; sleep 1
-  assert UC-102 cancel-closes-it "no" "$(screen_has 'Launch')"
-  # #77 was started in UC-100: its card jumps rather than confirming.
-  tu mouse click --name "$SESS" --on-text "Start work" --match-index 3 >/dev/null 2>&1
-  await "claude stub" 15000; sleep 1
-  assert UC-102 started-card-jumps "yes" "$(screen_has '[0-9]:feat-77[^ ]*\*')"
-  assert UC-102 nothing-created "$worktrees_before" \
-    "$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
-  tu resize --name "$SESS" 140x44 >/dev/null 2>&1
-fi
-
 # --- UC-103: Start work for a free-text feature --------------------------------
 #
-# Rust only, after UC-102. The free-text entry leads beta's `feature` list; the
+# Rust only, after UC-101. The free-text entry leads beta's `feature` list; the
 # description names the worktree, rides into the prompt as `{body}`, and is
 # what the worktree's link records. Nothing is asked of GitHub. Starting the
 # same words a second time asks about the taken name instead of matching it.

@@ -14,7 +14,6 @@ use super::App;
 use crate::models::Speaker;
 use crate::theme;
 use crate::util::Noun;
-use crate::work;
 use ratatui::style::Style;
 
 /// An actionable control in the detail pane — the immediate-mode stand-in for
@@ -38,12 +37,6 @@ pub enum Action {
     RenameSession(usize),
     TogglePinSession(usize),
     DeleteSession(usize),
-    RefreshIssues,
-    /// The issues header's "show blocked" checkbox, shared with Start work.
-    ToggleBlockedIssues,
-    /// An issue card's Start work: the confirm screen for that issue, by its
-    /// position in the whole loaded list — hidden issues included.
-    StartWorkOnIssue(usize),
     /// Choose one of the repository's settings files to open in an editor.
     RepositorySettings,
     /// Remove the repository's finished worktrees and their branches.
@@ -97,15 +90,6 @@ impl ControlSpec {
     }
 }
 
-/// The header line the issues section shares with its refresh control,
-/// which says whose issues the list holds.
-pub fn issues_header(scope: crate::models::Scope) -> &'static str {
-    match scope {
-        crate::models::Scope::Mine => "MY OPEN GITHUB ISSUES",
-        crate::models::Scope::All => "OPEN GITHUB ISSUES",
-    }
-}
-
 /// One piece of the pane, in rendering order.
 #[derive(Debug, Clone)]
 pub enum DetailNode {
@@ -125,9 +109,7 @@ pub enum DetailNode {
         style: Style,
     },
     /// Open a card; nodes until [`DetailNode::CardEnd`] land inside it.
-    CardStart {
-        padded: bool,
-    },
+    CardStart,
     CardEnd,
     /// A row of boxed controls. `lead` is non-clickable text sharing the line.
     Controls {
@@ -147,15 +129,6 @@ pub enum DetailNode {
     Field {
         field: Field,
         label: &'static str,
-    },
-    /// The issues header with its inline refresh control, whose glyph doubles
-    /// as the loading spinner, and the "show blocked" checkbox after it.
-    IssuesHeader {
-        title: &'static str,
-        glyph: char,
-        show_blocked: bool,
-        /// The hidden-count note, while blocked issues are hidden.
-        hidden: Option<String>,
     },
 }
 
@@ -201,10 +174,6 @@ pub fn drawn(nodes: &[DetailNode]) -> Vec<(DetailItem, bool)> {
                 }
             }
             DetailNode::Field { field, .. } => items.push((DetailItem::Field(*field), true)),
-            DetailNode::IssuesHeader { .. } => {
-                items.push((DetailItem::Action(Action::RefreshIssues), true));
-                items.push((DetailItem::Action(Action::ToggleBlockedIssues), true));
-            }
             _ => {}
         }
     }
@@ -270,9 +239,6 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
     nodes.push(DetailNode::Rule);
     claude(nodes, app);
     sessions(nodes, app);
-
-    nodes.push(DetailNode::Rule);
-    issues(nodes, app);
 
     nodes.push(DetailNode::Rule);
     nodes.push(DetailNode::Section("MANAGE"));
@@ -500,10 +466,10 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
         let live = app.live_sessions.get(&session.id);
         let pinned = app.state.is_pinned(&path, &session.id);
         nodes.push(DetailNode::Blank);
-        // Unpadded: the card's own top and bottom blanks cost two rows per
-        // session, and with five cards on screen that is ten rows of nothing.
-        // The name carries the separation instead, where it does some work.
-        nodes.push(DetailNode::CardStart { padded: false });
+        // No padding rows inside the card: top and bottom blanks would cost
+        // two rows per session, and with five cards on screen that is ten
+        // rows of nothing. The name carries the separation instead.
+        nodes.push(DetailNode::CardStart);
 
         // The left column, top to bottom: title, a blank, the turns, a blank,
         // the branch, the meta. The buttons float to its right, sharing these
@@ -661,96 +627,6 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
         nodes.push(DetailNode::CardBody {
             left,
             rows: vec![launch, manage],
-        });
-        nodes.push(DetailNode::CardEnd);
-    }
-}
-
-fn issues(nodes: &mut Vec<DetailNode>, app: &App) {
-    // The refresh control rides the header line and doubles as the loading
-    // spinner — Textual's `.refresh-btn` was flat, `height: 1; border: none`.
-    let show_blocked = app.settings.show_blocked_issues;
-    nodes.push(DetailNode::Blank);
-    nodes.push(DetailNode::IssuesHeader {
-        title: issues_header(
-            app.state
-                .selected_repository()
-                .map_or(app.settings.start_work.scope, |repo| {
-                    app.start_work_for(&repo.source_path).scope
-                }),
-        ),
-        glyph: match app.issues {
-            Some(_) => '↻',
-            None => SPINNER[app.spinner_index % SPINNER.len()],
-        },
-        show_blocked,
-        hidden: app
-            .issues
-            .as_deref()
-            .and_then(|list| work::hidden_blocked_text(work::hidden_blocked(list, show_blocked))),
-    });
-
-    let Some(list) = app.issues.as_deref() else {
-        text(nodes, "Loading...", theme::muted());
-        return;
-    };
-    if list.is_empty() {
-        text(nodes, "No issues found", theme::muted());
-        return;
-    }
-    // Enumerated before filtering: the index is into the whole list, which
-    // is what Start work resolves it against.
-    let shown: Vec<_> = list
-        .iter()
-        .enumerate()
-        .filter(|(_, issue)| work::is_shown(issue, show_blocked))
-        .collect();
-    // The header already says how many are hidden; this says that is all
-    // there is, rather than leaving a header over nothing.
-    if shown.is_empty() {
-        text(nodes, "No unblocked issues", theme::muted());
-        return;
-    }
-    for (index, issue) in shown {
-        nodes.push(DetailNode::Blank);
-        nodes.push(DetailNode::CardStart { padded: true });
-
-        let mut meta = issue.relative_time();
-        let labels: Vec<&str> = issue
-            .labels
-            .iter()
-            .take(2)
-            .map(|label| label.name.as_str())
-            .collect();
-        if !labels.is_empty() {
-            meta.push_str(&format!(" • {}", labels.join(", ")));
-        }
-        // The marker takes the spare line between title and meta, where the
-        // labels cannot push it past the clip at the buttons.
-        let marker = work::blocked_marker(issue)
-            .map(|marker| vec![(marker, theme::warning())])
-            .unwrap_or_default();
-        // The button floats beside the text instead of taking a full-width
-        // band, same as the session cards: title, a blank, the meta on the
-        // left; Start work's three rows share those same lines on the right.
-        nodes.push(DetailNode::CardBody {
-            left: vec![
-                vec![(
-                    format!(
-                        "#{} {}",
-                        issue.number,
-                        crate::util::truncate(&issue.title, 45)
-                    ),
-                    theme::primary(),
-                )],
-                marker,
-                vec![(meta, theme::muted())],
-            ],
-            rows: vec![vec![ControlSpec::new(
-                Action::StartWorkOnIssue(index),
-                "Start work",
-                theme::Variant::Normal,
-            )]],
         });
         nodes.push(DetailNode::CardEnd);
     }

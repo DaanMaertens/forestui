@@ -33,7 +33,6 @@ async fn moving_the_sidebar_cursor_changes_the_selection() {
 async fn detail_items_differ_between_repository_and_worktree() {
     let (_dir, mut app) = app_with_fixture();
     app.sessions = Some(Vec::new());
-    app.issues = Some(Vec::new());
 
     let repo_items = app.detail_items();
     assert!(repo_items.contains(&DetailItem::Action(Action::StartWork)));
@@ -52,7 +51,6 @@ async fn detail_items_differ_between_repository_and_worktree() {
 #[tokio::test]
 async fn custom_buttons_add_one_control_per_session_and_one_at_the_top() {
     let (_dir, mut app) = app_with_fixture();
-    app.issues = Some(Vec::new());
     app.sessions = Some(Vec::new());
     let baseline = app.detail_items().len();
 
@@ -206,7 +204,7 @@ async fn startup_activates_the_saved_theme() {
 }
 
 #[tokio::test]
-async fn a_warm_cache_renders_issues_without_a_loading_flash() {
+async fn selecting_a_repository_prefetches_only_a_cold_cache() {
     let (_dir, mut app) = app_with_fixture();
     let path = app
         .state
@@ -227,15 +225,25 @@ async fn a_warm_cache_renders_issues_without_a_loading_flash() {
         chrono::Utc::now(),
     );
 
-    // Leave the repository and come back: the second visit must render
-    // from cache synchronously, not drop to the Loading state (#29).
+    // Leave the repository and come back: a fresh cache is what Start
+    // work will list, so there is nothing to fetch.
+    app.issues_in_flight.clear();
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Up));
-    let issues = app
-        .issues
-        .as_ref()
-        .expect("no Loading flash on a warm cache");
-    assert_eq!(issues[0].number, 9);
+    assert!(
+        app.issues_in_flight.is_empty(),
+        "a warm cache was refetched"
+    );
+
+    // Once it goes cold, coming back warms it again in the background.
+    crate::services::github::invalidate_cache(&path);
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Up));
+    assert!(
+        app.issues_in_flight
+            .contains(&(path, crate::models::Scope::Mine)),
+        "a cold cache was not prefetched"
+    );
 }
 
 #[tokio::test]

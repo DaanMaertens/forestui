@@ -134,7 +134,6 @@ fn confirm_modal() -> Modal {
         crate::prompt::ISSUE_TEMPLATE.to_string(),
         branches,
         PathBuf::from("/forest"),
-        true,
     )))
 }
 

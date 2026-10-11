@@ -73,7 +73,7 @@ pub fn naturaltime(when: DateTime<Utc>) -> String {
 /// Its shape is not obvious and the boundaries are not round numbers — sub-day
 /// units are *rounded* rather than truncated, and anything from 16 days up is
 /// fuzzed into months at 30.5 days each — so it is transcribed rather than
-/// reinvented. Getting this wrong is quiet: every session and issue card grows
+/// reinvented. Getting this wrong is quiet: every session card grows
 /// a slightly different timestamp than the Python build showed.
 pub fn naturaldelta(secs: u64) -> String {
     const MINUTE: u64 = 60;

@@ -95,20 +95,12 @@ async fn an_idle_tick_does_not_repaint() {
     }
 }
 
-/// While the issue spinner is on screen the tick is what animates it.
+/// The issue prefetch draws nothing, so a repository pane waiting on it
+/// is idle: away from the whole-second boundary, the tick paints nothing.
 #[tokio::test]
-async fn a_tick_repaints_while_the_issue_spinner_is_visible() {
+async fn an_issue_prefetch_does_not_animate_the_pane() {
     let (_dir, mut app) = app_with_fixture();
     assert!(app.state.selection.is_repository());
-    app.issues = None;
-    app.redraw = false;
-
-    app.handle_event(AppEvent::Tick);
-    assert!(app.redraw, "the spinner froze");
-
-    // Once the issues have landed there is nothing animating. Away from
-    // the whole-second boundary, a loaded pane paints nothing.
-    app.issues = Some(Vec::new());
     app.sessions = Some(Vec::new());
     app.notifications.clear();
     app.spinner_index = 1;

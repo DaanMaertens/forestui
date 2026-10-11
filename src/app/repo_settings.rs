@@ -181,7 +181,7 @@ impl App {
 
     /// Hand a checkout's settings, if they changed from `before`, to an open
     /// Start work; and, if they changed whose issues are listed, re-list
-    /// them wherever they are shown.
+    /// them for the flow and re-warm the cache for the selected repository.
     fn settings_changed(&mut self, path: &str, before: &StartWorkSettings) {
         let after = self.start_work_for(path);
         if after == *before {
@@ -195,14 +195,14 @@ impl App {
         if after.scope == before.scope {
             return;
         }
-        let shown = self.state.selection.is_repository()
+        let selected = self.state.selection.is_repository()
             && self
                 .state
                 .selected_repository()
                 .map(|r| r.source_path.as_str())
                 == Some(path);
-        if shown {
-            self.load_issues(path);
+        if selected {
+            self.prefetch_issues(path);
         }
         // The flow dropped both lists, fetched for the old scope.
         if flow_open {

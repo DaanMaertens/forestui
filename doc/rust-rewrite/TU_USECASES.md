@@ -141,7 +141,7 @@ fui_fixture() {
   import checkbox at all — the reconcile scan adopts whatever
   `git worktree list` reports, wherever it lives, and dedups by path.
 - Isolated `HOME` means `gh` is unauthenticated, so the sidebar always shows
-  `gh cli: unauth'd` and the GitHub-issues section is always empty. Deterministic.
+  `gh cli: unauth'd` and Start work's issue lists are always empty. Deterministic.
 - Isolated `HOME` means settings are always defaults on first run:
   editor `vim`, branch prefix `feat/`, theme `system`, no custom buttons.
 
@@ -399,8 +399,8 @@ parses `[...]` as console markup and swallows it.
 
 ### UC-12 — Repository detail: full section layout
 **Area:** Repo detail | **Priority:** P0 | 🟢 EXECUTED (partial — sections above
-`RECENT SESSIONS` verified on screen; `MY OPEN GITHUB ISSUES` and `MANAGE` read from
-source, they sit below the fold at 120x40)
+`RECENT SESSIONS` verified on screen; `MANAGE` read from source, it sits below
+the fold at 120x40)
 **Setup:** UC-08 done, `alpha` selected, terminal `120x70`
 (`tu resize --name fui 120x70`).
 **Steps:**
@@ -421,8 +421,6 @@ CLAUDE
 [ New Session ] [ New Session: YOLO ]
 RECENT SESSIONS
 No sessions found
-MY OPEN GITHUB ISSUES            [↻]
-No issues found
 MANAGE
 [  Remove Repository ]
 ```
@@ -463,19 +461,21 @@ that is a feature, and it changes the parity baseline.
 
 ---
 
-### UC-15 — GitHub issues section shows the spinner then settles
+### UC-15 — Selecting a repository warms its issues silently
 **Area:** Repo detail | **Priority:** P2 | ⚪ SOURCE
 **Setup:** UC-08; `gh` unauthenticated under the isolated `HOME`.
 **Steps:**
 1. Select a repository.
 2. Immediately `tu screenshot --name fui` (within ~1s).
-3. `sleep 3`; `tu screenshot --name fui`
+3. `sleep 3`; `s`, `Enter` (mode `issue`); `tu screenshot --name fui`
 
-**Expected:** the refresh button next to `MY OPEN GITHUB ISSUES` cycles through
-`|`, `/`, `-`, `\` while loading (50ms tick) and returns to `↻` when the fetch
-resolves. With `gh` unauthenticated the list settles on `No issues found` and
-**never blocks the UI** — the pane is fully interactive during the fetch.
-**Fails if:** the app freezes while `gh` runs, or the spinner never stops.
+**Expected:** the repository pane has no issues section and draws nothing
+while the fetch runs — no spinner, no `Loading...`. The fetch only warms the
+GitHub issue cache, so Start work's `issue` list opens already settled (here on
+its empty state, `gh` being unauthenticated) and **never blocks the UI**.
+**Fails if:** the app freezes while `gh` runs, an issues section or spinner
+appears on the pane, or Start work's list opens loading after the fetch
+resolved.
 
 ---
 
@@ -946,27 +946,28 @@ window name.
 
 ---
 
-### UC-38 — Start work from a GitHub issue card
+### UC-38 — Start work from a real GitHub issue
 **Area:** Modals | **Priority:** P2 | ⚪ SOURCE
 **Setup:** requires a **real** authenticated `gh` and a GitHub repo with an open
 issue assigned to or authored by the user. Cannot run under the isolated `HOME`;
 run it as an opt-in tier with `--env HOME=$REAL_HOME` and a scratch clone.
-UC-102 covers the same path against the sweep's `gh` stub.
+UC-99 and UC-100 cover the same path against the sweep's `gh` stub.
 **Steps:**
-1. Select the repo, wait for `MY OPEN GITHUB ISSUES` to populate.
-2. `tu mouse click --name fui --on-text "Start work" --match-index 1` (index 0 is
-   the pane's own Start work); `sleep 2`; `tu screenshot --name fui`
+1. Select the repo and wait a few seconds for the background issue fetch.
+2. `s`, `Enter` (mode `issue`, or `Down` `Enter` for `feature`); `tu screenshot
+   --name fui`
+3. `Enter` on an issue; `sleep 2`; `tu screenshot --name fui`
 
-**Expected:** Start work's confirm screen, with no mode or item step before it,
-titled `Start Work: Issue #<n>` — or `Feature #<n>` when the issue carries a
-feature label (`enhancement`). Name, branch and prompt follow that mode
-(UC-99/UC-100); the base branch defaults to the remote's default branch;
-`Pull repo before creating` is ticked; `Fetch` spins `| / - \` at 10Hz while
-`git fetch` runs and refreshes the suggester afterwards. Its dismiss button
-reads `Cancel`, since nothing is beneath it. An issue that already has a
+**Expected:** the item list is already filled when it opens. Picking an issue
+opens Start work's confirm screen titled `Start Work: Issue #<n>` — or
+`Feature #<n>` for one carrying a feature label (`enhancement`). Name, branch
+and prompt follow that mode (UC-99/UC-100); the base branch defaults to the
+remote's default branch; `Pull repo before creating` is ticked; `Fetch` spins
+`| / - \` at 10Hz while `git fetch` runs and refreshes the suggester
+afterwards. Its dismiss button reads `Back`. An issue that already has a
 worktree jumps there instead (UC-101).
-**Fails if:** a card still reads `Create WT`, the mode or item step shows, the
-mode ignores the labels, or a started issue opens the confirm screen.
+**Fails if:** the list opens loading after the fetch resolved, the mode ignores
+the labels, or a started issue opens the confirm screen.
 
 ---
 
@@ -1091,8 +1092,8 @@ never wedge the UI.
 1. `sleep 5`; `tu screenshot --name fui --png -o /tmp/uc45.png`; `Read` it.
 
 **Expected:** sidebar shows `gh cli: missing`, styled with the **error** class (not
-the warn class used for `unauth'd`). The issues section settles on
-`No issues found`. The app is fully usable.
+the warn class used for `unauth'd`). Start work's issue lists settle on their
+empty state. The app is fully usable.
 Status → display mapping: `authenticated` + user → `ok (<login>)`; `authenticated`
 alone → `ok`; `not_authenticated` → `unauth'd`; `not_installed` → `missing`.
 **Fails if:** a missing `gh` produces a traceback, a hang, or an error toast.
@@ -1125,8 +1126,8 @@ Same tolerance for `settings.json`: unparseable → fall back to defaults.
    `tu press --name fui s`, `tu press --name fui Escape` within the first 2s.
 2. `tu screenshot --name fui` after each.
 
-**Expected:** every keystroke is honoured within ~1s. The issues section shows
-`Loading...` then the spinner; the rest of the UI is fully interactive throughout.
+**Expected:** every keystroke is honoured within ~1s, while the background
+loads (sessions, issues) run; the UI is fully interactive throughout.
 **Fails if:** the UI freezes — the CLAUDE.md contract is "render immediately,
 dispatch work to the background, update reactively", and it must survive the port.
 
@@ -1456,11 +1457,10 @@ That was a real bug this case caught.
 follows the cursor with no `Enter` needed.
 
 ### UC-77 — Create worktree from a GitHub issue — ⬛ RETIRED
-The Create-from-issue dialog was replaced by Start work (issue #6): an issue
-card's `Start work` opens Start work's confirm screen, which carries the base
-branch, Fetch and pull-first checkbox the dialog had. That path is UC-102,
-driven against a stubbed `gh`, so the credentials this case was blocked on are
-no longer needed.
+The Create-from-issue dialog was replaced by Start work (issue #6), whose
+confirm screen carries the base branch, Fetch and pull-first checkbox the
+dialog had. That path is UC-99, driven against a stubbed `gh`, so the
+credentials this case was blocked on are no longer needed.
 
 ---
 
@@ -1688,22 +1688,14 @@ outside forestui's tmux session is named by pid instead.
 **Fails if:** the row is unmarked, the confirm screen opens, a second worktree
 appears in the config, or the window does not switch.
 
-### UC-102 — An issue card's Start work
-**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** after UC-101, click beta's sidebar row, grow the terminal to 140x80
-so the issue cards are on screen, then click the first card's `Start work`
-(#326). `Escape`, then click `#77`'s card's `Start work`.
-**Expected:** every card carries `Start work`; none reads `Create WT`. #326's
-opens the confirm screen directly, titled `Start Work: Issue #326` — no
-`Work Mode` step — and `Escape` closes it. #77 was started in UC-100, so its
-card jumps to that worktree's Claude window instead, and no worktree is
-created. That #77 would otherwise open as a feature is unit-tested.
-**Fails if:** a card reads `Create WT`, the mode step shows, the confirm
-screen does not open, or the started issue is not jumped to.
+### UC-102 — An issue card's Start work — ⬛ RETIRED
+The repository pane's issue cards were removed (issue #50); issues are picked
+only through Start work (UC-99, UC-100). The sweep no longer captures this
+case and its `baseline/rust/UC-102-*` frames are gone.
 
 ### UC-103 — Start work for a free-text feature
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** after UC-102, click beta's sidebar row, `s` → `Down` `Enter` (mode
+**Steps:** after UC-101, click beta's sidebar row, `s` → `Down` `Enter` (mode
 `feature`) → `Enter` (`✎ Free-text feature…`, first in the list) → type
 `Try a quick spike on caching` → `Enter` → `Enter` (Launch). Then the same
 again up to the second `Enter` on the description, and `Escape` four times.
@@ -1830,12 +1822,12 @@ composite shows a difference not listed above, treat it as a regression.
 | Hand-driven, unscripted | 71–77 (77 retired) | 4 |
 | Flows & mouse | 78–89 | 8 |
 | Visual parity | 90–94 (93 retired) | 1 |
-| Start work | 99–106 | 8 |
+| Start work | 99–106 (102 retired) | 7 |
 
 **104 numbered use cases written up here (UC-97 and 98 are assertions in
-`tu-sweep.sh` only), 3 retired with the `?` binding (UC-26, 59, 93) and 1 with
-the Create-from-issue dialog (UC-77) —
-100 active · 60 P0 · 82 executed live · 17 written from source only · 1 in
+`tu-sweep.sh` only), 3 retired with the `?` binding (UC-26, 59, 93), 1 with
+the Create-from-issue dialog (UC-77) and 1 with the issue cards (UC-102) —
+99 active · 59 P0 · 81 executed live · 17 written from source only · 1 in
 progress (UC-94).**
 
 UC-01–52 were written against the Python build on 2026-08-14 (35 executed).

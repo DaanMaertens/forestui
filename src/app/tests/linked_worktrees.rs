@@ -164,29 +164,6 @@ async fn a_jump_the_user_moved_away_from_does_not_switch() {
     );
 }
 
-/// The card keeps one work item to one worktree too: a started issue
-/// jumps to its worktree instead of opening the confirm screen.
-#[tokio::test]
-async fn the_issue_card_jumps_to_a_started_issue() {
-    let (_dir, mut app, _) = app_with_issues(Vec::new());
-    app.issues = Some(two_issues());
-    let (beta, path) = link_worktree(&mut app, "beta", 7);
-    let worktrees = app.state.repositories()[0].worktrees.len();
-
-    app.run_action(Action::StartWorkOnIssue(1));
-
-    assert!(app.modals.is_empty(), "no confirm screen: {:?}", app.modals);
-    assert!(app.pending_start.is_none(), "no branch load");
-    assert_eq!(app.state.selection.worktree_id, Some(beta));
-    assert_eq!(app.meta.path, path);
-    assert_eq!(app.state.repositories()[0].worktrees.len(), worktrees);
-    assert!(
-        notified(&app).contains(&"Issue #7 is already in worktree 'beta'"),
-        "{:?}",
-        notified(&app)
-    );
-}
-
 /// The link is not derived from names: renaming the worktree and its
 /// branch keeps the item pointing at it.
 #[tokio::test]
