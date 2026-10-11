@@ -53,8 +53,32 @@ TMUXDIR="$(mktemp -d /tmp/fuisweepXXXX)"
 # prefix, which is why committed baselines did not reproduce across machines.
 ROOT="$(mktemp -d /tmp/fui-sweep.XXXXXX)"
 
+# `tu kill` ends a tmux *client*. The server that client started is a daemon
+# and outlives it, still running the forestui under test, and once TMUXDIR is
+# deleted nothing can reach its socket again: every sweep used to leave one
+# behind. So the server is stopped first, through tu like every other tmux
+# call this harness makes. -S names the throwaway socket outright, and TMUX is
+# dropped so the session running the sweep, often itself inside the user's
+# tmux, is never the server reached.
+reap_tmux_server() {
+  local socket="$TMUXDIR/tmux-$(id -u)/default"
+  [ -S "$socket" ] || return 0
+  tu run --name "$SESS-reap" --env TMUX_TMPDIR="$TMUXDIR" \
+    -- env -u TMUX tmux -S "$socket" kill-server >/dev/null 2>&1
+  local _
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    tu status --name "$SESS-reap" 2>/dev/null | grep -q '"alive":false' && break
+    sleep 0.2
+  done
+  tu kill --name "$SESS-reap" >/dev/null 2>&1
+}
+
 cleanup() {
+  # Every client this sweep may have started, should it stop part-way.
   tu kill --name "$SESS" >/dev/null 2>&1
+  tu kill --name "$SESS-b" >/dev/null 2>&1
+  tu kill --name "$SESS-c" >/dev/null 2>&1
+  reap_tmux_server
   rm -rf "$TMUXDIR" "$ROOT"
 }
 trap cleanup EXIT
