@@ -155,6 +155,33 @@ async fn repository_settings_name_the_worktrees_of_their_repository() {
     assert_eq!(confirm.name.value(), "issue-42-fix-login-bug");
 }
 
+/// A repository's own feature labels decide how its issues start: a
+/// `kind/feature` issue is a feature there, and an `enhancement` one, a
+/// feature under the global labels, is not.
+#[tokio::test]
+async fn a_repositorys_feature_labels_decide_how_its_issues_start() {
+    let repos = ReposDir::new();
+    repos.write(
+        "settings.json",
+        r#"{"start_work": {"feature_labels": ["kind/feature"]}}"#,
+    );
+    let issues = vec![
+        labelled_issue(7, "Dark mode", &["kind/feature"]),
+        labelled_issue(8, "Export", &["enhancement"]),
+    ];
+    for (query, branch) in [
+        ("dark", "feat/feat-7-dark-mode"),
+        ("export", "fix/issue-8-export"),
+    ] {
+        let (_dir, mut app, path) = app_with_issues(issues.clone());
+        on_github(&mut app, &path);
+
+        walk_to_confirm(&mut app, query);
+
+        assert_eq!(confirm_screen(&app).branch.value(), branch);
+    }
+}
+
 /// A repository's template wins over the global one.
 #[tokio::test]
 async fn a_repository_template_fills_the_confirm_screens_prompt() {
