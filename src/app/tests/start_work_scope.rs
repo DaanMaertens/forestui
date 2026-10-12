@@ -71,8 +71,7 @@ async fn the_scope_toggle_waits_for_its_own_list() {
 async fn the_scope_toggle_relists_the_pull_requests() {
     let (_dir, mut app, path) = app_with_issues(Vec::new());
     app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Down));
+    highlight_mode(&mut app, crate::work::WorkMode::PrReview);
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Tab));
     assert_eq!(

@@ -10,7 +10,6 @@
 
 
 
-
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
                               │   Start Work                                                                 │
@@ -19,6 +18,7 @@
                               │  Work Mode                                                                   │
                               │   issue      Fix a bug or chore from an open issue                           │
                               │   feature    Build a feature from a labelled issue                           │
+                              │   session    A Claude session for anything else                              │
                               │   pr-review  Review a pull request                                           │
                               │   worktree   A plain worktree: new or existing branch, no Claude             │
                               │                                                                              │

@@ -20,10 +20,7 @@ fn worktree_branches_loaded(app: &App) -> AppEvent {
 /// `s`, the `worktree` mode — last in the list — and its form, loaded.
 fn open_form(app: &mut App) {
     app.handle_key(key(KeyCode::Char('s')));
-    for _ in 0..3 {
-        app.handle_key(key(KeyCode::Down));
-    }
-    assert_eq!(start_work(app).mode, WorkMode::Worktree);
+    highlight_mode(app, WorkMode::Worktree);
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(start_work(app).step, StartWorkStep::Worktree);
     let loaded = worktree_branches_loaded(app);
@@ -83,9 +80,7 @@ async fn worktree_is_selectable_without_github() {
 async fn the_form_waits_for_the_branches() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
     app.handle_key(key(KeyCode::Char('s')));
-    for _ in 0..3 {
-        app.handle_key(key(KeyCode::Down));
-    }
+    highlight_mode(&mut app, WorkMode::Worktree);
     app.handle_key(key(KeyCode::Enter));
     assert!(start_work(&app).worktree.is_none());
     assert!(rendered(&mut app).contains("Loading branches..."));
@@ -103,9 +98,7 @@ async fn the_form_waits_for_the_branches() {
 async fn a_branch_load_for_another_target_does_not_fill_the_form() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
     app.handle_key(key(KeyCode::Char('s')));
-    for _ in 0..3 {
-        app.handle_key(key(KeyCode::Down));
-    }
+    highlight_mode(&mut app, WorkMode::Worktree);
     app.handle_key(key(KeyCode::Enter));
     let loaded = branches_loaded(&app);
     app.handle_event(loaded);

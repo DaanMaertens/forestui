@@ -1,0 +1,44 @@
+
+
+
+
+
+
+
+
+
+
+
+
+                              ┌──────────────────────────────────────────────────────────────────────────────┐
+                              │                                                                              │
+                              │   Start Work                                                                 │
+                              │                                                                              │
+                              │  in beta                                                                     │
+                              │  Work Mode                                                                   │
+                              │   issue      Fix a bug or chore from an open issue                           │
+                              │   feature    Build a feature from a labelled issue                           │
+                              │   session    A Claude session for anything else                              │
+                              │   pr-review  Review a pull request                                           │
+                              │   worktree   A plain worktree: new or existing branch, no Claude             │
+                              │                                                                              │
+                              │  Enter chooses · Esc closes                                                  │
+                              │                                  ┌────────┐                                  │
+                              │                                  │ Cancel │                                  │
+                              │                                  └────────┘                                  │
+                              │                                                                              │
+                              └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+[forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

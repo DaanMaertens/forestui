@@ -95,8 +95,8 @@ fn a_file_without_start_work_loads_todays_behaviour() {
     assert_eq!(start.issue.name_pattern, "issue-{number}-{slug}");
     assert_eq!(start.feature.branch_prefix, "feat/");
     assert_eq!(start.feature.name_pattern, "feat-{number}-{slug}");
-    assert_eq!(start.free_feature.branch_prefix, "feat/");
-    assert_eq!(start.free_feature.name_pattern, "feat-{slug}");
+    assert_eq!(start.session.branch_prefix, "session/");
+    assert_eq!(start.session.name_pattern, "session-{slug}");
     assert_eq!(start.pr_review.name_pattern, "pr-{number}-{slug}");
     assert_eq!(*start, StartWorkSettings::default());
 }
@@ -123,10 +123,27 @@ fn a_partial_start_work_section_fills_the_rest() {
     assert_eq!(start.issue.name_pattern, "issue-{number}-{slug}");
     assert_eq!(start.feature.branch_prefix, "feat/");
     assert_eq!(start.feature.name_pattern, "f{number}");
-    assert_eq!(
-        start.free_feature,
-        StartWorkSettings::default().free_feature
-    );
+    assert_eq!(start.session, StartWorkSettings::default().session);
+}
+
+/// The free-text feature's naming is gone, not migrated: a file that still
+/// has it loads cleanly, and its values do not reach sessions.
+#[test]
+fn an_old_free_feature_key_is_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    std::fs::write(
+        &p,
+        r#"{"default_editor": "nvim", "start_work": {
+            "scope": "all",
+            "free_feature": {"branch_prefix": "idea/", "name_pattern": "idea-{slug}"}
+        }}"#,
+    )
+    .unwrap();
+    let s = load_settings_from(&p);
+    assert_eq!(s.default_editor, "nvim");
+    assert_eq!(s.start_work.scope, Scope::All);
+    assert_eq!(s.start_work.session, StartWorkSettings::default().session);
 }
 
 /// A hand-edit that does not parse costs the Start work section, not the

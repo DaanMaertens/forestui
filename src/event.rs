@@ -126,9 +126,9 @@ pub enum AppEvent {
     },
     /// `gh` was asked which GitHub repository a checkout resolves to:
     /// `repo` keys its repository settings, and without one only a
-    /// free-text feature can be started. `for_start_work` when Start work
-    /// asked, which then wants the PRs for the scope that turns out to be in
-    /// effect.
+    /// session or a plain worktree can be started. `for_start_work` when
+    /// Start work asked, which then wants the PRs for the scope that turns
+    /// out to be in effect.
     GitHubChecked {
         path: String,
         repo: Option<crate::repo_settings::RepoKey>,

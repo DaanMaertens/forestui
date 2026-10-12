@@ -12,14 +12,14 @@
 
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
-                              │   Start Work: Free-text feature                                              │
+                              │   Start Work: Session                                                        │
                               │                                                                              │
                               │  in beta                                                                     │
-                              │  Description                                                                 │
+                              │  Prompt                                                                      │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │
                               │  │Try a quick spike on caching                                            │  │
                               │  └────────────────────────────────────────────────────────────────────────┘  │
-                              │  Worktree: feat-try-a-quick-spike-on-caching                                 │
+                              │  Worktree: session-try-a-quick-spike-on-caching                              │
                               │  Stays local: nothing is created on GitHub.                                  │
                               │                                                                              │
                               │  Enter continues · Esc goes back                                             │

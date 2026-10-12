@@ -202,12 +202,12 @@ impl App {
                 let repo_id = flow.repo_id;
                 self.start_work_on_pull_request(repo_id, *item);
             }
-            ModalEffect::ConfirmFreeText { description, copy } => {
+            ModalEffect::ConfirmSession { prompt, copy } => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
                     return;
                 };
                 let repo_id = flow.repo_id;
-                self.start_free_text(repo_id, description, copy);
+                self.start_session(repo_id, prompt, copy);
             }
             ModalEffect::OpenWorktree(worktree_id) => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
@@ -726,17 +726,17 @@ impl App {
         self.open_confirm(repo_id, start, BranchList::default());
     }
 
-    /// Start work on a free-text feature: the confirm screen once the
-    /// branches load. Its link is never looked up — a description is not an
-    /// identity, and the same words may well mean new work. What can collide
+    /// Start work on a session prompt: the confirm screen once the branches
+    /// load. Its link is never looked up — a prompt is not an identity, and
+    /// the same words may well mean new work. What can collide
     /// is the names: then the flow asks, and `copy` is its answer to take the
     /// next free suffix.
-    fn start_free_text(&mut self, repo_id: Uuid, description: String, copy: bool) {
+    fn start_session(&mut self, repo_id: Uuid, prompt: String, copy: bool) {
         let Some(repo) = self.state.find_repository(repo_id) else {
             return;
         };
         let start_work = self.start_work_for(&repo.source_path);
-        let Some(names) = work::free_text_names(&start_work, &description) else {
+        let Some(names) = work::session_names(&start_work, &prompt) else {
             return;
         };
         let worktrees = &repo.worktrees;
@@ -757,8 +757,8 @@ impl App {
             names
         };
         self.pending_start = Some(PendingStart {
-            mode: WorkMode::Feature,
-            item: WorkItem::FreeText { description },
+            mode: WorkMode::Session,
+            item: WorkItem::Session { prompt },
             names,
         });
         self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);

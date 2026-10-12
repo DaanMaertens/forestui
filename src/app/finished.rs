@@ -134,14 +134,14 @@ pub fn linked(repo: &Repository) -> Vec<LinkedWorktree> {
 /// `gh` missing or signed out, a branch git cannot resolve, no remote
 /// default branch — and keeps whatever mark it had.
 ///
-/// A free-text branch counts as merged only when its tip is in the default
+/// A session's branch counts as merged only when its tip is in the default
 /// branch, so a squash or rebase merge on GitHub goes unnoticed, as does a
 /// worktree from before `created_from_ref` was recorded.
 pub async fn check(source: &str, linked: &[LinkedWorktree]) -> HashMap<Uuid, bool> {
-    let is_free_text = |item: &&LinkedWorktree| matches!(item.link, WorkItemLink::FreeText { .. });
-    let signed_in = linked.iter().any(|item| !is_free_text(&item))
+    let is_session = |item: &&LinkedWorktree| matches!(item.link, WorkItemLink::Session { .. });
+    let signed_in = linked.iter().any(|item| !is_session(&item))
         && github::get_auth_status().await.0 == AuthStatus::Authenticated;
-    let target = if linked.iter().any(|item| is_free_text(&item)) {
+    let target = if linked.iter().any(|item| is_session(&item)) {
         let remotes = git::list_remotes(source).await.unwrap_or_default();
         git::remote_default_branch(source, &remotes).await
     } else {
@@ -159,7 +159,7 @@ pub async fn check(source: &str, linked: &[LinkedWorktree]) -> HashMap<Uuid, boo
                     .await
                     .map(Observed::State)
             }
-            WorkItemLink::FreeText { .. } => match (&target, &item.created_from) {
+            WorkItemLink::Session { .. } => match (&target, &item.created_from) {
                 (Some(target), Some(created_from)) => {
                     git::branch_progress(source, &item.branch, target, created_from)
                         .await

@@ -44,9 +44,7 @@ fn listed_prs(app: &App) -> Vec<i64> {
 async fn pr_review_lists_the_pull_requests_once_they_load() {
     let (_dir, mut app, path) = app_with_issues(two_issues());
     app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Down));
-    assert_eq!(start_work(&app).mode, crate::work::WorkMode::PrReview);
+    highlight_mode(&mut app, crate::work::WorkMode::PrReview);
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Item);
     assert!(start_work(&app).picker.is_none(), "still loading");
@@ -230,8 +228,7 @@ async fn a_pr_whose_branch_is_checked_out_jumps_there() {
         .map(|w| (w.id, w.branch.clone()))
         .expect("fixture worktree");
     app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Down));
+    highlight_mode(&mut app, crate::work::WorkMode::PrReview);
     app.handle_key(key(KeyCode::Enter));
     app.handle_event(AppEvent::PullRequests {
         scope: Scope::Mine,
@@ -269,8 +266,7 @@ async fn a_fork_pr_is_not_matched_by_branch_name() {
     let mut fork = open_pr(32, "From a fork", "alice", &branch);
     fork.is_cross_repository = true;
     app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Down));
+    highlight_mode(&mut app, crate::work::WorkMode::PrReview);
     app.handle_key(key(KeyCode::Enter));
     app.handle_event(AppEvent::PullRequests {
         scope: Scope::Mine,
@@ -293,8 +289,7 @@ async fn a_stray_pull_request_list_is_ignored() {
         path: "/somewhere/else".into(),
         result: Ok(pr_answer(two_prs(), None)),
     });
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Down));
+    highlight_mode(&mut app, crate::work::WorkMode::PrReview);
     app.handle_key(key(KeyCode::Enter));
     assert!(start_work(&app).picker.is_none(), "still loading");
 }
@@ -302,8 +297,7 @@ async fn a_stray_pull_request_list_is_ignored() {
 /// `s`, then `pr-review`, before `gh` has answered.
 fn choose_pr_review(app: &mut App) {
     app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Down));
+    highlight_mode(app, crate::work::WorkMode::PrReview);
     app.handle_key(key(KeyCode::Enter));
 }
 

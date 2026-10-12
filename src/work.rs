@@ -16,6 +16,9 @@ const SLUG_LIMIT: usize = 40;
 pub enum WorkMode {
     Issue,
     Feature,
+    /// A Claude session for work that is no issue or PR: its work item is a
+    /// session prompt the user types, which exists nowhere but here.
+    Session,
     PrReview,
     /// A plain worktree: no work item, no prompt, no Claude. It has no item
     /// list; its step is a form for the worktree and its branch.
@@ -24,9 +27,10 @@ pub enum WorkMode {
 
 impl WorkMode {
     /// Every mode, in the order the mode step lists them.
-    pub const ALL: [WorkMode; 4] = [
+    pub const ALL: [WorkMode; 5] = [
         WorkMode::Issue,
         WorkMode::Feature,
+        WorkMode::Session,
         WorkMode::PrReview,
         WorkMode::Worktree,
     ];
@@ -35,6 +39,7 @@ impl WorkMode {
         match self {
             WorkMode::Issue => "issue",
             WorkMode::Feature => "feature",
+            WorkMode::Session => "session",
             WorkMode::PrReview => "pr-review",
             WorkMode::Worktree => "worktree",
         }
@@ -44,6 +49,7 @@ impl WorkMode {
         match self {
             WorkMode::Issue => "Fix a bug or chore from an open issue",
             WorkMode::Feature => "Build a feature from a labelled issue",
+            WorkMode::Session => "A Claude session for anything else",
             WorkMode::PrReview => "Review a pull request",
             WorkMode::Worktree => "A plain worktree: new or existing branch, no Claude",
         }
@@ -162,9 +168,10 @@ pub fn names(
             &settings.feature.name_pattern,
         ),
         WorkMode::PrReview => (&String::new(), &settings.pr_review.name_pattern),
-        // Never reached: a plain worktree has no numbered item and is named
-        // by hand on its form. A bare number is the least surprising answer.
-        WorkMode::Worktree => (&String::new(), &String::new()),
+        // Never reached: a session has no number and is named by
+        // [`session_names`], and a plain worktree is named by hand on its
+        // form. A bare number is the least surprising answer.
+        WorkMode::Session | WorkMode::Worktree => (&String::new(), &String::new()),
     };
     let filled = fill_pattern(pattern, Some(number), &title_slug(title));
     // A pattern that fills to nothing would name every item alike.
@@ -208,27 +215,24 @@ pub fn title_slug(title: &str) -> String {
     capped.trim_matches('-').to_string()
 }
 
-/// How many words of a free-text description its names are made from. A
-/// description is a sentence or more, not a title, and a name built from
-/// all of it would be cut off mid-word by the cap anyway.
-const FREE_TEXT_WORDS: usize = 6;
+/// How many words of a session prompt its names are made from. A prompt is
+/// a sentence or more, not a title, and a name built from all of it would
+/// be cut off mid-word by the cap anyway.
+const SESSION_WORDS: usize = 6;
 
-/// Name the worktree and branch for a free-text feature, by the
-/// `free_feature` naming — `feat-<slug>` on `feat/` by default — from the
-/// description's first words. `None` when they hold nothing a name can be
-/// made of, or the pattern fills to nothing: a bare prefix would be shared
-/// by every such description. A pattern without `{slug}` names them all
-/// alike too; the clash question is what catches that.
-pub fn free_text_names(settings: &StartWorkSettings, description: &str) -> Option<WorktreeNames> {
-    let first_words: Vec<&str> = description
-        .split_whitespace()
-        .take(FREE_TEXT_WORDS)
-        .collect();
+/// Name the worktree and branch for a session, by the `session` naming —
+/// `session-<slug>` on `session/` by default — from the prompt's first
+/// words. `None` when they hold nothing a name can be made of, or the
+/// pattern fills to nothing: a bare prefix would be shared by every such
+/// prompt. A pattern without `{slug}` names them all alike too; the clash
+/// question is what catches that.
+pub fn session_names(settings: &StartWorkSettings, prompt: &str) -> Option<WorktreeNames> {
+    let first_words: Vec<&str> = prompt.split_whitespace().take(SESSION_WORDS).collect();
     let slug = title_slug(&first_words.join(" "));
     if slug.is_empty() {
         return None;
     }
-    let naming = &settings.free_feature;
+    let naming = &settings.session;
     let worktree = fill_pattern(&naming.name_pattern, None, &slug);
     if worktree.is_empty() {
         return None;
@@ -263,7 +267,7 @@ pub fn clash<'a>(names: &WorktreeNames, worktrees: &'a [Worktree]) -> Option<&'a
 }
 
 /// What a worktree is started for: an issue, a pull request to review, or a
-/// feature described in the user's own words that exists nowhere but here.
+/// session prompt typed in by the user, which exists nowhere but here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkItem {
     Issue {
@@ -280,8 +284,8 @@ pub enum WorkItem {
         from_fork: bool,
         review: ReviewKind,
     },
-    FreeText {
-        description: String,
+    Session {
+        prompt: String,
     },
 }
 
@@ -310,8 +314,8 @@ impl WorkItem {
         match self {
             WorkItem::Issue { number, .. } => WorkItemLink::Issue { number: *number },
             WorkItem::PullRequest { number, .. } => WorkItemLink::PullRequest { number: *number },
-            WorkItem::FreeText { description } => WorkItemLink::FreeText {
-                description: description.clone(),
+            WorkItem::Session { prompt } => WorkItemLink::Session {
+                prompt: prompt.clone(),
             },
         }
     }
@@ -323,7 +327,7 @@ impl WorkItem {
             WorkItem::Issue { .. } if mode == WorkMode::Feature => Template::Feature,
             WorkItem::Issue { .. } => Template::Issue,
             WorkItem::PullRequest { review, .. } => review.template(),
-            WorkItem::FreeText { .. } => Template::FreeFeature,
+            WorkItem::Session { .. } => Template::Session,
         }
     }
 }
@@ -333,7 +337,7 @@ impl WorkItem {
 pub enum Observed {
     /// GitHub's state for an issue or pull request.
     State(ItemState),
-    /// A free-text feature's branch, against the remote default branch.
+    /// A session's branch, against the remote default branch.
     Branch {
         /// The branch tip is contained in the default branch.
         merged: bool,
@@ -343,10 +347,10 @@ pub enum Observed {
 }
 
 /// Whether a worktree's work item is done: an issue closed, a pull request
-/// merged or closed, a free-text feature's branch merged. `None` when the
+/// merged or closed, a session's branch merged. `None` when the
 /// observation is not about this kind of link and so decides nothing.
 ///
-/// A free-text branch needs commits of its own: one just created from the
+/// A session's branch needs commits of its own: one just created from the
 /// default branch is already contained in it, and that is a worktree whose
 /// work has not started, not one whose work is done.
 pub fn is_finished(link: &WorkItemLink, observed: Observed) -> Option<bool> {
@@ -355,7 +359,7 @@ pub fn is_finished(link: &WorkItemLink, observed: Observed) -> Option<bool> {
             Some(state != ItemState::Open)
         }
         (
-            WorkItemLink::FreeText { .. },
+            WorkItemLink::Session { .. },
             Observed::Branch {
                 merged,
                 has_commits,
@@ -365,29 +369,17 @@ pub fn is_finished(link: &WorkItemLink, observed: Observed) -> Option<bool> {
     }
 }
 
-/// The label of the free-text entry, which is searched like any other row.
-pub const FREE_TEXT_LABEL: &str = "✎ Free-text feature…";
-
 /// One row of the item picker.
 #[derive(Debug, Clone)]
 pub enum ItemEntry {
-    /// Describe a feature that has no issue.
-    FreeText,
     Issue(IssueEntry),
     PullRequest(PullRequestEntry),
 }
 
 impl ItemEntry {
-    /// Whether the row is a work item from GitHub, rather than the
-    /// free-text entry that is always there.
-    pub fn is_item(&self) -> bool {
-        !matches!(self, ItemEntry::FreeText)
-    }
-
     /// The worktree already started for the row's item, if any.
     pub fn worktree(&self) -> Option<&str> {
         match self {
-            ItemEntry::FreeText => None,
             ItemEntry::Issue(entry) => entry.worktree.as_deref(),
             ItemEntry::PullRequest(entry) => entry.worktree.as_deref(),
         }
@@ -397,7 +389,6 @@ impl ItemEntry {
 impl Searchable for ItemEntry {
     fn search_text(&self) -> &str {
         match self {
-            ItemEntry::FreeText => FREE_TEXT_LABEL,
             ItemEntry::Issue(entry) => entry.search_text(),
             ItemEntry::PullRequest(entry) => entry.search_text(),
         }
@@ -482,7 +473,7 @@ pub fn blocked_marker(issue: &GitHubIssue) -> Option<String> {
 
 /// The rows a mode's picker lists: the issues it lists — less the blocked
 /// ones, unless `show_blocked` — each with the worktree `linked` says it was
-/// started in, behind the free-text entry in `feature`.
+/// started in.
 pub fn item_entries(
     mode: WorkMode,
     issues: &[GitHubIssue],
@@ -490,18 +481,13 @@ pub fn item_entries(
     show_blocked: bool,
     linked: impl Fn(i64) -> Option<String>,
 ) -> Vec<ItemEntry> {
-    let free_text = (mode == WorkMode::Feature).then_some(ItemEntry::FreeText);
-    free_text
+    issues_for(mode, issues, feature_labels)
         .into_iter()
-        .chain(
-            issues_for(mode, issues, feature_labels)
-                .into_iter()
-                .filter(|issue| is_shown(issue, show_blocked))
-                .map(|issue| {
-                    let worktree = linked(issue.number);
-                    ItemEntry::Issue(IssueEntry::new(issue, worktree))
-                }),
-        )
+        .filter(|issue| is_shown(issue, show_blocked))
+        .map(|issue| {
+            let worktree = linked(issue.number);
+            ItemEntry::Issue(IssueEntry::new(issue, worktree))
+        })
         .collect()
 }
 

@@ -491,15 +491,6 @@ fn count_line<T: Searchable>(picker: &SearchPicker<T>, noun: Noun) -> String {
     )
 }
 
-/// [`count_line`] for Start work's item list, counting the work items only:
-/// the free-text entry is always there and is not one of them.
-fn item_count_line(picker: &SearchPicker<ItemEntry>, noun: Noun) -> String {
-    let is_item = |e: &&ItemEntry| e.is_item();
-    let shown = picker.matches().filter(is_item).count();
-    let total = picker.entries().filter(is_item).count();
-    count_text(is_filtered(picker), shown, total, noun)
-}
-
 fn is_filtered<T: Searchable>(picker: &SearchPicker<T>) -> bool {
     !picker.query().value().trim().is_empty()
 }
@@ -551,7 +542,7 @@ fn start_work(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut 
     match modal.step {
         StartWorkStep::Mode => start_work_mode(frame, modal, area, hits),
         StartWorkStep::Item => start_work_item(frame, modal, area, hits),
-        StartWorkStep::Describe => start_work_describe(frame, modal, area, hits),
+        StartWorkStep::Prompt => start_work_prompt(frame, modal, area, hits),
         StartWorkStep::Clash => start_work_clash(frame, modal, area, hits),
         StartWorkStep::Worktree => start_work_worktree(frame, modal, area, hits),
     }
@@ -724,7 +715,6 @@ fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
     column.line(frame, widgets::section("Work Mode"));
     let focused = modal.focus == StartWorkModal::FOCUS_LIST;
-    let github = modal.has_github();
     for (row, mode) in WorkMode::ALL.into_iter().enumerate() {
         let enabled = modal.mode_enabled(mode);
         let style = if !enabled {
@@ -738,13 +728,7 @@ fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         } else {
             theme::primary()
         };
-        // Without GitHub, `feature` is only the free-text half of itself.
-        let description = if mode == WorkMode::Feature && !github {
-            "Describe a feature in your own words"
-        } else {
-            mode.description()
-        };
-        let mut text = format!(" {:<11}{description}", mode.label());
+        let mut text = format!(" {:<11}{}", mode.label(), mode.description());
         if !enabled {
             text.push_str("  (needs GitHub)");
         }
@@ -779,8 +763,9 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
     let (section, loading, empty, noun) = match modal.mode {
-        // `worktree` has a form, not an item list, so never lands here.
-        WorkMode::Issue | WorkMode::Worktree => (
+        // `session` has a prompt and `worktree` a form, not an item list,
+        // so neither lands here.
+        WorkMode::Issue | WorkMode::Session | WorkMode::Worktree => (
             "Issue",
             " Loading issues...",
             "No open non-feature issues",
@@ -827,13 +812,10 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
                 modal.focus,
                 StartWorkModal::FOCUS_LIST,
             );
-            // The free-text entry is not a work item: an empty list still
-            // says so above it, and the count is of the items alone.
-            let items = picker.entries().filter(|e| e.is_item()).count();
-            let (mut count, count_style) = if items == 0 {
+            let (mut count, count_style) = if picker.entry_count() == 0 {
                 (empty, empty_style)
             } else {
-                (item_count_line(picker, noun), theme::muted())
+                (count_line(picker, noun), theme::muted())
             };
             // Said beside the count, so an issue the list leaves out is
             // accounted for rather than missing.
@@ -911,25 +893,25 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     column.controls(frame, hits, controls, true);
 }
 
-const FREE_TEXT_TITLE: &str = "Start Work: Free-text feature";
+const SESSION_TITLE: &str = "Start Work: Session";
 
-fn start_work_describe(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
+fn start_work_prompt(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
     // Repo, label, input, names, local note, gap, hint, buttons.
     let rect = widgets::centered_rect(WIDTH, CHROME + 12, area);
-    let mut column = dialog(frame, rect, FREE_TEXT_TITLE, theme::title());
+    let mut column = dialog(frame, rect, SESSION_TITLE, theme::title());
 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
-    column.line(frame, widgets::section("Description"));
+    column.line(frame, widgets::section("Prompt"));
     column.input(
         frame,
         hits,
-        &modal.description,
+        &modal.prompt,
         modal.focus,
         StartWorkModal::FOCUS_LIST,
     );
     // What Enter would create, so the names are no surprise on the confirm
     // screen — and why Enter does nothing while there are none.
-    let names = match work::free_text_names(&modal.start_work, modal.description.value()) {
+    let names = match work::session_names(&modal.start_work, modal.prompt.value()) {
         Some(names) => format!("Worktree: {}", names.worktree),
         None => "Type a few words to name the worktree after".to_string(),
     };
@@ -950,7 +932,7 @@ fn start_work_clash(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits:
     };
     // Repo, question, two lines of choices explained, gap, buttons.
     let rect = widgets::centered_rect(WIDTH, CHROME + 9, area);
-    let mut column = dialog(frame, rect, FREE_TEXT_TITLE, theme::title());
+    let mut column = dialog(frame, rect, SESSION_TITLE, theme::title());
 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
     column.text(
@@ -964,11 +946,7 @@ fn start_work_clash(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits:
         format!("Open it, create {} instead,", clash.copy_name),
         theme::muted(),
     );
-    column.text(
-        frame,
-        "or go back and edit the description.",
-        theme::muted(),
-    );
+    column.text(frame, "or go back and edit the prompt.", theme::muted());
     column.controls(
         frame,
         hits,
@@ -1052,7 +1030,9 @@ fn start_work_confirm(
         WorkItem::Issue { number, title } => {
             let kind = match modal.mode {
                 WorkMode::Feature => "Feature",
-                WorkMode::Issue | WorkMode::PrReview | WorkMode::Worktree => "Issue",
+                WorkMode::Issue | WorkMode::Session | WorkMode::PrReview | WorkMode::Worktree => {
+                    "Issue"
+                }
             };
             (format!("Start Work: {kind} #{number}"), title.to_string())
         }
@@ -1065,7 +1045,7 @@ fn start_work_confirm(
             format!("Start Work: PR #{number}"),
             format!("{title}  (by @{author})"),
         ),
-        WorkItem::FreeText { description } => (FREE_TEXT_TITLE.to_string(), description.clone()),
+        WorkItem::Session { prompt } => (SESSION_TITLE.to_string(), prompt.clone()),
     };
     let mut column = dialog(frame, rect, &title, theme::title());
 

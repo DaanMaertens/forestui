@@ -1320,7 +1320,7 @@ sweep caught it and it was fixed in `ui/widgets.rs`.
 
 ### UC-56 — Start work's `worktree` mode opens the worktree form
 **Area:** Sweep | **Priority:** P0 | 🟢 EXECUTED (both builds)
-**Steps:** `s`, `Down` ×3 (→ `worktree`, the last mode), `Enter`.
+**Steps:** `s`, `Down` ×4 (→ `worktree`, the last mode), `Enter`.
 **Expected:** title `Start Work: worktree`, `in alpha`, `Worktree Name`,
 `Branch`, `New Branch`, `Existing`, branch placeholder `feat/my-feature`, and
 `Create Worktree`, `Back`, `Cancel`. `Esc` returns to the mode list.
@@ -1405,7 +1405,7 @@ when they stabilise.
 
 ### UC-71 — Existing-branch mode with fuzzy search
 **Area:** Modals | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** `s`, `Down` ×3, `Enter` (the `worktree` mode), type a name, `Tab`,
+**Steps:** `s`, `Down` ×4, `Enter` (the `worktree` mode), type a name, `Tab`,
 `Right` (→ `Existing`), `Tab`, type `rel`.
 **Expected:** the count line reads `1 match`; `release-2` is listed with `rel`
 highlighted; `Create Worktree` is **disabled** while the typed text is not a real
@@ -1658,10 +1658,8 @@ missing from the config, or the window carries a mode prefix.
 ### UC-100 — Start work for a feature
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
 **Steps:** after UC-99, with beta still selected, `s` → `Down` `Enter` (mode
-`feature`) → `Down` `Enter` (issue #77, below the free-text entry) → `Enter`
-(Launch).
-**Expected:** the item step lists `✎ Free-text feature…` first (UC-103), then
-only `#77 Dark mode for the dashboard`, the
+`feature`) → `Enter` (issue #77) → `Enter` (Launch).
+**Expected:** the item step lists only `#77 Dark mode for the dashboard`, the
 one issue labelled `enhancement`; `#326` and `#298` are not in it. The confirm
 screen is titled `Start Work: Feature #77`, names the worktree
 `feat-77-dark-mode-for-the-dashboard` on
@@ -1676,7 +1674,7 @@ otherwise, the prompt is the `issue` template, or the link is missing.
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
 **Steps:** after UC-100, with feat-77's Claude still running in its window,
 `Up` (move the selection off the feature worktree) → `s` → `Down` `Enter`
-(mode `feature`) → `Down` `Enter` (issue #77).
+(mode `feature`) → `Enter` (issue #77).
 **Expected:** the item step marks the row
 `#77 Dark mode for the dashboard  → feat-77-dark-mode-for-the-dashboard`.
 Picking it opens no confirm screen and creates nothing: Start work closes, the
@@ -1688,36 +1686,42 @@ outside forestui's tmux session is named by pid instead.
 **Fails if:** the row is unmarked, the confirm screen opens, a second worktree
 appears in the config, or the window does not switch.
 
-### UC-103 — Start work for a free-text feature
+### UC-103 — Start work for a session
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** after UC-101, click beta's sidebar row, `s` → `Down` `Enter` (mode
-`feature`) → `Enter` (`✎ Free-text feature…`, first in the list) → type
-`Try a quick spike on caching` → `Enter` → `Enter` (Launch). Then the same
-again up to the second `Enter` on the description, and `Escape` four times.
-**Expected:** the description step previews
-`Worktree: feat-try-a-quick-spike-on-caching`. The confirm screen is titled
-`Start Work: Free-text feature`, names the worktree
-`feat-try-a-quick-spike-on-caching` on
-`feat/feat-try-a-quick-spike-on-caching`, and its prompt carries the
-description itself and no `gh issue view`. Launch creates the worktree on that
-branch and records
+**Steps:** after UC-101, click beta's sidebar row, `s` → `Down` `Down` `Enter`
+(mode `session`) → type `Try a quick spike on caching` → `Enter` → `Enter`
+(Launch). Then the same again up to the `Enter` on the prompt, and `Escape`
+three times.
+**Expected:** the mode step lists `issue`, `feature`, `session`, `pr-review`,
+`worktree`, with `session` described as `A Claude session for anything else`.
+`session` opens the prompt step directly, which previews
+`Worktree: session-try-a-quick-spike-on-caching`. The confirm screen is titled
+`Start Work: Session`, names the worktree
+`session-try-a-quick-spike-on-caching` on
+`session/session-try-a-quick-spike-on-caching`, and its prompt is the typed
+prompt alone: no `gh issue view`, no plan-first rule. Launch creates the
+worktree on that branch and records
 `{"kind": "free_text", "description": "Try a quick spike on caching"}` as its
-`work_item`; nothing is created on GitHub. The second run does not jump to that
-worktree — free text is never matched by its link — but asks, because the name
-is taken: `Open existing`, `Create copy` (naming
-`feat-try-a-quick-spike-on-caching-2`) and `Edit name`, exactly those three.
-Each `Escape` steps back one screen and nothing is created. What each choice
-does, and that a repository without a GitHub remote offers only this mode with
-`issue` greyed out as `(needs GitHub)`, are unit-tested.
-**Fails if:** the free-text entry is not first, the worktree or branch is
-named otherwise, the prompt points at an issue, the link is missing, or the
-second run opens a confirm screen or jumps instead of asking.
+`work_item` — the free-text feature's wire format, kept so older worktrees keep
+their links; nothing is created on GitHub. The second run does not jump to
+that worktree — a session is never matched by its link — but asks, because
+the name is taken: `Open existing`, `Create copy` (naming
+`session-try-a-quick-spike-on-caching-2`) and `Edit name`, exactly those
+three. Each `Escape` steps back one screen (clash → prompt → modes → closed)
+and nothing is created. What each choice does, the session naming and
+`session.md` overrides, and that a repository without a GitHub remote offers
+only `session` and `worktree`, with the rest greyed out as `(needs GitHub)`,
+are unit-tested.
+**Fails if:** `session` is missing or misplaced, a list stands between it and
+the prompt, the worktree or branch is named otherwise, the prompt points at an
+issue or asks for a plan, the link is missing, or the second run opens a
+confirm screen or jumps instead of asking.
 
 ### UC-104 — Start work for a pr-review
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** after UC-103, click beta's sidebar row, `s` → `Down` `Down` `Enter`
+**Steps:** after UC-103, click beta's sidebar row, `s` → `Down` ×3 `Enter`
 (mode `pr-review`) → type `retry` → `Enter` → `Enter` (Launch). Then `s` →
-`Down` `Down` `Enter` → type `cache` → `Enter`, and `Escape` three times.
+`Down` ×3 `Enter` → type `cache` → `Enter`, and `Escape` three times.
 **Expected:** the item step lists beta's PRs — `#45 Retry uploads with
 backoff`, awaiting the user's review, and `#46 Cache the session index`, a
 draft they opened, marked `draft`. The confirm screen for #45 is titled
@@ -1744,7 +1748,7 @@ starts answering `MERGED` for it). Click alpha's sidebar row, then beta's.
 seconds have passed since beta's last one, or the 30-second sweep — beta's
 `pr-45-retry-uploads-with-backoff` row reads `├─ ✓ pr-45-…`, dimmed, with the
 ✓ in the success colour. `feat-77-…` stays unmarked (#77 is still open), as
-does `feat-try-…` (beta has no remote, so its free-text branch has no default
+does `session-try-…` (beta has no remote, so its session branch has no default
 branch to be merged into). Nothing is written to the config. The rule per link
 type, what each `gh` answer means, keeping a mark through a check that could
 not tell, and discarding results for a removed repository or another

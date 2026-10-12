@@ -146,9 +146,20 @@ pub struct Worktree {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkItemLink {
-    Issue { number: i64 },
-    PullRequest { number: i64 },
-    FreeText { description: String },
+    Issue {
+        number: i64,
+    },
+    PullRequest {
+        number: i64,
+    },
+    /// A session prompt. Recorded under the free-text feature's kind and
+    /// field names, which it replaced, so worktrees started before keep
+    /// their links and their finished checks.
+    #[serde(rename = "free_text")]
+    Session {
+        #[serde(rename = "description")]
+        prompt: String,
+    },
 }
 
 /// A link this build cannot read loads as no link.
@@ -380,7 +391,7 @@ impl Scope {
 /// How one work mode names its worktree and branch.
 ///
 /// `name_pattern` is the worktree name, with `{number}` and `{slug}` (the
-/// title's, or a free-text description's first words) filled in; the branch
+/// title's, or a session prompt's first words) filled in; the branch
 /// is `branch_prefix` followed by that name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Naming {
@@ -435,7 +446,7 @@ pub struct StartWorkSettings {
     pub feature_labels: Vec<String>,
     pub issue: Naming,
     pub feature: Naming,
-    pub free_feature: Naming,
+    pub session: Naming,
     pub pr_review: PrReviewNaming,
 }
 
@@ -446,7 +457,7 @@ impl Default for StartWorkSettings {
             feature_labels: vec!["enhancement".into()],
             issue: Naming::new("fix/", "issue-{number}-{slug}"),
             feature: Naming::new("feat/", "feat-{number}-{slug}"),
-            free_feature: Naming::new("feat/", "feat-{slug}"),
+            session: Naming::new("session/", "session-{slug}"),
             pr_review: PrReviewNaming {
                 name_pattern: "pr-{number}-{slug}".into(),
             },
@@ -469,7 +480,7 @@ impl StartWorkSettings {
                 .unwrap_or_else(|| self.feature_labels.clone()),
             issue: self.issue.overlaid(&partial.issue),
             feature: self.feature.overlaid(&partial.feature),
-            free_feature: self.free_feature.overlaid(&partial.free_feature),
+            session: self.session.overlaid(&partial.session),
             pr_review: PrReviewNaming {
                 name_pattern: partial
                     .pr_review
@@ -489,7 +500,7 @@ pub struct PartialStartWork {
     pub feature_labels: Option<Vec<String>>,
     pub issue: PartialNaming,
     pub feature: PartialNaming,
-    pub free_feature: PartialNaming,
+    pub session: PartialNaming,
     pub pr_review: PartialPrReviewNaming,
 }
 

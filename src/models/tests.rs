@@ -67,8 +67,8 @@ fn every_kind_of_link_roundtrips() {
     for link in [
         WorkItemLink::Issue { number: 3 },
         WorkItemLink::PullRequest { number: 19 },
-        WorkItemLink::FreeText {
-            description: "dark mode".into(),
+        WorkItemLink::Session {
+            prompt: "dark mode".into(),
         },
     ] {
         let mut worktree = Worktree::new("wt".into(), "b".into(), "/tmp/wt".into());
@@ -77,6 +77,26 @@ fn every_kind_of_link_roundtrips() {
         let back: Worktree = serde_json::from_str(&json).unwrap();
         assert_eq!(back.work_item, Some(link), "{json}");
     }
+}
+
+/// A session keeps the free-text feature's wire format, so a worktree
+/// started for one before the rename keeps its link.
+#[test]
+fn a_session_link_is_recorded_as_free_text() {
+    let link = WorkItemLink::Session {
+        prompt: "dark mode".into(),
+    };
+    let json = serde_json::to_value(&link).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"kind": "free_text", "description": "dark mode"})
+    );
+    let worktree: Worktree = serde_json::from_str(
+        r#"{"name":"wt","branch":"b","path":"/tmp/wt",
+                "work_item":{"kind":"free_text","description":"dark mode"}}"#,
+    )
+    .unwrap();
+    assert_eq!(worktree.work_item, Some(link));
 }
 
 /// A newer release may record a kind of link this one does not know. That

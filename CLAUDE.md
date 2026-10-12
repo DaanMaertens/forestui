@@ -215,7 +215,7 @@ the worktrees with a change in flight alone.
 
 **Finished worktrees ride on the same scans.** Each scan also kicks a
 check (throttled per repository, `app/finished.rs`) that asks `gh` for each
-linked issue's or PR's state and git whether a free-text branch is merged into
+linked issue's or PR's state and git whether a session's branch is merged into
 the remote default branch; `work::is_finished` is the rule. The marks are
 derived and never saved. A worktree the check could not answer for (`gh`
 signed out, no remote default branch) keeps its previous mark — "could not

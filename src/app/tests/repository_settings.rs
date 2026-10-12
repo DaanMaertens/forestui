@@ -170,6 +170,34 @@ async fn a_repository_template_fills_the_confirm_screens_prompt() {
     assert_eq!(confirm_screen(&app).prompt(), "repository #42");
 }
 
+/// A repository can name its sessions and give them its own first prompt,
+/// one half of the naming at a time.
+#[tokio::test]
+async fn a_repository_overrides_the_session_naming_and_template() {
+    let repos = ReposDir::new();
+    let _prompts = PromptsDir::new();
+    repos.write(
+        "settings.json",
+        r#"{"start_work": {"session": {"branch_prefix": "spike/"}}}"#,
+    );
+    repos.write("prompts/session.md", "In {worktree}: {body}");
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    on_github(&mut app, &path);
+
+    app.handle_key(key(KeyCode::Char('s')));
+    highlight_mode(&mut app, crate::work::WorkMode::Session);
+    app.handle_key(key(KeyCode::Enter));
+    type_text(&mut app, "Dark mode");
+    app.handle_key(key(KeyCode::Enter));
+    let loaded = branches_loaded(&app);
+    app.handle_event(loaded);
+
+    let confirm = confirm_screen(&app);
+    assert_eq!(confirm.name.value(), "session-dark-mode");
+    assert_eq!(confirm.branch.value(), "spike/session-dark-mode");
+    assert_eq!(confirm.prompt(), "In session-dark-mode: Dark mode");
+}
+
 /// A repository's scope is learned with its key, after the cache was
 /// warmed with the global one's issues: the new scope is prefetched too, so
 /// Start work's list is the one it will open on.

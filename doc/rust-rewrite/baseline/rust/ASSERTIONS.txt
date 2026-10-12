@@ -31,7 +31,7 @@ PASS UC-99     branch-checked-out                             expected=fix/issue
 PASS UC-99     work-item-linked                               expected={'kind': 'issue', 'number': 298} actual={'kind': 'issue', 'number': 298}
 PASS UC-99     claude-window-named-after-worktree             expected=yes                          actual=yes
 PASS UC-100    bug-issues-not-listed                          expected=no                           actual=no
-PASS UC-100    free-text-entry-listed                         expected=yes                          actual=yes
+PASS UC-100    no-free-text-entry                             expected=no                           actual=no
 PASS UC-100    titled-as-a-feature                            expected=yes                          actual=yes
 PASS UC-100    prompt-asks-for-a-plan                         expected=yes                          actual=yes
 PASS UC-100    worktree-created                               expected=yes                          actual=yes
@@ -41,11 +41,13 @@ PASS UC-101    linked-item-marked                             expected=yes      
 PASS UC-101    switched-to-claude-window                      expected=yes                          actual=yes
 PASS UC-101    nothing-created                                expected=4                            actual=4
 PASS UC-101    worktree-selected                              expected=yes                          actual=yes
-PASS UC-103    titled-as-free-text                            expected=yes                          actual=yes
-PASS UC-103    prompt-carries-description                     expected=yes                          actual=yes
+PASS UC-103    session-listed                                 expected=yes                          actual=yes
+PASS UC-103    titled-as-session                              expected=yes                          actual=yes
+PASS UC-103    prompt-carries-the-prompt                      expected=yes                          actual=yes
 PASS UC-103    prompt-reads-no-issue                          expected=no                           actual=no
+PASS UC-103    prompt-asks-for-no-plan                        expected=no                           actual=no
 PASS UC-103    worktree-created                               expected=yes                          actual=yes
-PASS UC-103    branch-checked-out                             expected=feat/feat-try-a-quick-spike-on-caching actual=feat/feat-try-a-quick-spike-on-caching
+PASS UC-103    branch-checked-out                             expected=session/session-try-a-quick-spike-on-caching actual=session/session-try-a-quick-spike-on-caching
 PASS UC-103    work-item-linked                               expected={'kind': 'free_text', 'description': 'Try a quick spike on caching'} actual={'kind': 'free_text', 'description': 'Try a quick spike on caching'}
 PASS UC-103    clash-offers-three-choices                     expected=yes                          actual=yes
 PASS UC-103    clash-names-the-copy                           expected=yes                          actual=yes
@@ -64,7 +66,7 @@ PASS UC-104    flow-closed                                    expected=no       
 PASS UC-104    nothing-created                                expected=6                            actual=6
 PASS UC-105    merged-pr-marked                               expected=yes                          actual=yes
 PASS UC-105    open-issue-unmarked                            expected=no                           actual=no
-PASS UC-105    free-text-unmarked                             expected=no                           actual=no
+PASS UC-105    session-unmarked                               expected=no                           actual=no
 PASS UC-105    mark-not-saved                                 expected=False                        actual=False
 PASS UC-72     cancel-closes-confirm                          expected=no                           actual=no
 PASS UC-72     cancel-keeps-dir                               expected=yes                          actual=yes
