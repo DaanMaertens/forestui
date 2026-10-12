@@ -15,11 +15,11 @@
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │
                               │  │Type a number or part of a title...                                     │  │
                               │  └────────────────────────────────────────────────────────────────────────┘  │
-                              │  3 issues                                                                    │
+                              │  4 issues                                                                    │
                               │   #326 Fansly conversation discovery has no backoff                          │
                               │   #298 Proactive metrics: coalesced FIRE rows overcount                      │
+                              │   #77 Dark mode for the dashboard                                            │
                               │   #412 Someone else's flaky export                                           │
-                              │                                                                              │
                               │                                                                              │
                               │                                                                              │
                               │                                                                              │

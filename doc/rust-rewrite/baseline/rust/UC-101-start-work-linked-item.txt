@@ -8,17 +8,17 @@
 
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
-                              │   Start Work: feature                                                        │
+                              │   Start Work: issue                                                          │
                               │                                                                              │
                               │  in beta                                                                     │
                               │  Issue                                                                       │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │
                               │  │Type a number or part of a title...                                     │  │
                               │  └────────────────────────────────────────────────────────────────────────┘  │
-                              │  1 feature                                                                   │
+                              │  3 issues                                                                    │
+                              │   #326 Fansly conversation discovery has no backoff                          │
+                              │   #298 Proactive metrics: coalesced FIRE rows overcount  → issue-298-proact  │
                               │   #77 Dark mode for the dashboard  → feat-77-dark-mode-for-the-dashboard     │
-                              │                                                                              │
-                              │                                                                              │
                               │                                                                              │
                               │                                                                              │
                               │                                                                              │
