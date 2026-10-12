@@ -4,7 +4,7 @@
 ──────────────────────────────────│  MAIN REPOSITORY
   alpha                           │  Repository: beta
 ▼ beta                            │  Branch:     main
-├─ feat-try-a-quick-spike-on-cachi│  Commit:     <sha> (<rel>)
+├─ session-try-a-quick-spike-on-ca│  Commit:     <sha> (<rel>)
 └─ feat-77-dark-mode-for-the-dashb│
 ▼ gamma                           │  ┌────────────┐ ┌────────────────────────┐
 └─ gamma-imported [feat/imported] │  │ Start work │ │ ↓ Git Pull (No remote) │

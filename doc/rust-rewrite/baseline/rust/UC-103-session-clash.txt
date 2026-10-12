@@ -14,13 +14,13 @@
 
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
-                              │   Start Work: Free-text feature                                              │
+                              │   Start Work: Session                                                        │
                               │                                                                              │
                               │  in beta                                                                     │
-                              │  A worktree named 'feat-try-a-quick-spike-on-caching' already exists.        │
+                              │  A worktree named 'session-try-a-quick-spike-on-caching' already exists.     │
                               │                                                                              │
-                              │  Open it, create feat-try-a-quick-spike-on-caching-2 instead,                │
-                              │  or go back and edit the description.                                        │
+                              │  Open it, create session-try-a-quick-spike-on-caching-2 instead,             │
+                              │  or go back and edit the prompt.                                             │
                               │               ┌───────────────┐ ┌─────────────┐ ┌───────────┐                │
                               │               │ Open existing │ │ Create copy │ │ Edit name │                │
                               │               └───────────────┘ └─────────────┘ └───────────┘                │
