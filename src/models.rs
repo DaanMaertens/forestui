@@ -441,8 +441,10 @@ pub struct PrReviewNaming {
 #[serde(from = "PartialStartWork")]
 pub struct StartWorkSettings {
     pub scope: Scope,
-    /// An issue carrying any of these is a `feature`; every other open issue
-    /// is an `issue`. Matched case-insensitively, as GitHub does.
+    /// An issue carrying any of these starts as a feature, with the `feature`
+    /// naming and template; every other issue starts as an issue. Both are
+    /// listed under the `issue` work mode. Matched case-insensitively, as
+    /// GitHub does.
     pub feature_labels: Vec<String>,
     pub issue: Naming,
     pub feature: Naming,

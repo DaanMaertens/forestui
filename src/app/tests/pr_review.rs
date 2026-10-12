@@ -77,7 +77,6 @@ async fn someone_elses_pr_confirms_as_a_report_only_review() {
     app.handle_key(key(KeyCode::Enter));
 
     let confirm = confirm_screen(&app);
-    assert_eq!(confirm.mode, crate::work::WorkMode::PrReview);
     assert!(matches!(
         confirm.item,
         crate::work::WorkItem::PullRequest {

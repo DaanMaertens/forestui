@@ -121,9 +121,10 @@ async fn a_shown_blocked_issue_can_be_started() {
     assert_eq!(confirm_number(confirm_screen(&app)), Some(2));
 }
 
-/// Each list counts what it hides: `feature` the blocked features only.
+/// The one list counts every blocked issue it hides, features and bugs
+/// alike.
 #[tokio::test]
-async fn the_feature_list_counts_only_its_own_hidden_issues() {
+async fn the_issue_list_counts_every_hidden_issue() {
     let mut feature = blocked_issue(5, "Blocked feature", &[9]);
     feature.labels = vec![crate::models::GitHubLabel {
         name: "enhancement".into(),
@@ -134,9 +135,8 @@ async fn the_feature_list_counts_only_its_own_hidden_issues() {
         blocked_issue(7, "Another blocked bug", &[9]),
     ]);
     app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(start_work(&app).hidden_blocked(), 1);
+    assert_eq!(start_work(&app).hidden_blocked(), 3);
     let screen = rendered(&mut app);
-    assert!(screen.contains("1 blocked hidden"), "{screen}");
+    assert!(screen.contains("3 blocked hidden"), "{screen}");
 }

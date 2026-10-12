@@ -954,20 +954,20 @@ run it as an opt-in tier with `--env HOME=$REAL_HOME` and a scratch clone.
 UC-99 and UC-100 cover the same path against the sweep's `gh` stub.
 **Steps:**
 1. Select the repo and wait a few seconds for the background issue fetch.
-2. `s`, `Enter` (mode `issue`, or `Down` `Enter` for `feature`); `tu screenshot
-   --name fui`
+2. `s`, `Enter` (mode `issue`); `tu screenshot --name fui`
 3. `Enter` on an issue; `sleep 2`; `tu screenshot --name fui`
 
-**Expected:** the item list is already filled when it opens. Picking an issue
+**Expected:** the item list is already filled when it opens, with every open
+issue in it, features included. Picking an issue
 opens Start work's confirm screen titled `Start Work: Issue #<n>` — or
 `Feature #<n>` for one carrying a feature label (`enhancement`). Name, branch
-and prompt follow that mode (UC-99/UC-100); the base branch defaults to the
+and prompt follow that kind (UC-99/UC-100); the base branch defaults to the
 remote's default branch; `Pull repo before creating` is ticked; `Fetch` spins
 `| / - \` at 10Hz while `git fetch` runs and refreshes the suggester
 afterwards. Its dismiss button reads `Back`. An issue that already has a
 worktree jumps there instead (UC-101).
-**Fails if:** the list opens loading after the fetch resolved, the mode ignores
-the labels, or a started issue opens the confirm screen.
+**Fails if:** the list opens loading after the fetch resolved, the naming
+ignores the labels, or a started issue opens the confirm screen.
 
 ---
 
@@ -1637,10 +1637,10 @@ being diffed stops short of the content the case exists to compare.
 `Enter` (tick `Not just mine`) → `Space` (untick it) → `Shift+Tab` twice →
 type `metrics` → `Enter` (issue #298) → `Enter` (Launch, from the focused name
 field).
-**Expected:** the mode step lists `issue`, `feature` and `pr-review`, all
-enabled (`pr-review` is UC-104). The item step lists `#326` and `#298`, but not the
-`enhancement`-labelled `#77`, which belongs to `feature` (UC-100), nor `#412`,
-which is neither assigned to nor opened by the user. Ticking
+**Expected:** the mode step lists `issue`, `session`, `pr-review` and
+`worktree`, all enabled (`pr-review` is UC-104). The item step lists `#326`,
+`#298` and the `enhancement`-labelled `#77` (UC-100), but not `#412`, which is
+neither assigned to nor opened by the user. Ticking
 `[x] Not just mine` lists `#412` too, for this pick alone; unticking it goes
 back to the user's own. The
 confirm screen is titled `Start Work: Issue #298`, names the worktree
@@ -1657,24 +1657,27 @@ missing from the config, or the window carries a mode prefix.
 
 ### UC-100 — Start work for a feature
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** after UC-99, with beta still selected, `s` → `Down` `Enter` (mode
-`feature`) → `Enter` (issue #77) → `Enter` (Launch).
-**Expected:** the item step lists only `#77 Dark mode for the dashboard`, the
-one issue labelled `enhancement`; `#326` and `#298` are not in it. The confirm
-screen is titled `Start Work: Feature #77`, names the worktree
+**Steps:** after UC-99, with beta still selected, `s` → `Enter` (mode
+`issue`) → type `dark mode` → `Enter` (issue #77) → `Enter` (Launch).
+**Expected:** the mode step has no `feature` mode. The item step lists every
+open issue — `#77 Dark mode for the dashboard`, the one labelled
+`enhancement`, together with `#326` and `#298` — counted as `3 issues`. Its
+feature label decides only how #77 starts: the confirm screen is titled
+`Start Work: Feature #77`, names the worktree
 `feat-77-dark-mode-for-the-dashboard` on
 `feat/feat-77-dark-mode-for-the-dashboard`, and its prompt asks Claude to write
 a plan and change no code until the plan is approved. Launch creates the
 worktree on that branch and records `{"kind": "issue", "number": 77}` as its
 `work_item`.
-**Fails if:** a non-feature issue is listed, the worktree or branch is named
-otherwise, the prompt is the `issue` template, or the link is missing.
+**Fails if:** a `feature` mode is offered, an issue is missing from the
+list, the worktree or branch is named otherwise, the prompt is the `issue`
+template, or the link is missing.
 
 ### UC-101 — Picking a started work item jumps to its worktree
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
 **Steps:** after UC-100, with feat-77's Claude still running in its window,
-`Up` (move the selection off the feature worktree) → `s` → `Down` `Enter`
-(mode `feature`) → `Enter` (issue #77).
+`Up` (move the selection off the feature worktree) → `s` → `Enter`
+(mode `issue`) → type `dark mode` → `Enter` (issue #77).
 **Expected:** the item step marks the row
 `#77 Dark mode for the dashboard  → feat-77-dark-mode-for-the-dashboard`.
 Picking it opens no confirm screen and creates nothing: Start work closes, the
@@ -1688,11 +1691,11 @@ appears in the config, or the window does not switch.
 
 ### UC-103 — Start work for a session
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** after UC-101, click beta's sidebar row, `s` → `Down` `Down` `Enter`
+**Steps:** after UC-101, click beta's sidebar row, `s` → `Down` `Enter`
 (mode `session`) → type `Try a quick spike on caching` → `Enter` → `Enter`
 (Launch). Then the same again up to the `Enter` on the prompt, and `Escape`
 three times.
-**Expected:** the mode step lists `issue`, `feature`, `session`, `pr-review`,
+**Expected:** the mode step lists `issue`, `session`, `pr-review`,
 `worktree`, with `session` described as `A Claude session for anything else`.
 `session` opens the prompt step directly, which previews
 `Worktree: session-try-a-quick-spike-on-caching`. The confirm screen is titled
@@ -1719,9 +1722,9 @@ confirm screen or jumps instead of asking.
 
 ### UC-104 — Start work for a pr-review
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
-**Steps:** after UC-103, click beta's sidebar row, `s` → `Down` ×3 `Enter`
+**Steps:** after UC-103, click beta's sidebar row, `s` → `Down` ×2 `Enter`
 (mode `pr-review`) → type `retry` → `Enter` → `Enter` (Launch). Then `s` →
-`Down` ×3 `Enter` → type `cache` → `Enter`, and `Escape` three times.
+`Down` ×2 `Enter` → type `cache` → `Enter`, and `Escape` three times.
 **Expected:** the item step lists beta's PRs — `#45 Retry uploads with
 backoff`, awaiting the user's review, and `#46 Cache the session index`, a
 draft they opened, marked `draft`. The confirm screen for #45 is titled

@@ -61,9 +61,9 @@ pub enum ModalEffect {
     /// dialog stays open and re-reads its status, so the result of the action
     /// is visible where the action was taken.
     ClaudePlugin(IntegrationAction),
-    /// Start work picked an issue in a work mode: load the branches and open
-    /// the confirm screen for it on top of the picker.
-    ConfirmIssue(Box<GitHubIssue>, WorkMode),
+    /// Start work picked an issue: load the branches and open the confirm
+    /// screen for it on top of the picker.
+    ConfirmIssue(Box<GitHubIssue>),
     /// Start work's `worktree` mode was chosen: load the branches its form
     /// searches.
     LoadWorktreeBranches,
@@ -770,8 +770,8 @@ pub struct StartWorkModal {
     /// Work item → the worktree already started for it, as the flow opened.
     /// Only marks the list: picking an item checks the live state.
     linked: HashMap<WorkItemLink, String>,
-    /// The settings in effect as the flow opened: which issues are
-    /// features, and how a session is named.
+    /// The settings in effect as the flow opened: the scope, and how a
+    /// session is named.
     pub start_work: StartWorkSettings,
     /// Whether blocked issues are listed. Starts from the shared setting and
     /// is toggled here; the app persists every toggle.
@@ -915,23 +915,22 @@ impl StartWorkModal {
     /// different scope replaces the flow's — the settings were not known
     /// when it started from them — unless the user has already chosen one
     /// here, and lists loaded for another scope are dropped for the
-    /// refetch to fill; different feature labels re-split
-    /// the issues already here. The same settings change nothing, so a
-    /// half-typed query survives the usual answer.
+    /// refetch to fill, with what was typed waiting for it. Nothing else
+    /// here decides what the list shows, so any other answer leaves the
+    /// list — and a half-typed query — alone.
     pub fn set_start_work(&mut self, start_work: StartWorkSettings) {
-        if start_work == self.start_work {
-            return;
-        }
-        if start_work.scope != self.start_work.scope && !self.scope_chosen {
-            if start_work.scope != self.scope {
-                self.issues = None;
-                self.pull_requests = None;
-            }
+        if start_work.scope != self.start_work.scope
+            && !self.scope_chosen
+            && start_work.scope != self.scope
+        {
             self.scope = start_work.scope;
+            if let Some(picker) = self.picker.take() {
+                self.query_after_reload = Some(picker.query().value().to_string());
+            }
+            self.issues = None;
+            self.pull_requests = None;
         }
         self.start_work = start_work;
-        self.picker = None;
-        self.fill_picker();
     }
 
     /// Fill `pr-review`'s list once the PRs for `scope` have loaded; kept,
@@ -1004,13 +1003,9 @@ impl StartWorkModal {
                 (true, Some(issues)) => issues,
                 (true, None) => return,
             };
-            work::item_entries(
-                self.mode,
-                issues,
-                &self.start_work.feature_labels,
-                self.show_blocked,
-                |number| self.linked.get(&WorkItemLink::Issue { number }).cloned(),
-            )
+            work::issue_entries(issues, self.show_blocked, |number| {
+                self.linked.get(&WorkItemLink::Issue { number }).cloned()
+            })
         };
         let mut picker = SearchPicker::new(entries, "Type a number or part of a title...");
         if let Some(query) = self.query_after_reload.take() {
@@ -1048,10 +1043,7 @@ impl StartWorkModal {
     /// How many blocked issues the current list leaves out.
     pub fn hidden_blocked(&self) -> usize {
         match (self.offers_blocked_toggle(), self.issues.as_deref()) {
-            (true, Some(issues)) => work::hidden_blocked(
-                &work::issues_for(self.mode, issues, &self.start_work.feature_labels),
-                self.show_blocked,
-            ),
+            (true, Some(issues)) => work::hidden_blocked(issues, self.show_blocked),
             _ => 0,
         }
     }
@@ -1242,12 +1234,9 @@ impl StartWorkModal {
                         }
                         if key.code == KeyCode::Enter {
                             return match picker.selected() {
-                                Some(ItemEntry::Issue(entry)) => {
-                                    ModalOutcome::Effect(ModalEffect::ConfirmIssue(
-                                        Box::new(entry.issue.clone()),
-                                        self.mode,
-                                    ))
-                                }
+                                Some(ItemEntry::Issue(entry)) => ModalOutcome::Effect(
+                                    ModalEffect::ConfirmIssue(Box::new(entry.issue.clone())),
+                                ),
                                 Some(ItemEntry::PullRequest(entry)) => {
                                     let item = WorkItem::from_pull_request(
                                         &entry.pr,
@@ -1340,9 +1329,8 @@ pub struct StartWorkConfirmModal {
     pub repo_id: Uuid,
     pub repo_name: String,
     pub repo_path: String,
-    /// Decides the names, and for an issue, the prompt template.
-    pub mode: WorkMode,
-    /// The issue, PR or session prompt the worktree is for.
+    /// The issue, PR or session prompt the worktree is for; it decided the
+    /// names, and decides the prompt template.
     pub item: WorkItem,
     pub branches: BranchList,
     pub forest_dir: PathBuf,
@@ -1421,10 +1409,9 @@ impl StartWorkConfirmModal {
 
     /// `names` are passed in rather than derived from `item`: a session's
     /// may carry a suffix the clash question chose. `template` is
-    /// the text of `item.template(mode)`, read by the caller.
+    /// the text of `item.template()`, read by the caller.
     pub fn new(
         repo: &Repository,
-        mode: WorkMode,
         item: WorkItem,
         names: WorktreeNames,
         template: String,
@@ -1436,7 +1423,6 @@ impl StartWorkConfirmModal {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
             repo_path: repo.source_path.clone(),
-            mode,
             item,
             branches,
             forest_dir,
@@ -1473,7 +1459,7 @@ impl StartWorkConfirmModal {
         // A session has no number and no title of its own; its prompt
         // stands in for the title and is the only `{body}`.
         let (number, title, body) = match &self.item {
-            WorkItem::Issue { number, title } | WorkItem::PullRequest { number, title, .. } => {
+            WorkItem::Issue { number, title, .. } | WorkItem::PullRequest { number, title, .. } => {
                 (Some(*number), title.as_str(), None)
             }
             WorkItem::Session { prompt } => (None, prompt.as_str(), Some(prompt.as_str())),

@@ -12,7 +12,7 @@ fn default_labels() -> Vec<String> {
 #[test]
 fn an_issue_is_named_issue_number_slug_on_a_fix_branch() {
     assert_eq!(
-        names(&defaults(), WorkMode::Issue, 42, "Fix login bug!"),
+        issue_names(&defaults(), IssueKind::Issue, 42, "Fix login bug!"),
         WorktreeNames {
             worktree: "issue-42-fix-login-bug".into(),
             branch: "fix/issue-42-fix-login-bug".into(),
@@ -23,7 +23,7 @@ fn an_issue_is_named_issue_number_slug_on_a_fix_branch() {
 #[test]
 fn a_feature_issue_is_named_feat_on_a_feat_branch() {
     assert_eq!(
-        names(&defaults(), WorkMode::Feature, 7, "Dark mode"),
+        issue_names(&defaults(), IssueKind::Feature, 7, "Dark mode"),
         WorktreeNames {
             worktree: "feat-7-dark-mode".into(),
             branch: "feat/feat-7-dark-mode".into(),
@@ -34,11 +34,11 @@ fn a_feature_issue_is_named_feat_on_a_feat_branch() {
 #[test]
 fn a_title_with_nothing_sluggable_names_by_number_alone() {
     assert_eq!(
-        names(&defaults(), WorkMode::Issue, 5, "!!! ???").worktree,
+        issue_names(&defaults(), IssueKind::Issue, 5, "!!! ???").worktree,
         "issue-5"
     );
     assert_eq!(
-        names(&defaults(), WorkMode::Issue, 5, "").branch,
+        issue_names(&defaults(), IssueKind::Issue, 5, "").branch,
         "fix/issue-5"
     );
 }
@@ -81,13 +81,7 @@ fn an_unknown_viewer_reviews_without_changing_code() {
 #[test]
 fn a_pull_request_is_named_pr_number_slug() {
     assert_eq!(
-        names(
-            &defaults(),
-            WorkMode::PrReview,
-            31,
-            "Give the cache tests their own cache"
-        )
-        .worktree,
+        pull_request_names(&defaults(), 31, "Give the cache tests their own cache").worktree,
         "pr-31-give-the-cache-tests-their-own-cache"
     );
 }
@@ -103,12 +97,15 @@ fn labelled(number: i64, labels: &[&str]) -> GitHubIssue {
     .unwrap()
 }
 
-fn numbers(issues: &[GitHubIssue]) -> Vec<i64> {
-    issues.iter().map(|i| i.number).collect()
+fn kinds(issues: &[GitHubIssue], labels: &[impl AsRef<str>]) -> Vec<IssueKind> {
+    issues.iter().map(|i| issue_kind(i, labels)).collect()
 }
 
+/// A feature label makes an issue a feature, and wins over anything else
+/// it carries: a `bug` + `enhancement` issue starts as a feature.
 #[test]
-fn feature_labelled_issues_split_from_the_rest() {
+fn a_feature_label_makes_an_issue_a_feature() {
+    use IssueKind::{Feature, Issue};
     let issues = vec![
         labelled(1, &[]),
         labelled(2, &["enhancement"]),
@@ -116,54 +113,30 @@ fn feature_labelled_issues_split_from_the_rest() {
         labelled(4, &["bug", "enhancement"]),
         labelled(5, &["Enhancement"]),
     ];
-    let labels = &default_labels();
     assert_eq!(
-        numbers(&issues_for(WorkMode::Issue, &issues, labels)),
-        vec![1, 3]
+        kinds(&issues, &default_labels()),
+        vec![Issue, Feature, Issue, Feature, Feature]
     );
-    assert_eq!(
-        numbers(&issues_for(WorkMode::Feature, &issues, labels)),
-        vec![2, 4, 5]
-    );
-    assert!(issues_for(WorkMode::PrReview, &issues, labels).is_empty());
 }
 
-/// Whatever the labels, the two lists partition the issues: none is
-/// dropped and none is listed twice.
+/// The mode step offers the kinds of work, with no separate `feature`:
+/// every issue is under `issue`.
 #[test]
-fn every_issue_is_in_exactly_one_list() {
+fn the_mode_step_lists_issue_session_pr_review_worktree() {
+    let labels: Vec<_> = WorkMode::ALL.iter().map(|m| m.label()).collect();
+    assert_eq!(labels, vec!["issue", "session", "pr-review", "worktree"]);
+}
+
+/// `issue` lists every issue, feature or not, in its own order.
+#[test]
+fn the_issue_list_holds_every_issue() {
     let issues = vec![
-        labelled(1, &["feature"]),
-        labelled(2, &["ui", "feature"]),
-        labelled(3, &["enhancement"]),
+        labelled(1, &["bug"]),
+        labelled(2, &["enhancement"]),
+        labelled(3, &[]),
     ];
-    let labels = ["feature", "ui"];
-    let mut both = numbers(&issues_for(WorkMode::Issue, &issues, &labels));
-    both.extend(numbers(&issues_for(WorkMode::Feature, &issues, &labels)));
-    both.sort();
-    assert_eq!(both, vec![1, 2, 3]);
-    assert_eq!(
-        numbers(&issues_for(WorkMode::Feature, &issues, &labels)),
-        vec![1, 2]
-    );
-}
-
-/// An issue picked without the mode step starts in the list it would
-/// have been picked from.
-#[test]
-fn an_issue_starts_in_the_mode_that_lists_it() {
-    let issues = vec![labelled(1, &["bug"]), labelled(2, &["bug", "Enhancement"])];
-    for issue in &issues {
-        let mode = mode_for(issue, &default_labels());
-        let listed = issues_for(mode, &issues, &default_labels());
-        assert!(
-            numbers(&listed).contains(&issue.number),
-            "#{}",
-            issue.number
-        );
-    }
-    assert_eq!(mode_for(&issues[0], &default_labels()), WorkMode::Issue);
-    assert_eq!(mode_for(&issues[1], &default_labels()), WorkMode::Feature);
+    let entries = issue_entries(&issues, false, |_| None);
+    assert_eq!(entry_numbers(&entries), vec![1, 2, 3]);
 }
 
 fn pull_request(review: ReviewKind) -> WorkItem {
@@ -179,20 +152,21 @@ fn pull_request(review: ReviewKind) -> WorkItem {
 
 #[test]
 fn each_work_item_fills_its_own_template() {
-    let issue = WorkItem::Issue {
+    let issue = |kind| WorkItem::Issue {
         number: 7,
         title: "x".into(),
+        kind,
     };
-    assert_eq!(issue.template(WorkMode::Issue), Template::Issue);
-    assert_eq!(issue.template(WorkMode::Feature), Template::Feature);
+    assert_eq!(issue(IssueKind::Issue).template(), Template::Issue);
+    assert_eq!(issue(IssueKind::Feature).template(), Template::Feature);
     let session = WorkItem::Session { prompt: "x".into() };
-    assert_eq!(session.template(WorkMode::Session), Template::Session);
+    assert_eq!(session.template(), Template::Session);
     assert_eq!(
-        pull_request(ReviewKind::Others).template(WorkMode::PrReview),
+        pull_request(ReviewKind::Others).template(),
         Template::PrReviewOthers
     );
     assert_eq!(
-        pull_request(ReviewKind::Own).template(WorkMode::PrReview),
+        pull_request(ReviewKind::Own).template(),
         Template::PrReviewOwn
     );
 }
@@ -298,7 +272,8 @@ fn a_work_item_links_to_what_it_was_started_for() {
     assert_eq!(
         WorkItem::Issue {
             number: 7,
-            title: "x".into()
+            title: "x".into(),
+            kind: IssueKind::Feature,
         }
         .link(),
         crate::models::WorkItemLink::Issue { number: 7 }
@@ -354,27 +329,7 @@ fn the_pr_review_list_holds_the_pull_requests() {
     );
 }
 
-/// The `feature` list holds its issues alone, in their own order.
-#[test]
-fn the_feature_list_holds_only_issues() {
-    let issues = vec![labelled(2, &["enhancement"]), labelled(3, &["enhancement"])];
-    let entries = item_entries(WorkMode::Feature, &issues, &default_labels(), false, |_| {
-        None
-    });
-    let numbers: Vec<_> = entries
-        .iter()
-        .map(|e| match e {
-            ItemEntry::Issue(entry) => entry.issue.number,
-            other => panic!("only issues expected, found {other:?}"),
-        })
-        .collect();
-    assert_eq!(numbers, vec![2, 3]);
-
-    let entries = item_entries(WorkMode::Issue, &issues, &default_labels(), false, |_| None);
-    assert!(entries.is_empty(), "every issue here is a feature");
-}
-
-/// The configured prefix and pattern name the worktree and branch, per mode.
+/// The configured prefix and pattern name the worktree and branch, per kind.
 #[test]
 fn naming_follows_the_configured_prefix_and_pattern() {
     let mut settings = defaults();
@@ -385,21 +340,21 @@ fn naming_follows_the_configured_prefix_and_pattern() {
     settings.feature.name_pattern = "feature-{slug}-{number}".into();
     settings.pr_review.name_pattern = "review-{number}".into();
     assert_eq!(
-        names(&settings, WorkMode::Issue, 42, "Fix login bug"),
+        issue_names(&settings, IssueKind::Issue, 42, "Fix login bug"),
         WorktreeNames {
             worktree: "42_fix-login-bug".into(),
             branch: "bug/42_fix-login-bug".into(),
         }
     );
     assert_eq!(
-        names(&settings, WorkMode::Feature, 7, "Dark mode"),
+        issue_names(&settings, IssueKind::Feature, 7, "Dark mode"),
         WorktreeNames {
             worktree: "feature-dark-mode-7".into(),
             branch: "feat/feature-dark-mode-7".into(),
         }
     );
     assert_eq!(
-        names(&settings, WorkMode::PrReview, 31, "Anything").worktree,
+        pull_request_names(&settings, 31, "Anything").worktree,
         "review-31"
     );
 }
@@ -432,16 +387,23 @@ fn a_session_follows_its_own_naming() {
 fn a_pattern_fills_to_a_clean_name() {
     let mut settings = defaults();
     settings.issue.name_pattern = "{slug}--{number} / x?".into();
-    assert_eq!(names(&settings, WorkMode::Issue, 5, "").worktree, "5-x");
+    assert_eq!(
+        issue_names(&settings, IssueKind::Issue, 5, "").worktree,
+        "5-x"
+    );
     // A pattern with nothing to fill still names the worktree by number.
     settings.issue.name_pattern = "???".into();
-    assert_eq!(names(&settings, WorkMode::Issue, 5, "Title").worktree, "5");
+    assert_eq!(
+        issue_names(&settings, IssueKind::Issue, 5, "Title").worktree,
+        "5"
+    );
 }
 
-/// Changing the feature labels changes which list an issue lands in, and
-/// the labels still match case-insensitively.
+/// Changing the feature labels changes how an issue starts, and the labels
+/// still match case-insensitively.
 #[test]
-fn the_configured_feature_labels_decide_the_split() {
+fn the_configured_feature_labels_decide_the_kind() {
+    use IssueKind::{Feature, Issue};
     let issues = vec![
         labelled(1, &["enhancement"]),
         labelled(2, &["Feature"]),
@@ -450,15 +412,11 @@ fn the_configured_feature_labels_decide_the_split() {
     ];
     let labels = vec!["feature".to_string(), "type: feature".to_string()];
     assert_eq!(
-        numbers(&issues_for(WorkMode::Feature, &issues, &labels)),
-        vec![2, 3]
-    );
-    assert_eq!(
-        numbers(&issues_for(WorkMode::Issue, &issues, &labels)),
-        vec![1, 4]
+        kinds(&issues, &labels),
+        vec![Issue, Feature, Feature, Issue]
     );
     let none: Vec<String> = Vec::new();
-    assert!(issues_for(WorkMode::Feature, &issues, &none).is_empty());
+    assert_eq!(kinds(&issues, &none), vec![Issue; 4]);
 }
 
 /// `labelled`, blocked by an open #`by` — and by a closed #99, which does
@@ -492,22 +450,14 @@ fn blocked_issues_are_listed_only_when_shown() {
         blocked(3, &["enhancement"], &[9]),
         blocked(4, &[], &[]),
     ];
-    let labels = &default_labels();
-    let hidden = item_entries(WorkMode::Issue, &issues, labels, false, |_| None);
+    let hidden = issue_entries(&issues, false, |_| None);
     assert_eq!(
         entry_numbers(&hidden),
         vec![1, 4],
         "a closed blocker blocks nothing"
     );
-    let shown = item_entries(WorkMode::Issue, &issues, labels, true, |_| None);
-    assert_eq!(entry_numbers(&shown), vec![1, 2, 4]);
-
-    // The split sees every issue, blocked or not: a blocked feature is a
-    // feature, hidden from `feature`, never moved into `issue`.
-    let features = item_entries(WorkMode::Feature, &issues, labels, false, |_| None);
-    assert_eq!(entry_numbers(&features), Vec::<i64>::new());
-    let features = item_entries(WorkMode::Feature, &issues, labels, true, |_| None);
-    assert_eq!(entry_numbers(&features), vec![3]);
+    let shown = issue_entries(&issues, true, |_| None);
+    assert_eq!(entry_numbers(&shown), vec![1, 2, 3, 4]);
 }
 
 #[test]
@@ -518,11 +468,9 @@ fn the_hidden_count_is_of_the_blocked_issues_a_list_leaves_out() {
         blocked(3, &[], &[9, 10]),
         blocked(4, &["enhancement"], &[9]),
     ];
-    let labels = &default_labels();
-    let in_issue = issues_for(WorkMode::Issue, &issues, labels);
-    assert_eq!(hidden_blocked(&in_issue, false), 2);
+    assert_eq!(hidden_blocked(&issues, false), 3);
     assert_eq!(
-        hidden_blocked(&in_issue, true),
+        hidden_blocked(&issues, true),
         0,
         "nothing is hidden while shown"
     );

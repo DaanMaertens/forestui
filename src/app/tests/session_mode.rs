@@ -16,8 +16,8 @@ fn session(prompt: &str) -> crate::work::WorkItem {
     }
 }
 
-/// `session` is listed between the issue modes and `pr-review`, with what it
-/// is for.
+/// `session` is listed between `issue` and `pr-review`, with what it is
+/// for.
 #[tokio::test]
 async fn the_mode_step_lists_session() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
@@ -25,7 +25,7 @@ async fn the_mode_step_lists_session() {
 
     assert_eq!(
         crate::work::WorkMode::ALL.map(crate::work::WorkMode::label),
-        ["issue", "feature", "session", "pr-review", "worktree"]
+        ["issue", "session", "pr-review", "worktree"]
     );
     let screen = rendered(&mut app);
     assert!(
@@ -37,13 +37,12 @@ async fn the_mode_step_lists_session() {
     assert!(session < review, "{screen}");
 }
 
-/// The `feature` list holds issues and nothing else; the old wording is gone.
+/// The `issue` list holds issues and nothing else; the old wording is gone.
 #[tokio::test]
-async fn the_feature_list_has_no_free_text_entry() {
+async fn the_issue_list_has_no_free_text_entry() {
     let (_dir, mut app, _) =
         app_with_issues(vec![labelled_issue(7, "Dark mode", &["enhancement"])]);
     app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
     let screen = rendered(&mut app);
     assert!(!screen.contains("own words"), "{screen}");
     app.handle_key(key(KeyCode::Enter));
@@ -52,7 +51,7 @@ async fn the_feature_list_has_no_free_text_entry() {
     assert_eq!(picker.entry_count(), 1);
     let screen = rendered(&mut app);
     assert!(!screen.contains("Free-text"), "{screen}");
-    assert!(screen.contains("1 feature"), "{screen}");
+    assert!(screen.contains("1 issue"), "{screen}");
 }
 
 /// A session is named from its prompt's first words by the `session`
@@ -68,7 +67,6 @@ async fn a_session_confirms_with_its_own_names_and_prompt() {
     app.handle_event(loaded);
 
     let confirm = confirm_screen(&app);
-    assert_eq!(confirm.mode, crate::work::WorkMode::Session);
     assert_eq!(confirm.name.value(), "session-why-is-the-sidebar-so-slow");
     assert_eq!(
         confirm.branch.value(),

@@ -123,11 +123,10 @@ fn confirm_modal() -> Modal {
     let issue = issue();
     Modal::StartWorkConfirm(Box::new(StartWorkConfirmModal::new(
         &repo(),
-        WorkMode::Issue,
-        crate::work::WorkItem::from_issue(&issue),
-        crate::work::names(
+        crate::work::WorkItem::from_issue(&issue, crate::work::IssueKind::Issue),
+        crate::work::issue_names(
             &Default::default(),
-            WorkMode::Issue,
+            crate::work::IssueKind::Issue,
             issue.number,
             &issue.title,
         ),

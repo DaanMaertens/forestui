@@ -159,8 +159,8 @@ case "$1 $2" in
   "assignees":[],"labels":[{"name":"metrics","color":"00ff00"},{"name":"p2","color":"0000ff"}]}]
 JSON
         ;;
-      # beta alone also has a feature issue, for Start work's feature mode
-      # (UC-100). Only Start work shows it, so the frozen Python frames are
+      # beta alone also has a feature issue, which Start work lists with the
+      # rest and starts as a feature (UC-100). Only Start work shows it, so the frozen Python frames are
       # unaffected.
       *--author*)
         case "$PWD" in
@@ -495,12 +495,12 @@ for spec in "a:UC-55:modal-add-repository:Repository Path" \
   focus_app; press Escape; sleep 1.0
 done
 
-# The plain worktree form is Start work's last mode. Four Downs reach it
+# The plain worktree form is Start work's last mode. Three Downs reach it
 # whether or not the GitHub probe has greyed out the modes before it, and Esc
 # steps back to the mode list before a second one closes the flow.
 focus_app; press s
 await "Work Mode"
-press Down; press Down; press Down; press Down; press Enter
+press Down; press Down; press Down; press Enter
 await "Worktree Name"; sleep 0.8
 capture UC-56 modal-add-worktree
 focus_app; press Escape
@@ -831,15 +831,20 @@ fi
 # --- UC-100: Start work for a feature ----------------------------------------
 #
 # Rust only, and after UC-99 for the same reason. The selection is still in
-# beta, whose gh stub also answers with #77, labelled `enhancement`.
+# beta, whose gh stub also answers with #77, labelled `enhancement`. It is
+# listed under `issue` with every other issue, and its label decides only how
+# it starts.
 if [ "$LABEL" = "rust" ]; then
   focus_app
   press s; await "Work Mode"; sleep 0.8
-  press Down Enter; await "#77"; sleep 0.8
+  assert UC-100 no-feature-mode "no" "$(screen_has ' feature {4,}[A-Z]')"
+  press Enter; await "#77"; sleep 0.8
   capture UC-100 start-work-feature-item
-  assert UC-100 bug-issues-not-listed "no" "$(screen_has '#298|#326')"
+  assert UC-100 bug-listed "yes" "$(screen_has '#326')"
+  assert UC-100 other-issue-listed "yes" "$(screen_has '#298')"
+  assert UC-100 counted-as-issues "yes" "$(screen_has '3 issues')"
   assert UC-100 no-free-text-entry "no" "$(screen_has 'Free-text feature')"
-  press Enter
+  type_ "dark mode"; await "1 match"; press Enter
   await "Launch"; sleep 0.8
   capture UC-100 start-work-feature-confirm
   assert UC-100 titled-as-a-feature "yes" "$(screen_has 'Start Work: Feature #77')"
@@ -867,11 +872,11 @@ if [ "$LABEL" = "rust" ]; then
   press Up; sleep 0.8
   worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
   press s; await "Work Mode"; sleep 0.8
-  press Down Enter; await "#77"; sleep 0.8
+  press Enter; await "#77"; sleep 0.8
   capture UC-101 start-work-linked-item
   assert UC-101 linked-item-marked "yes" \
     "$(screen_has '#77 Dark mode for the dashboard +→ feat-77-dark-mode-for-the-dashboard')"
-  press Enter
+  type_ "dark mode"; await "1 match"; press Enter
   # The switch lands on the Claude window: the stub's output is on screen and
   # the window is the current one in the status bar.
   await "claude stub" 15000; sleep 1
@@ -899,7 +904,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-103 session-mode
   assert UC-103 session-listed "yes" \
     "$(screen_has 'session +A Claude session for anything else')"
-  press Down Down Enter; await "Prompt"; sleep 0.8
+  press Down Enter; await "Prompt"; sleep 0.8
   type_ "Try a quick spike on caching"; sleep 0.5
   await "Worktree: session-try-a-quick-spike-on-caching"
   capture UC-103 session-prompt
@@ -924,7 +929,7 @@ if [ "$LABEL" = "rust" ]; then
   focus_app
   worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
   press s; await "Work Mode"; sleep 0.8
-  press Down Down Enter; await "Prompt"; sleep 0.8
+  press Down Enter; await "Prompt"; sleep 0.8
   type_ "Try a quick spike on caching"; sleep 0.5; press Enter
   await "already exists"; sleep 0.8
   capture UC-103 session-clash
@@ -954,7 +959,7 @@ if [ "$LABEL" = "rust" ]; then
   tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
   await "Repository: beta"
   press s; await "Work Mode"; sleep 0.8
-  press Down Down Down Enter; await "#45"; sleep 0.8
+  press Down Down Enter; await "#45"; sleep 0.8
   capture UC-104 pr-review-item
   assert UC-104 draft-marked "yes" "$(screen_has '#46 Cache the session index +draft')"
   type_ "retry"; sleep 0.5; press Enter
@@ -977,7 +982,7 @@ if [ "$LABEL" = "rust" ]; then
   focus_app
   worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
   press s; await "Work Mode"; sleep 0.8
-  press Down Down Down Enter; await "#46"; sleep 0.8
+  press Down Down Enter; await "#46"; sleep 0.8
   type_ "cache"; sleep 0.5; press Enter
   await "Launch"; sleep 0.8
   capture UC-104 own-pr-confirm

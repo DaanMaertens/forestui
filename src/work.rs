@@ -3,7 +3,7 @@
 
 use crate::fuzzy::Searchable;
 use crate::models::{
-    GitHubIssue, GitHubPullRequest, ItemState, StartWorkSettings, WorkItemLink, Worktree,
+    GitHubIssue, GitHubPullRequest, ItemState, Naming, StartWorkSettings, WorkItemLink, Worktree,
 };
 use crate::prompt::Template;
 
@@ -14,8 +14,9 @@ const SLUG_LIMIT: usize = 40;
 /// The kind of work about to start, which decides what the item list holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkMode {
+    /// Every open issue. A feature label decides only how a picked one
+    /// starts — see [`IssueKind`] — not which list it is in.
     Issue,
-    Feature,
     /// A Claude session for work that is no issue or PR: its work item is a
     /// session prompt the user types, which exists nowhere but here.
     Session,
@@ -27,9 +28,8 @@ pub enum WorkMode {
 
 impl WorkMode {
     /// Every mode, in the order the mode step lists them.
-    pub const ALL: [WorkMode; 5] = [
+    pub const ALL: [WorkMode; 4] = [
         WorkMode::Issue,
-        WorkMode::Feature,
         WorkMode::Session,
         WorkMode::PrReview,
         WorkMode::Worktree,
@@ -38,7 +38,6 @@ impl WorkMode {
     pub fn label(self) -> &'static str {
         match self {
             WorkMode::Issue => "issue",
-            WorkMode::Feature => "feature",
             WorkMode::Session => "session",
             WorkMode::PrReview => "pr-review",
             WorkMode::Worktree => "worktree",
@@ -47,8 +46,7 @@ impl WorkMode {
 
     pub fn description(self) -> &'static str {
         match self {
-            WorkMode::Issue => "Fix a bug or chore from an open issue",
-            WorkMode::Feature => "Build a feature from a labelled issue",
+            WorkMode::Issue => "Work on an open issue: a feature, a bug or a chore",
             WorkMode::Session => "A Claude session for anything else",
             WorkMode::PrReview => "Review a pull request",
             WorkMode::Worktree => "A plain worktree: new or existing branch, no Claude",
@@ -106,7 +104,7 @@ pub fn review_kind(author: &str, viewer: Option<&str>) -> ReviewKind {
 
 /// Whether an issue carries one of the feature labels. GitHub treats label
 /// names case-insensitively, so `Enhancement` counts as `enhancement`.
-pub fn is_feature(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> bool {
+fn is_feature(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> bool {
     issue.labels.iter().any(|label| {
         feature_labels
             .iter()
@@ -114,30 +112,48 @@ pub fn is_feature(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> bo
     })
 }
 
-/// The mode an issue belongs to: `feature` if it carries a feature label —
-/// which wins over anything else it carries, so a `bug` + `enhancement`
-/// issue is a feature — and `issue` otherwise. [`issues_for`] lists by it,
-/// and a picked issue starts in it, so the two never disagree.
-pub fn mode_for(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> WorkMode {
-    if is_feature(issue, feature_labels) {
-        WorkMode::Feature
-    } else {
-        WorkMode::Issue
+/// How a picked issue starts: which naming names its worktree and branch,
+/// and which prompt template opens its session. Both kinds are listed
+/// together in the `issue` work mode; the kind only says how to start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueKind {
+    Issue,
+    Feature,
+}
+
+impl IssueKind {
+    /// What the confirm screen calls the work item: "Feature #7".
+    pub fn label(self) -> &'static str {
+        match self {
+            IssueKind::Issue => "Issue",
+            IssueKind::Feature => "Feature",
+        }
+    }
+
+    fn naming(self, settings: &StartWorkSettings) -> &Naming {
+        match self {
+            IssueKind::Issue => &settings.issue,
+            IssueKind::Feature => &settings.feature,
+        }
+    }
+
+    fn template(self) -> Template {
+        match self {
+            IssueKind::Issue => Template::Issue,
+            IssueKind::Feature => Template::Feature,
+        }
     }
 }
 
-/// The issues a mode lists. Every issue lands in exactly one of `issue` and
-/// `feature`; `pr-review` lists no issues.
-pub fn issues_for(
-    mode: WorkMode,
-    issues: &[GitHubIssue],
-    feature_labels: &[impl AsRef<str>],
-) -> Vec<GitHubIssue> {
-    issues
-        .iter()
-        .filter(|issue| mode_for(issue, feature_labels) == mode)
-        .cloned()
-        .collect()
+/// The kind an issue starts as: a feature if it carries a feature label —
+/// which wins over anything else it carries, so a `bug` + `enhancement`
+/// issue is a feature — and an issue otherwise.
+pub fn issue_kind(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> IssueKind {
+    if is_feature(issue, feature_labels) {
+        IssueKind::Feature
+    } else {
+        IssueKind::Issue
+    }
 }
 
 /// The worktree and branch a work item starts in.
@@ -147,32 +163,29 @@ pub struct WorktreeNames {
     pub branch: String,
 }
 
-/// Name the worktree and branch for a numbered work item, by the naming
-/// `settings` give its mode.
+/// Name the worktree and branch for an issue, by the naming `settings`
+/// give its kind.
 ///
-/// By default the worktree carries the mode, the number and a slug of the
+/// By default the worktree carries the kind, the number and a slug of the
 /// title, so the sidebar shows what kind of work it holds, and the branch is
-/// the worktree name under the mode's conventional prefix. A `pr-review`
-/// worktree checks out the PR's own branch, so only its worktree name is
-/// used.
-pub fn names(
+/// the worktree name under the kind's conventional prefix.
+pub fn issue_names(
     settings: &StartWorkSettings,
-    mode: WorkMode,
+    kind: IssueKind,
     number: i64,
     title: &str,
 ) -> WorktreeNames {
-    let (branch_prefix, pattern) = match mode {
-        WorkMode::Issue => (&settings.issue.branch_prefix, &settings.issue.name_pattern),
-        WorkMode::Feature => (
-            &settings.feature.branch_prefix,
-            &settings.feature.name_pattern,
-        ),
-        WorkMode::PrReview => (&String::new(), &settings.pr_review.name_pattern),
-        // Never reached: a session has no number and is named by
-        // [`session_names`], and a plain worktree is named by hand on its
-        // form. A bare number is the least surprising answer.
-        WorkMode::Session | WorkMode::Worktree => (&String::new(), &String::new()),
-    };
+    let naming = kind.naming(settings);
+    numbered_names(&naming.branch_prefix, &naming.name_pattern, number, title)
+}
+
+/// Name the worktree for a PR to review, by the `pr-review` naming. It
+/// checks out the PR's own branch, so only the worktree name is used.
+pub fn pull_request_names(settings: &StartWorkSettings, number: i64, title: &str) -> WorktreeNames {
+    numbered_names("", &settings.pr_review.name_pattern, number, title)
+}
+
+fn numbered_names(branch_prefix: &str, pattern: &str, number: i64, title: &str) -> WorktreeNames {
     let filled = fill_pattern(pattern, Some(number), &title_slug(title));
     // A pattern that fills to nothing would name every item alike.
     let worktree = if filled.is_empty() {
@@ -273,6 +286,7 @@ pub enum WorkItem {
     Issue {
         number: i64,
         title: String,
+        kind: IssueKind,
     },
     PullRequest {
         number: i64,
@@ -290,10 +304,11 @@ pub enum WorkItem {
 }
 
 impl WorkItem {
-    pub fn from_issue(issue: &GitHubIssue) -> Self {
+    pub fn from_issue(issue: &GitHubIssue, kind: IssueKind) -> Self {
         WorkItem::Issue {
             number: issue.number,
             title: issue.title.clone(),
+            kind,
         }
     }
 
@@ -321,11 +336,10 @@ impl WorkItem {
     }
 
     /// The template its first prompt is filled from. An issue's depends on
-    /// the mode it is started in; a PR's on its review kind.
-    pub fn template(&self, mode: WorkMode) -> Template {
+    /// its kind; a PR's on its review kind.
+    pub fn template(&self) -> Template {
         match self {
-            WorkItem::Issue { .. } if mode == WorkMode::Feature => Template::Feature,
-            WorkItem::Issue { .. } => Template::Issue,
+            WorkItem::Issue { kind, .. } => kind.template(),
             WorkItem::PullRequest { review, .. } => review.template(),
             WorkItem::Session { .. } => Template::Session,
         }
@@ -429,8 +443,8 @@ impl Searchable for PullRequestEntry {
 }
 
 /// Whether a list shows `issue`: always, unless it is blocked and blocked
-/// issues are hidden. Only a view filter — the cache, the `issue`/`feature`
-/// split and duplicate detection all see every issue.
+/// issues are hidden. Only a view filter — the cache and duplicate
+/// detection see every issue.
 pub fn is_shown(issue: &GitHubIssue, show_blocked: bool) -> bool {
     show_blocked || !issue.is_blocked()
 }
@@ -471,22 +485,20 @@ pub fn blocked_marker(issue: &GitHubIssue) -> Option<String> {
     Some(marker)
 }
 
-/// The rows a mode's picker lists: the issues it lists — less the blocked
-/// ones, unless `show_blocked` — each with the worktree `linked` says it was
+/// The rows `issue` lists: every open issue — less the blocked ones,
+/// unless `show_blocked` — each with the worktree `linked` says it was
 /// started in.
-pub fn item_entries(
-    mode: WorkMode,
+pub fn issue_entries(
     issues: &[GitHubIssue],
-    feature_labels: &[impl AsRef<str>],
     show_blocked: bool,
     linked: impl Fn(i64) -> Option<String>,
 ) -> Vec<ItemEntry> {
-    issues_for(mode, issues, feature_labels)
-        .into_iter()
+    issues
+        .iter()
         .filter(|issue| is_shown(issue, show_blocked))
         .map(|issue| {
             let worktree = linked(issue.number);
-            ItemEntry::Issue(IssueEntry::new(issue, worktree))
+            ItemEntry::Issue(IssueEntry::new(issue.clone(), worktree))
         })
         .collect()
 }
