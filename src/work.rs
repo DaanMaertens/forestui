@@ -3,7 +3,8 @@
 
 use crate::fuzzy::Searchable;
 use crate::models::{
-    GitHubIssue, GitHubPullRequest, ItemState, Naming, StartWorkSettings, WorkItemLink, Worktree,
+    GitHubIssue, GitHubPullRequest, IssueFilter, ItemState, Naming, StartWorkSettings,
+    WorkItemLink, Worktree,
 };
 use crate::prompt::Template;
 
@@ -102,14 +103,27 @@ pub fn review_kind(author: &str, viewer: Option<&str>) -> ReviewKind {
     }
 }
 
-/// Whether an issue carries one of the feature labels. GitHub treats label
-/// names case-insensitively, so `Enhancement` counts as `enhancement`.
-fn is_feature(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> bool {
+/// Whether an issue carries one of `labels`. GitHub treats label names
+/// case-insensitively, so `Enhancement` counts as `enhancement`.
+fn has_label(issue: &GitHubIssue, labels: &[impl AsRef<str>]) -> bool {
     issue.labels.iter().any(|label| {
-        feature_labels
+        labels
             .iter()
             .any(|wanted| label.name.eq_ignore_ascii_case(wanted.as_ref()))
     })
+}
+
+/// Whether `issue` is among the issues `filter` lists, by the feature and
+/// bug labels `settings` give. An issue with both is a feature and a bug.
+pub fn in_filter(issue: &GitHubIssue, filter: IssueFilter, settings: &StartWorkSettings) -> bool {
+    let feature = has_label(issue, &settings.feature_labels);
+    let bug = has_label(issue, &settings.bug_labels);
+    match filter {
+        IssueFilter::All => true,
+        IssueFilter::Features => feature,
+        IssueFilter::Bugs => bug,
+        IssueFilter::Other => !feature && !bug,
+    }
 }
 
 /// How a picked issue starts: which naming names its worktree and branch,
@@ -149,7 +163,7 @@ impl IssueKind {
 /// which wins over anything else it carries, so a `bug` + `enhancement`
 /// issue is a feature — and an issue otherwise.
 pub fn issue_kind(issue: &GitHubIssue, feature_labels: &[impl AsRef<str>]) -> IssueKind {
-    if is_feature(issue, feature_labels) {
+    if has_label(issue, feature_labels) {
         IssueKind::Feature
     } else {
         IssueKind::Issue
@@ -449,11 +463,28 @@ pub fn is_shown(issue: &GitHubIssue, show_blocked: bool) -> bool {
     show_blocked || !issue.is_blocked()
 }
 
-/// How many of `issues` a list leaves out for being blocked.
-pub fn hidden_blocked(issues: &[GitHubIssue], show_blocked: bool) -> usize {
+/// Whether a list under `filter` shows `issue`: the filter first, then
+/// blocked-hiding.
+fn is_listed(
+    issue: &GitHubIssue,
+    filter: IssueFilter,
+    settings: &StartWorkSettings,
+    show_blocked: bool,
+) -> bool {
+    in_filter(issue, filter, settings) && is_shown(issue, show_blocked)
+}
+
+/// How many of the issues in `filter` a list leaves out for being blocked:
+/// one the filter already leaves out is not missing from the list.
+pub fn hidden_blocked(
+    issues: &[GitHubIssue],
+    filter: IssueFilter,
+    settings: &StartWorkSettings,
+    show_blocked: bool,
+) -> usize {
     issues
         .iter()
-        .filter(|issue| !is_shown(issue, show_blocked))
+        .filter(|issue| in_filter(issue, filter, settings) && !is_shown(issue, show_blocked))
         .count()
 }
 
@@ -485,17 +516,19 @@ pub fn blocked_marker(issue: &GitHubIssue) -> Option<String> {
     Some(marker)
 }
 
-/// The rows `issue` lists: every open issue — less the blocked ones,
-/// unless `show_blocked` — each with the worktree `linked` says it was
+/// The rows `issue` lists: the open issues in `filter` — less the blocked
+/// ones, unless `show_blocked` — each with the worktree `linked` says it was
 /// started in.
 pub fn issue_entries(
     issues: &[GitHubIssue],
+    filter: IssueFilter,
+    settings: &StartWorkSettings,
     show_blocked: bool,
     linked: impl Fn(i64) -> Option<String>,
 ) -> Vec<ItemEntry> {
     issues
         .iter()
-        .filter(|issue| is_shown(issue, show_blocked))
+        .filter(|issue| is_listed(issue, filter, settings, show_blocked))
         .map(|issue| {
             let worktree = linked(issue.number);
             ItemEntry::Issue(IssueEntry::new(issue.clone(), worktree))

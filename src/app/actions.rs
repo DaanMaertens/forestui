@@ -13,7 +13,9 @@ use crate::modal::{
     StartWorkConfirmModal, StartWorkModal, WorktreeForm,
 };
 use crate::modal::{IntegrationAction, ModalOutcome};
-use crate::models::{CustomClaudeButton, GitHubIssue, Repository, WorkItemLink, Worktree};
+use crate::models::{
+    CustomClaudeButton, GitHubIssue, IssueFilter, Repository, WorkItemLink, Worktree,
+};
 use crate::services::live::LivePlace;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use crate::util::Noun;
@@ -176,6 +178,17 @@ impl App {
         }
     }
 
+    /// Remember Start work's issue filter, saved like "Show blocked".
+    fn set_issue_filter(&mut self, filter: IssueFilter) {
+        if self.settings.issue_filter == filter {
+            return;
+        }
+        self.settings.issue_filter = filter;
+        if let Err(error) = settings_service::save_settings(&self.settings) {
+            self.notify(format!("Could not save settings: {error}"), Severity::Error);
+        }
+    }
+
     fn run_modal_effect(&mut self, effect: ModalEffect) {
         match effect {
             ModalEffect::ClaudePlugin(action) => self.run_claude_plugin_action(action),
@@ -240,6 +253,7 @@ impl App {
                 });
             }
             ModalEffect::ShowBlockedIssues(show) => self.set_show_blocked_issues(show),
+            ModalEffect::IssueFilter(filter) => self.set_issue_filter(filter),
             ModalEffect::ListScope(path) => self.list_for_flow(&path),
             ModalEffect::EditTemplate(template) => self.edit_template(template),
             ModalEffect::EditRepositoryFile(key, file) => self.edit_repository_file(key, file),
@@ -878,6 +892,7 @@ impl App {
             cached.as_ref().map(|(issues, _)| issues.clone()),
             start_work,
             self.settings.show_blocked_issues,
+            self.settings.issue_filter,
         );
         self.modals.push(Modal::StartWork(Box::new(modal)));
         // Nobody waits on the answer: the modes stay usable until it says

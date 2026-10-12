@@ -338,6 +338,17 @@ how many were left out (`2 blocked hidden`). Tick **Show blocked** to list
 them, each marked with what blocks it (`blocked by #12`). The choice is
 remembered across runs as `show_blocked_issues`.
 
+#### Filtering issues
+
+The **Filter** button under the `issue` list cycles through **All**,
+**Features**, **Bugs** and **Other**. Features carry a feature label, bugs a
+bug label, and Other lists the issues with neither, including unlabelled
+ones. An issue with both labels is listed under Features and under Bugs, and
+still starts as a feature. The filter applies before blocked issues are
+hidden and before the search. It works with either scope. The count line
+names it (`3 bug issues`). The choice is remembered across runs as
+`issue_filter`.
+
 #### Prompt templates
 
 Each prompt comes from a Markdown template, with `{number}`, `{title}`,
@@ -405,9 +416,11 @@ Settings are stored in `~/.config/forestui/settings.json`:
   ],
   "remote_control": true,
   "show_blocked_issues": false,
+  "issue_filter": "all",
   "start_work": {
     "scope": "mine",
     "feature_labels": ["enhancement"],
+    "bug_labels": ["bug"],
     "issue": { "branch_prefix": "fix/", "name_pattern": "issue-{number}-{slug}" },
     "feature": { "branch_prefix": "feat/", "name_pattern": "feat-{number}-{slug}" },
     "session": { "branch_prefix": "session/", "name_pattern": "session-{slug}" },
@@ -427,6 +440,8 @@ Press `S` in the app to open the settings modal.
   starts as a feature, with the `feature` naming and `feature.md`; every
   other issue starts with the `issue` naming and `issue.md`. Both are
   listed together under `issue`.
+- `bug_labels` — an issue carrying any of these (case-insensitive) is a
+  bug for the issue filter. It does not change how the issue starts.
 - Per kind of work (`issue`, `feature`, `session`, `pr_review`), the
   worktree is named by `name_pattern` with `{number}` and `{slug}` (from the
   title, or a session prompt's first six words) filled in, and the branch is

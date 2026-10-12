@@ -25,6 +25,22 @@ fn no_repository_file_leaves_the_global_settings_as_they_are() {
     assert_eq!(effective(&global(), &loaded.overrides), global());
 }
 
+/// A repository's bug labels replace the global ones; left out, they are
+/// the global ones.
+#[test]
+fn a_repository_can_name_its_own_bug_labels() {
+    let overrides = overrides_from(r#"{"start_work": {"bug_labels": ["kind/defect"]}}"#);
+    assert_eq!(
+        effective(&global(), &overrides).bug_labels,
+        vec!["kind/defect".to_string()]
+    );
+    let overrides = overrides_from(r#"{"start_work": {}}"#);
+    assert_eq!(
+        effective(&global(), &overrides).bug_labels,
+        global().bug_labels
+    );
+}
+
 #[test]
 fn repository_values_are_laid_over_the_global_ones() {
     let overrides =
