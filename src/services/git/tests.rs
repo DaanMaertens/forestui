@@ -257,7 +257,7 @@ async fn list_branches_keeps_remote_branches_but_not_remote_names() {
     assert!(!all.iter().any(|b| b.ends_with("/HEAD")));
 }
 
-/// A free-text feature's branch, from creation to merged upstream.
+/// A session's branch, from creation to merged upstream.
 #[tokio::test]
 async fn branch_progress_follows_a_branch_into_the_default_branch() {
     let dir = tempfile::tempdir().unwrap();

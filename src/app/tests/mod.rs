@@ -279,7 +279,6 @@ fn two_issues() -> Vec<crate::models::GitHubIssue> {
     ]
 }
 
-/// What the GitHub probe reports for a repository with no GitHub remote.
 /// Move Start work's mode highlight down to `mode`, by key, so a test does
 /// not count rows the mode list may gain.
 fn highlight_mode(app: &mut App, mode: crate::work::WorkMode) {
@@ -292,6 +291,7 @@ fn highlight_mode(app: &mut App, mode: crate::work::WorkMode) {
     assert_eq!(start_work(app).mode, mode);
 }
 
+/// What the GitHub probe reports for a repository with no GitHub remote.
 fn no_github(app: &mut App, path: &str) {
     app.handle_event(AppEvent::GitHubChecked {
         path: path.to_string(),

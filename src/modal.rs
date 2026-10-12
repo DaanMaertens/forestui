@@ -867,8 +867,9 @@ impl StartWorkModal {
     }
 
     /// Take the probe's answer. A repository found not to be on GitHub moves
-    /// off any mode it can no longer offer — even mid-list, if the answer
-    /// was slower than the user — and drops the issues from its list.
+    /// off any mode it can no longer offer to `session` — even mid-list, if
+    /// the answer was slower than the user, in which case it goes back to the
+    /// mode step: `session` has no list to stay on.
     pub fn set_github(&mut self, is_github: bool) {
         self.github = Some(is_github);
         // A yes is what the flow assumed all along: nothing on screen
@@ -878,6 +879,9 @@ impl StartWorkModal {
         }
         if !self.mode_enabled(self.mode) {
             self.mode = WorkMode::Session;
+            if self.step == StartWorkStep::Item {
+                self.go_to(StartWorkStep::Mode);
+            }
         }
         self.picker = None;
         self.fill_picker();
@@ -992,8 +996,9 @@ impl StartWorkModal {
                     .cloned()
             })
         } else {
-            // Without GitHub there are no issues to wait for: the list is
-            // empty, and says so.
+            // Without GitHub there are no issues to wait for. No mode with a
+            // list is offered then, but an empty list says so rather than
+            // loading forever.
             let issues = match (self.has_github(), self.issues.as_deref()) {
                 (false, _) => &[][..],
                 (true, Some(issues)) => issues,

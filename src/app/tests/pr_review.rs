@@ -45,7 +45,6 @@ async fn pr_review_lists_the_pull_requests_once_they_load() {
     let (_dir, mut app, path) = app_with_issues(two_issues());
     app.handle_key(key(KeyCode::Char('s')));
     highlight_mode(&mut app, crate::work::WorkMode::PrReview);
-    assert_eq!(start_work(&app).mode, crate::work::WorkMode::PrReview);
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Item);
     assert!(start_work(&app).picker.is_none(), "still loading");

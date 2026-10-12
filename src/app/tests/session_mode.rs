@@ -1,7 +1,7 @@
 use super::*;
 
 /// `s`, then the `session` mode, then `prompt` typed and submitted.
-fn prompt(app: &mut App, prompt: &str) {
+fn type_session_prompt(app: &mut App, prompt: &str) {
     app.handle_key(key(KeyCode::Char('s')));
     highlight_mode(app, crate::work::WorkMode::Session);
     app.handle_key(key(KeyCode::Enter));
@@ -60,7 +60,7 @@ async fn the_feature_list_has_no_free_text_entry() {
 #[tokio::test]
 async fn a_session_confirms_with_its_own_names_and_prompt() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
-    prompt(&mut app, "Why is the sidebar so slow today?");
+    type_session_prompt(&mut app, "Why is the sidebar so slow today?");
 
     let pending = app.pending_start.as_ref().expect("waiting on branches");
     assert_eq!(pending.item, session("Why is the sidebar so slow today?"));
@@ -107,7 +107,7 @@ async fn the_session_naming_comes_from_the_settings() {
     settings.start_work.session.name_pattern = "s-{slug}".into();
     let (_dir, mut app, _) =
         app_with_settings_and_issues(settings, crate::models::Scope::Mine, Vec::new());
-    prompt(&mut app, "Dark mode");
+    type_session_prompt(&mut app, "Dark mode");
 
     let pending = app.pending_start.as_ref().expect("waiting on branches");
     assert_eq!(pending.names.worktree, "s-dark-mode");
@@ -124,7 +124,7 @@ async fn a_global_session_template_fills_the_first_prompt() {
         b"{body}\n\nYou are in {worktree} of {repo}, on {branch}.",
     );
     let (_dir, mut app, _) = app_with_issues(Vec::new());
-    prompt(&mut app, "Dark mode");
+    type_session_prompt(&mut app, "Dark mode");
     let loaded = branches_loaded(&app);
     app.handle_event(loaded);
 
@@ -150,7 +150,7 @@ async fn an_old_free_feature_template_is_not_used() {
     )
     .unwrap();
     let (_dir, mut app, _) = app_with_issues(Vec::new());
-    prompt(&mut app, "Dark mode");
+    type_session_prompt(&mut app, "Dark mode");
     let loaded = branches_loaded(&app);
     app.handle_event(loaded);
 
@@ -161,7 +161,7 @@ async fn an_old_free_feature_template_is_not_used() {
 #[tokio::test]
 async fn an_unnameable_prompt_goes_nowhere() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
-    prompt(&mut app, "???");
+    type_session_prompt(&mut app, "???");
 
     assert!(app.pending_start.is_none());
     assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Prompt);
@@ -172,7 +172,7 @@ async fn an_unnameable_prompt_goes_nowhere() {
 #[tokio::test]
 async fn back_from_the_prompt_returns_to_the_modes() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
-    prompt(&mut app, "");
+    type_session_prompt(&mut app, "");
     app.handle_key(key(KeyCode::Esc));
     let flow = start_work(&app);
     assert_eq!(flow.step, crate::modal::StartWorkStep::Mode);
@@ -205,7 +205,7 @@ async fn a_taken_slug_asks_what_to_do() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
     take_slug(&mut app, "session-dark-mode");
 
-    prompt(&mut app, "Dark mode");
+    type_session_prompt(&mut app, "Dark mode");
 
     let flow = start_work(&app);
     assert_eq!(flow.step, crate::modal::StartWorkStep::Clash);
@@ -235,7 +235,7 @@ async fn a_taken_slug_asks_what_to_do() {
 async fn edit_name_goes_back_to_the_prompt_as_typed() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
     take_slug(&mut app, "session-dark-mode");
-    prompt(&mut app, "Dark mode");
+    type_session_prompt(&mut app, "Dark mode");
 
     if let Some(modal) = app.modals.last_mut() {
         modal.set_focus(crate::modal::StartWorkModal::FOCUS_EDIT);
@@ -252,7 +252,7 @@ async fn edit_name_goes_back_to_the_prompt_as_typed() {
 async fn create_copy_confirms_under_the_next_free_suffix() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
     take_slug(&mut app, "session-dark-mode");
-    prompt(&mut app, "Dark mode");
+    type_session_prompt(&mut app, "Dark mode");
 
     if let Some(modal) = app.modals.last_mut() {
         modal.set_focus(crate::modal::StartWorkModal::FOCUS_COPY);
@@ -272,7 +272,7 @@ async fn open_existing_jumps_to_the_worktree_and_creates_nothing() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
     let taken = take_slug(&mut app, "session-dark-mode");
     let worktrees = app.state.repositories()[0].worktrees.len();
-    prompt(&mut app, "Dark mode");
+    type_session_prompt(&mut app, "Dark mode");
 
     // The first choice is focused, so Enter opens.
     app.handle_key(key(KeyCode::Enter));
@@ -295,7 +295,7 @@ async fn a_session_is_never_matched_by_its_link() {
         });
     });
 
-    prompt(&mut app, "Dark mode");
+    type_session_prompt(&mut app, "Dark mode");
 
     assert_eq!(
         app.pending_start.as_ref().map(|p| &p.item),
@@ -337,7 +337,8 @@ async fn a_repository_without_github_offers_only_session_and_worktree() {
 }
 
 /// The probe can answer after the user already moved to `issue`'s list;
-/// the flow falls back to `session`, which still works, on the mode step.
+/// the flow falls back to `session`, which still works, back on the mode
+/// step, since `session` has no list to stay on.
 #[tokio::test]
 async fn a_late_no_github_answer_leaves_the_issue_list() {
     let (_dir, mut app, path) = app_with_issues(vec![open_issue(42, "Fix login bug")]);
@@ -349,7 +350,10 @@ async fn a_late_no_github_answer_leaves_the_issue_list() {
 
     let flow = start_work(&app);
     assert_eq!(flow.mode, crate::work::WorkMode::Session);
+    assert_eq!(flow.step, crate::modal::StartWorkStep::Mode);
     assert!(flow.picker.is_none(), "a session has no list");
+    let screen = rendered(&mut app);
+    assert!(!screen.contains("Loading issues"), "{screen}");
 }
 
 /// A yes is what the flow already assumed, so it must not rebuild the list

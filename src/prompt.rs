@@ -143,9 +143,8 @@ pub struct TemplateVars<'a> {
     pub branch: &'a str,
     pub worktree: &'a str,
     pub repo: &'a str,
-    /// The session prompt, and nothing else: an
-    /// issue's or PR's body would be a stale copy of text Claude can read
-    /// fresh with `gh`.
+    /// The session prompt, and nothing else: an issue's or PR's body would
+    /// be a stale copy of text Claude can read fresh with `gh`.
     pub body: Option<&'a str>,
 }
 
@@ -153,9 +152,8 @@ pub struct TemplateVars<'a> {
 ///
 /// One pass, left to right, so a value is never itself expanded — an issue
 /// titled `{branch}` stays that title. A placeholder this does not know, or
-/// `{body}` outside a session, is left as written rather than
-/// failing: a typo in a template should show up in the prompt, not stop the
-/// launch.
+/// `{body}` outside a session, is left as written rather than failing: a
+/// typo in a template should show up in the prompt, not stop the launch.
 pub fn fill(template: &str, vars: &TemplateVars<'_>) -> String {
     let number = vars.number.map(|n| n.to_string());
     let mut out = String::with_capacity(template.len());
