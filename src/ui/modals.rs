@@ -768,14 +768,8 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         WorkMode::Issue | WorkMode::Session | WorkMode::Worktree => (
             "Issue",
             " Loading issues...",
-            "No open non-feature issues",
+            "No open issues",
             Noun::new("issue", "issues"),
-        ),
-        WorkMode::Feature => (
-            "Issue",
-            " Loading issues...",
-            "No open feature issues",
-            Noun::new("feature", "features"),
         ),
         WorkMode::PrReview => (
             "Pull Request",
@@ -1027,15 +1021,14 @@ fn start_work_confirm(
 
     let rect = widgets::centered_rect(WIDTH, body + prompt.len() as u16, area);
     let (title, subtitle) = match &modal.item {
-        WorkItem::Issue { number, title } => {
-            let kind = match modal.mode {
-                WorkMode::Feature => "Feature",
-                WorkMode::Issue | WorkMode::Session | WorkMode::PrReview | WorkMode::Worktree => {
-                    "Issue"
-                }
-            };
-            (format!("Start Work: {kind} #{number}"), title.to_string())
-        }
+        WorkItem::Issue {
+            number,
+            title,
+            kind,
+        } => (
+            format!("Start Work: {} #{number}", kind.label()),
+            title.to_string(),
+        ),
         WorkItem::PullRequest {
             number,
             title,

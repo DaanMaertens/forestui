@@ -118,7 +118,7 @@ async fn an_all_setting_starts_the_toggle_ticked() {
     app.handle_key(key(KeyCode::Enter));
     let screen = rendered(&mut app);
     assert!(screen.contains("[x] Not just mine"), "{screen}");
-    assert!(screen.contains("No open non-feature issues"), "{screen}");
+    assert!(screen.contains("No open issues"), "{screen}");
     assert!(!screen.contains("assigned to or opened by you"), "{screen}");
 }
 
@@ -145,4 +145,28 @@ async fn a_late_settings_answer_keeps_a_ticked_scope() {
     }
     assert_eq!(start_work(&app).scope, Scope::All, "the tick stands");
     assert_eq!(start_work(&app).start_work.feature_labels, vec!["feature"]);
+}
+
+/// Repository settings that answer with other labels or names, but the same
+/// scope, change nothing the list shows: a half-typed search survives them.
+#[tokio::test]
+async fn a_late_settings_answer_keeps_a_typed_query() {
+    let (_dir, mut app, _) = app_with_issues(vec![
+        open_issue(1, "Crash on save"),
+        labelled_issue(2, "Dark mode", &["feature"]),
+    ]);
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    type_text(&mut app, "dark");
+
+    let mut settings = start_work(&app).start_work.clone();
+    settings.feature_labels = vec!["feature".into()];
+    settings.feature.branch_prefix = "feature/".into();
+    match app.modals.last_mut() {
+        Some(Modal::StartWork(flow)) => flow.set_start_work(settings),
+        other => panic!("Start work expected, found {other:?}"),
+    }
+    let picker = start_work(&app).picker.as_ref().expect("list kept");
+    assert_eq!(picker.query().value(), "dark");
+    assert_eq!(picker.match_count(), 1);
 }

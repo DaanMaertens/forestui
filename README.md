@@ -202,7 +202,7 @@ pane, `↑`/`↓` move and `Enter` activates.
 | `PgUp` / `PgDn` | Page the sidebar, or scroll the detail pane |
 | `Enter` | Select a row / activate the focused control |
 | `a` | Add repository |
-| `s` | Start work (an issue, a feature, a PR review, or a plain worktree) |
+| `s` | Start work (an issue, a session, a PR review, or a plain worktree) |
 | `e` | Open in editor |
 | `t` | Open in terminal |
 | `o` | Open in file manager |
@@ -298,10 +298,12 @@ work in three steps:
 
 ![Start work's issue picker, with one blocked issue hidden](doc/screenshot_start_work.png)
 
-1. **Pick a work mode**: `issue`, `feature`, `session`, `pr-review` or
-   `worktree`. Open issues carrying a feature label (`enhancement` by
-   default) are listed under `feature`, every other open issue under
-   `issue`.
+1. **Pick a work mode**: `issue`, `session`, `pr-review` or `worktree`.
+   `issue` lists every open issue. One carrying a feature label
+   (`enhancement` by default) starts as a feature, with the `feature`
+   naming (`feat/feat-<n>-<slug>`) and the plan-first `feature.md` prompt;
+   every other issue starts with the `issue` naming and `issue.md`. The
+   confirm screen says which: `Feature #7` or `Issue #7`.
 2. **Pick a work item** from a fuzzy-searchable list. By default it holds
    only your items: issues assigned to or opened by you, PRs with a review
    requested from you or opened by you. Tick **Not just mine** to list every
@@ -325,13 +327,13 @@ worktree name and a new or existing branch, creates the worktree, and starts
 nothing in it. It needs no GitHub remote.
 
 Selecting a repository fetches its open issues in the background, so the
-`issue` and `feature` lists are usually filled by the time you open them. A
+`issue` list is usually filled by the time you open it. A
 repository without a GitHub remote offers sessions and plain worktrees only.
 
 #### Blocked issues
 
 An issue that GitHub records as blocked by another *open* issue is hidden
-from the `issue` and `feature` lists, and the count line above the list says
+from the `issue` list, and the count line above the list says
 how many were left out (`2 blocked hidden`). Tick **Show blocked** to list
 them, each marked with what blocks it (`blocked by #12`). The choice is
 remembered across runs as `show_blocked_issues`.
@@ -421,11 +423,14 @@ Press `S` in the app to open the settings modal.
 - `scope` — `mine` lists issues assigned to or opened by you and PRs with a
   review requested from you or opened by you; `all` lists every open one.
   The picker's **Not just mine** checkbox switches it for a single pick.
-- `feature_labels` — an issue carrying any of these (case-insensitive) is a
-  `feature`; every other open issue is an `issue`.
-- Per work mode, the worktree is named by `name_pattern` with `{number}` and
-  `{slug}` (from the title, or a session prompt's first six words) filled in,
-  and the branch is `branch_prefix` followed by that name. A `pr-review`
+- `feature_labels` — an issue carrying any of these (case-insensitive)
+  starts as a feature, with the `feature` naming and `feature.md`; every
+  other issue starts with the `issue` naming and `issue.md`. Both are
+  listed together under `issue`.
+- Per kind of work (`issue`, `feature`, `session`, `pr_review`), the
+  worktree is named by `name_pattern` with `{number}` and `{slug}` (from the
+  title, or a session prompt's first six words) filled in, and the branch is
+  `branch_prefix` followed by that name. A `pr-review`
   worktree checks out the PR's own branch, so it has no prefix.
 
 Every key is optional; a missing one keeps the default shown above.

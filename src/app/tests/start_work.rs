@@ -57,10 +57,10 @@ async fn the_start_work_control_leads_the_repository_pane() {
     assert!(matches!(app.modals.last(), Some(Modal::StartWork(_))));
 }
 
-/// The two modes split the issues by the feature label: a `bug` that is
-/// also an `enhancement` is a feature, and appears only there.
+/// `issue` lists every open issue in one list, features and bugs alike,
+/// and counts them all as issues.
 #[tokio::test]
-async fn issue_and_feature_list_disjoint_issues() {
+async fn the_issue_mode_lists_every_open_issue() {
     let (_dir, mut app, _) = app_with_issues(vec![
         labelled_issue(1, "Crash on save", &["bug"]),
         labelled_issue(2, "Dark mode", &["enhancement"]),
@@ -68,20 +68,26 @@ async fn issue_and_feature_list_disjoint_issues() {
         open_issue(4, "Typo in README"),
     ]);
     app.handle_key(key(KeyCode::Char('s')));
-    assert_eq!(listed(&app), vec![1, 4]);
-
-    app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
+
     let flow = start_work(&app);
-    assert_eq!(flow.mode, crate::work::WorkMode::Feature);
+    assert_eq!(flow.mode, crate::work::WorkMode::Issue);
     assert_eq!(flow.step, crate::modal::StartWorkStep::Item);
-    assert_eq!(listed(&app), vec![2, 3]);
+    assert_eq!(listed(&app), vec![1, 2, 3, 4]);
+    let screen = rendered(&mut app);
+    assert!(screen.contains("4 issues"), "{screen}");
+}
 
-    // Back to the mode step and over to `issue` swaps the list back.
-    app.handle_key(key(KeyCode::Esc));
-    app.handle_key(key(KeyCode::Up));
+/// With nothing open, the list says there are no issues — not "no
+/// non-feature issues".
+#[tokio::test]
+async fn an_empty_issue_list_says_no_open_issues() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    app.handle_key(key(KeyCode::Char('s')));
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(listed(&app), vec![1, 4]);
+    let screen = rendered(&mut app);
+    assert!(screen.contains("No open issues"), "{screen}");
+    assert!(!screen.contains("feature"), "{screen}");
 }
 
 fn with_scope(scope: crate::models::Scope) -> crate::models::Settings {
@@ -127,24 +133,45 @@ async fn start_work_lists_the_configured_scope() {
     }
 }
 
-/// The configured feature labels decide which list an issue is in.
+/// Pick the `nth` issue of the `issue` list and wait out the branches,
+/// landing on the confirm screen.
+fn confirm_nth_issue(app: &mut App, nth: usize) {
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    for _ in 0..nth {
+        app.handle_key(key(KeyCode::Down));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    let loaded = branches_loaded(app);
+    app.handle_event(loaded);
+}
+
+/// The configured feature labels decide how an issue starts, not whether
+/// it is listed: both are in the one list.
 #[tokio::test]
-async fn the_feature_labels_setting_splits_the_lists() {
+async fn the_feature_labels_setting_decides_how_an_issue_starts() {
     let mut settings = crate::models::Settings::default();
     settings.start_work.feature_labels = vec!["feature".into()];
-    let (_dir, mut app, _) = app_with_settings_and_issues(
-        settings,
-        crate::models::Scope::Mine,
-        vec![
-            labelled_issue(1, "Dark mode", &["enhancement"]),
-            labelled_issue(2, "Export", &["Feature"]),
-        ],
-    );
+    let issues = vec![
+        labelled_issue(1, "Dark mode", &["enhancement"]),
+        labelled_issue(2, "Export", &["Feature"]),
+    ];
+    let (_dir, mut app, _) =
+        app_with_settings_and_issues(settings.clone(), crate::models::Scope::Mine, issues.clone());
     app.handle_key(key(KeyCode::Char('s')));
-    assert_eq!(listed(&app), vec![1], "enhancement is no longer a feature");
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Enter));
-    assert_eq!(listed(&app), vec![2]);
+    assert_eq!(listed(&app), vec![1, 2]);
+
+    confirm_nth_issue(&mut app, 0);
+    assert_eq!(
+        confirm_screen(&app).name.value(),
+        "issue-1-dark-mode",
+        "enhancement is no longer a feature"
+    );
+
+    let (_dir, mut app, _) =
+        app_with_settings_and_issues(settings, crate::models::Scope::Mine, issues);
+    confirm_nth_issue(&mut app, 1);
+    assert_eq!(confirm_screen(&app).name.value(), "feat-2-export");
 }
 
 /// The confirm screen names the worktree and branch by the configured
@@ -172,33 +199,80 @@ async fn the_confirm_screen_uses_the_configured_naming() {
     assert_eq!(confirm.branch.value(), "bug/42-fix-login-bug");
 }
 
-/// A feature is named `feat-<n>-<slug>` on `feat/...` and started with the
-/// plan-first template.
+/// A feature-labelled issue, picked from the one `issue` list, is named
+/// `feat-<n>-<slug>` on `feat/...`, started with the plan-first template,
+/// and called a feature on the confirm screen.
 #[tokio::test]
 async fn a_feature_confirms_with_feat_names_and_the_feature_prompt() {
     let (_dir, mut app, _) = app_with_issues(vec![
         labelled_issue(42, "Fix login bug", &["bug"]),
         labelled_issue(7, "Dark mode", &["enhancement"]),
     ]);
-    app.handle_key(key(KeyCode::Char('s')));
-    app.handle_key(key(KeyCode::Down));
-    app.handle_key(key(KeyCode::Enter));
-    app.handle_key(key(KeyCode::Enter));
-    assert_eq!(pending_number(&app), Some(7));
-    assert_eq!(
-        app.pending_start.as_ref().map(|p| p.mode),
-        Some(crate::work::WorkMode::Feature)
-    );
-    let loaded = branches_loaded(&app);
-    app.handle_event(loaded);
+    confirm_nth_issue(&mut app, 1);
 
     let confirm = confirm_screen(&app);
-    assert_eq!(confirm.mode, crate::work::WorkMode::Feature);
+    assert!(matches!(
+        confirm.item,
+        crate::work::WorkItem::Issue {
+            number: 7,
+            kind: crate::work::IssueKind::Feature,
+            ..
+        }
+    ));
     assert_eq!(confirm.name.value(), "feat-7-dark-mode");
     assert_eq!(confirm.branch.value(), "feat/feat-7-dark-mode");
     let prompt = confirm.prompt();
     assert!(prompt.contains("feature from GitHub issue #7"), "{prompt}");
     assert!(prompt.contains("approved the plan"), "{prompt}");
+    let screen = rendered(&mut app);
+    assert!(screen.contains("Start Work: Feature #7"), "{screen}");
+}
+
+/// A bug — and any other issue without a feature label — is named
+/// `issue-<n>-<slug>` on `fix/...`, started with the issue template, and
+/// called an issue on the confirm screen.
+#[tokio::test]
+async fn a_bug_confirms_with_issue_names_and_the_issue_prompt() {
+    let (_dir, mut app, _) = app_with_issues(vec![
+        labelled_issue(42, "Fix login bug", &["bug"]),
+        labelled_issue(7, "Dark mode", &["enhancement"]),
+    ]);
+    confirm_nth_issue(&mut app, 0);
+
+    let confirm = confirm_screen(&app);
+    assert!(matches!(
+        confirm.item,
+        crate::work::WorkItem::Issue {
+            number: 42,
+            kind: crate::work::IssueKind::Issue,
+            ..
+        }
+    ));
+    assert_eq!(confirm.name.value(), "issue-42-fix-login-bug");
+    assert_eq!(confirm.branch.value(), "fix/issue-42-fix-login-bug");
+    let prompt = confirm.prompt();
+    assert!(
+        prompt.starts_with("Work on GitHub issue #42: Fix login bug"),
+        "{prompt}"
+    );
+    let screen = rendered(&mut app);
+    assert!(screen.contains("Start Work: Issue #42"), "{screen}");
+}
+
+/// A feature label wins over a bug label: an issue carrying both starts
+/// as a feature.
+#[tokio::test]
+async fn a_feature_label_wins_over_a_bug_label() {
+    let (_dir, mut app, _) = app_with_issues(vec![labelled_issue(
+        3,
+        "Faster startup",
+        &["bug", "enhancement"],
+    )]);
+    confirm_nth_issue(&mut app, 0);
+    assert_eq!(
+        confirm_screen(&app).branch.value(),
+        "feat/feat-3-faster-startup"
+    );
 }
 
 /// The confirm screen only ever opens over Start work: closed while the

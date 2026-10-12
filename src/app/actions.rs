@@ -17,7 +17,7 @@ use crate::models::{CustomClaudeButton, GitHubIssue, Repository, WorkItemLink, W
 use crate::services::live::LivePlace;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use crate::util::Noun;
-use crate::work::{self, WorkItem, WorkMode};
+use crate::work::{self, WorkItem};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -179,14 +179,14 @@ impl App {
     fn run_modal_effect(&mut self, effect: ModalEffect) {
         match effect {
             ModalEffect::ClaudePlugin(action) => self.run_claude_plugin_action(action),
-            ModalEffect::ConfirmIssue(issue, mode) => {
+            ModalEffect::ConfirmIssue(issue) => {
                 // The repository the flow was opened for, not whatever the
                 // selection says now.
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
                     return;
                 };
                 let repo_id = flow.repo_id;
-                self.start_work_on_issue(repo_id, *issue, mode);
+                self.start_work_on_issue(repo_id, *issue);
             }
             ModalEffect::LoadWorktreeBranches => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
@@ -619,11 +619,10 @@ impl App {
         let layers = self.prompt_layers_for(&repo.source_path);
         let template = crate::prompt::resolve(
             &layers.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
-            start.item.template(start.mode),
+            start.item.template(),
         );
         let modal = StartWorkConfirmModal::new(
             repo,
-            start.mode,
             start.item,
             start.names,
             template.text,
@@ -651,7 +650,10 @@ impl App {
     /// load, or — one work item, one worktree — a jump to the worktree it was
     /// already started in. Checked against the state now, not the marker the
     /// list drew at open.
-    fn start_work_on_issue(&mut self, repo_id: Uuid, issue: GitHubIssue, mode: WorkMode) {
+    ///
+    /// Its kind — feature or issue, and so its naming and template — is
+    /// settled here, by the feature labels in effect for the repository.
+    fn start_work_on_issue(&mut self, repo_id: Uuid, issue: GitHubIssue) {
         let link = WorkItemLink::Issue {
             number: issue.number,
         };
@@ -668,10 +670,10 @@ impl App {
             return;
         };
         let start_work = self.start_work_for(&repo.source_path);
+        let kind = work::issue_kind(&issue, &start_work.feature_labels);
         self.pending_start = Some(PendingStart {
-            mode,
-            names: work::names(&start_work, mode, issue.number, &issue.title),
-            item: WorkItem::from_issue(&issue),
+            names: work::issue_names(&start_work, kind, issue.number, &issue.title),
+            item: WorkItem::from_issue(&issue, kind),
         });
         self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
     }
@@ -716,13 +718,9 @@ impl App {
         let start_work = self.start_work_for(&repo.source_path);
         let names = work::WorktreeNames {
             branch: head_branch.clone(),
-            ..work::names(&start_work, WorkMode::PrReview, number, title)
+            ..work::pull_request_names(&start_work, number, title)
         };
-        let start = PendingStart {
-            mode: WorkMode::PrReview,
-            item,
-            names,
-        };
+        let start = PendingStart { item, names };
         self.open_confirm(repo_id, start, BranchList::default());
     }
 
@@ -757,7 +755,6 @@ impl App {
             names
         };
         self.pending_start = Some(PendingStart {
-            mode: WorkMode::Session,
             item: WorkItem::Session { prompt },
             names,
         });

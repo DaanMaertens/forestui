@@ -240,7 +240,6 @@ pub struct App {
 /// suffix its clash question chose.
 #[derive(Debug)]
 pub(crate) struct PendingStart {
-    pub mode: crate::work::WorkMode,
     pub item: crate::work::WorkItem,
     pub names: crate::work::WorktreeNames,
 }
