@@ -801,14 +801,15 @@ if [ "$LABEL" = "rust" ]; then
   await "#298"; sleep 0.8
   capture UC-99 start-work-item
   assert UC-99 lists-only-mine "no" "$(screen_has '#412')"
-  # Show blocked, then Not just mine: the list widens for this pick alone,
-  # and unticking it brings back the cached list of the user's own.
-  press Tab; press Tab; press Enter; await "#412"; sleep 0.8
+  # Past the filter and Show blocked to Not just mine: the list widens for
+  # this pick alone, and unticking it brings back the cached list of the
+  # user's own.
+  press Tab; press Tab; press Tab; press Enter; await "#412"; sleep 0.8
   capture UC-99 start-work-item-all
   assert UC-99 not-just-mine-ticked "yes" "$(screen_has '\[x\] Not just mine')"
   press Space; await "\[ \] Not just mine"; sleep 0.5
   assert UC-99 unticked-lists-only-mine "no" "$(screen_has '#412')"
-  press Shift+Tab; press Shift+Tab; sleep 0.3
+  press Shift+Tab; press Shift+Tab; press Shift+Tab; sleep 0.3
   type_ "metrics"; sleep 0.5; press Enter
   await "Launch"; sleep 0.8
   capture UC-99 start-work-confirm
