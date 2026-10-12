@@ -31,16 +31,16 @@ fn unknown_placeholders_and_stray_braces_are_left_as_written() {
 }
 
 #[test]
-fn body_is_filled_for_free_text_only() {
+fn body_is_filled_for_a_session_only() {
     assert_eq!(fill("do: {body}", &issue_vars()), "do: {body}");
-    let free = TemplateVars {
+    let session = TemplateVars {
         number: None,
         body: Some("dark mode"),
         ..issue_vars()
     };
-    assert_eq!(fill("do: {body}", &free), "do: dark mode");
-    // A free-text feature has no number to fill in.
-    assert_eq!(fill("#{number}", &free), "#{number}");
+    assert_eq!(fill("do: {body}", &session), "do: dark mode");
+    // A session prompt has no number to fill in.
+    assert_eq!(fill("#{number}", &session), "#{number}");
 }
 
 #[test]
@@ -108,23 +108,39 @@ fn the_own_review_template_waits_before_fixing() {
     assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
 }
 
-/// The free-text template carries the typed description itself, and sends
-/// Claude to no issue: there is none.
+/// The session template is the session prompt, verbatim: no plan-first
+/// rule, no issue to read.
 #[test]
-fn the_free_feature_template_carries_the_description() {
-    let free = TemplateVars {
+fn the_session_template_is_the_prompt_alone() {
+    let session = TemplateVars {
         number: None,
-        title: "Dark mode for the sidebar",
-        body: Some("Dark mode for the sidebar"),
-        branch: "feat/feat-dark-mode-for-the-sidebar",
-        worktree: "feat-dark-mode-for-the-sidebar",
+        title: "Why is the sidebar slow?",
+        body: Some("Why is the sidebar slow?"),
+        branch: "session/session-why-is-the-sidebar-slow",
+        worktree: "session-why-is-the-sidebar-slow",
         repo: "forestui",
     };
-    let prompt = fill(FREE_FEATURE_TEMPLATE, &free);
-    assert!(prompt.contains("Dark mode for the sidebar"), "{prompt}");
-    assert!(!prompt.contains("gh issue"), "{prompt}");
-    assert!(prompt.contains("approved the plan"), "{prompt}");
-    assert!(!prompt.contains('{'), "an unfilled placeholder: {prompt}");
+    assert_eq!(
+        fill(SESSION_TEMPLATE, &session),
+        "Why is the sidebar slow?\n"
+    );
+}
+
+/// An override of the session template can say where Claude is.
+#[test]
+fn a_session_override_fills_the_other_placeholders() {
+    let session = TemplateVars {
+        number: None,
+        title: "Spike",
+        body: Some("Spike"),
+        branch: "session/session-spike",
+        worktree: "session-spike",
+        repo: "forestui",
+    };
+    assert_eq!(
+        fill("{body} ({worktree} of {repo}, on {branch})", &session),
+        "Spike (session-spike of forestui, on session/session-spike)"
+    );
 }
 
 /// The editor sees the prompt in a file outside any worktree, what it
@@ -187,7 +203,7 @@ fn the_file_names_are_the_template_names() {
         [
             "issue.md",
             "feature.md",
-            "free-feature.md",
+            "session.md",
             "pr-review-others.md",
             "pr-review-own.md"
         ]
@@ -227,12 +243,9 @@ fn ensuring_a_file_creates_it_from_the_default_and_its_directory() {
     let dir = tempfile::tempdir().unwrap();
     let prompts = dir.path().join("prompts");
 
-    let path = ensure_file(&prompts, Template::FreeFeature, &[]).unwrap();
-    assert_eq!(path, prompts.join("free-feature.md"));
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        FREE_FEATURE_TEMPLATE
-    );
+    let path = ensure_file(&prompts, Template::Session, &[]).unwrap();
+    assert_eq!(path, prompts.join("session.md"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), SESSION_TEMPLATE);
 }
 
 #[test]

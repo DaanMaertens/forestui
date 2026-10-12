@@ -70,10 +70,10 @@ pub enum ModalEffect {
     /// Start work picked a PR to review, its review kind already settled:
     /// open the confirm screen for it on top of the picker.
     ConfirmPullRequest(Box<WorkItem>),
-    /// Start work was given a free-text feature: open the confirm screen for
+    /// Start work was given a session prompt: open the confirm screen for
     /// it — asking first if its names are taken, unless this is the answer
     /// to that question (`copy`), which takes the next free suffix instead.
-    ConfirmFreeText { description: String, copy: bool },
+    ConfirmSession { prompt: String, copy: bool },
     /// The clash question's "open existing": go to that worktree.
     OpenWorktree(Uuid),
     /// Open the confirm screen's prompt in an editor; the text comes back as
@@ -715,16 +715,16 @@ impl WorktreeForm {
 pub enum StartWorkStep {
     Mode,
     Item,
-    /// Typing a free-text feature's description.
-    Describe,
-    /// The description's names are taken: open that worktree, make a
+    /// Typing a session prompt.
+    Prompt,
+    /// The session prompt's names are taken: open that worktree, make a
     /// numbered copy, or go back and edit.
     Clash,
     /// The `worktree` mode's form: a plain worktree, no Claude.
     Worktree,
 }
 
-/// The worktree a free-text feature's names collided with.
+/// The worktree a session's names collided with.
 #[derive(Debug, Clone)]
 pub struct Clash {
     pub worktree_id: Uuid,
@@ -734,7 +734,7 @@ pub struct Clash {
 }
 
 /// Start work's steps before the confirm screen: choose a work mode, then a
-/// work item — or describe a free-text feature.
+/// work item — or type a session prompt.
 #[derive(Debug)]
 pub struct StartWorkModal {
     pub repo_id: Uuid,
@@ -759,19 +759,19 @@ pub struct StartWorkModal {
     viewer: Option<String>,
     /// The rows `mode` lists. `None` while its items are still loading.
     pub picker: Option<SearchPicker<ItemEntry>>,
-    /// A free-text feature's description, kept across Back so an edit after
-    /// a clash starts from what was typed.
-    pub description: TextInput,
+    /// The session prompt, kept across Back so an edit after a clash starts
+    /// from what was typed.
+    pub prompt: TextInput,
     /// Set on the clash step.
     pub clash: Option<Clash>,
     /// The `worktree` mode's form, once its branches have loaded. Kept
-    /// across Back, like the description.
+    /// across Back, like the session prompt.
     pub worktree: Option<Box<WorktreeForm>>,
     /// Work item → the worktree already started for it, as the flow opened.
     /// Only marks the list: picking an item checks the live state.
     linked: HashMap<WorkItemLink, String>,
     /// The settings in effect as the flow opened: which issues are
-    /// features, and how a free-text feature is named.
+    /// features, and how a session is named.
     pub start_work: StartWorkSettings,
     /// Whether blocked issues are listed. Starts from the shared setting and
     /// is toggled here; the app persists every toggle.
@@ -794,9 +794,9 @@ pub struct StartWorkModal {
 impl StartWorkModal {
     /// The mode list on the mode step; the query and its results on the item
     /// step, which share one focus stop so typing and Up/Down both work
-    /// without tabbing between them; the description on the describe step.
+    /// without tabbing between them; the session prompt on the prompt step.
     pub const FOCUS_LIST: usize = 0;
-    /// Only on the item and describe steps.
+    /// Only on the item and prompt steps.
     pub const FOCUS_BACK: usize = 1;
     pub const FOCUS_CANCEL: usize = 2;
     /// The clash step's three answers.
@@ -827,7 +827,7 @@ impl StartWorkModal {
             pull_requests: None,
             viewer: None,
             picker: None,
-            description: TextInput::new("").with_placeholder("Describe the feature..."),
+            prompt: TextInput::new("").with_placeholder("What should Claude do?"),
             clash: None,
             worktree: None,
             linked: repo
@@ -853,10 +853,9 @@ impl StartWorkModal {
     }
 
     /// Whether `mode` can be picked here: the repository is on GitHub, or
-    /// the mode needs nothing from it — `feature` through its free-text
-    /// entry, and `worktree`.
+    /// the mode needs nothing from it: `session` and `worktree`.
     pub fn mode_enabled(&self, mode: WorkMode) -> bool {
-        self.has_github() || matches!(mode, WorkMode::Feature | WorkMode::Worktree)
+        self.has_github() || matches!(mode, WorkMode::Session | WorkMode::Worktree)
     }
 
     /// Fill the `worktree` step's form once its branches have loaded. A
@@ -878,20 +877,10 @@ impl StartWorkModal {
             return;
         }
         if !self.mode_enabled(self.mode) {
-            self.mode = WorkMode::Feature;
+            self.mode = WorkMode::Session;
         }
         self.picker = None;
         self.fill_picker();
-    }
-
-    /// Where Esc and Back go from the describe step: the list the free-text
-    /// entry was picked from, or the modes when there was no list to show.
-    fn before_describe(&self) -> StartWorkStep {
-        if self.has_github() {
-            StartWorkStep::Item
-        } else {
-            StartWorkStep::Mode
-        }
     }
 
     /// Ask what to do about a taken slug.
@@ -901,10 +890,10 @@ impl StartWorkModal {
         self.focus = Self::FOCUS_OPEN;
     }
 
-    /// The description as it would be recorded: trimmed, so stray spaces do
-    /// not make two links for the same words.
-    fn typed_description(&self) -> String {
-        self.description.value().trim().to_string()
+    /// The session prompt as it would be recorded: trimmed, so stray spaces
+    /// do not make two links for the same words.
+    fn typed_prompt(&self) -> String {
+        self.prompt.value().trim().to_string()
     }
 
     /// Fill the item list once the issues for `scope` have loaded; a list
@@ -986,8 +975,8 @@ impl StartWorkModal {
     }
 
     fn fill_picker(&mut self) {
-        // The form stands in for a list.
-        if self.mode == WorkMode::Worktree {
+        // The form and the prompt stand in for a list.
+        if matches!(self.mode, WorkMode::Session | WorkMode::Worktree) {
             return;
         }
         let entries = if self.mode == WorkMode::PrReview {
@@ -1004,7 +993,7 @@ impl StartWorkModal {
             })
         } else {
             // Without GitHub there are no issues to wait for: the list is
-            // the free-text entry alone.
+            // empty, and says so.
             let issues = match (self.has_github(), self.issues.as_deref()) {
                 (false, _) => &[][..],
                 (true, Some(issues)) => issues,
@@ -1097,7 +1086,7 @@ impl StartWorkModal {
             ],
             // The worktree step's ring while its branches load; the form
             // keeps its own once it is up.
-            StartWorkStep::Item | StartWorkStep::Describe | StartWorkStep::Worktree => {
+            StartWorkStep::Item | StartWorkStep::Prompt | StartWorkStep::Worktree => {
                 &[Self::FOCUS_LIST, Self::FOCUS_BACK, Self::FOCUS_CANCEL]
             }
             StartWorkStep::Clash => &[Self::FOCUS_OPEN, Self::FOCUS_COPY, Self::FOCUS_EDIT],
@@ -1142,7 +1131,7 @@ impl StartWorkModal {
                     form.set_row(row);
                 }
             }
-            StartWorkStep::Describe | StartWorkStep::Clash => {}
+            StartWorkStep::Prompt | StartWorkStep::Clash => {}
         }
     }
 
@@ -1190,7 +1179,7 @@ impl StartWorkModal {
             return match self.step {
                 StartWorkStep::Mode => ModalOutcome::Close,
                 StartWorkStep::Item
-                | StartWorkStep::Describe
+                | StartWorkStep::Prompt
                 | StartWorkStep::Clash
                 | StartWorkStep::Worktree => {
                     self.go_back();
@@ -1231,16 +1220,12 @@ impl StartWorkModal {
                             None => ModalOutcome::Effect(ModalEffect::LoadWorktreeBranches),
                         };
                     }
+                    KeyCode::Enter if self.mode == WorkMode::Session => {
+                        self.go_to(StartWorkStep::Prompt);
+                        return ModalOutcome::None;
+                    }
                     KeyCode::Enter if self.mode_enabled(self.mode) => {
-                        // Without GitHub the list would hold the free-text
-                        // entry and nothing else; picking it is a step
-                        // with nothing to decide.
-                        let next = if self.has_github() {
-                            StartWorkStep::Item
-                        } else {
-                            StartWorkStep::Describe
-                        };
-                        self.go_to(next);
+                        self.go_to(StartWorkStep::Item);
                         return ModalOutcome::None;
                     }
                     _ => {}
@@ -1267,28 +1252,24 @@ impl StartWorkModal {
                                         item,
                                     )))
                                 }
-                                Some(ItemEntry::FreeText) => {
-                                    self.go_to(StartWorkStep::Describe);
-                                    ModalOutcome::None
-                                }
                                 None => ModalOutcome::None,
                             };
                         }
                     }
                 }
-                StartWorkStep::Describe => {
-                    if edit_input(&mut self.description, key) {
+                StartWorkStep::Prompt => {
+                    if edit_input(&mut self.prompt, key) {
                         return ModalOutcome::None;
                     }
                     if key.code == KeyCode::Enter {
                         // Words with nothing to name a worktree after go
                         // nowhere; the field stays up to say so by not moving.
-                        let description = self.typed_description();
-                        if work::free_text_names(&self.start_work, &description).is_none() {
+                        let prompt = self.typed_prompt();
+                        if work::session_names(&self.start_work, &prompt).is_none() {
                             return ModalOutcome::None;
                         }
-                        return ModalOutcome::Effect(ModalEffect::ConfirmFreeText {
-                            description,
+                        return ModalOutcome::Effect(ModalEffect::ConfirmSession {
+                            prompt,
                             copy: false,
                         });
                     }
@@ -1322,8 +1303,8 @@ impl StartWorkModal {
                 None => ModalOutcome::None,
             },
             (Self::FOCUS_COPY, KeyCode::Enter) => {
-                ModalOutcome::Effect(ModalEffect::ConfirmFreeText {
-                    description: self.typed_description(),
+                ModalOutcome::Effect(ModalEffect::ConfirmSession {
+                    prompt: self.typed_prompt(),
                     copy: true,
                 })
             }
@@ -1331,16 +1312,15 @@ impl StartWorkModal {
         }
     }
 
-    /// One step back: the clash question back to the description it was
-    /// asked about, the description back to where it was picked from, the
-    /// list back to the modes.
+    /// One step back: the clash question back to the session prompt it was
+    /// asked about, anything else back to the modes.
     fn go_back(&mut self) {
         let previous = match self.step {
-            StartWorkStep::Mode | StartWorkStep::Item | StartWorkStep::Worktree => {
-                StartWorkStep::Mode
-            }
-            StartWorkStep::Describe => self.before_describe(),
-            StartWorkStep::Clash => StartWorkStep::Describe,
+            StartWorkStep::Mode
+            | StartWorkStep::Item
+            | StartWorkStep::Prompt
+            | StartWorkStep::Worktree => StartWorkStep::Mode,
+            StartWorkStep::Clash => StartWorkStep::Prompt,
         };
         self.clash = None;
         self.go_to(previous);
@@ -1357,7 +1337,7 @@ pub struct StartWorkConfirmModal {
     pub repo_path: String,
     /// Decides the names, and for an issue, the prompt template.
     pub mode: WorkMode,
-    /// The issue, PR or free-text feature the worktree is for.
+    /// The issue, PR or session prompt the worktree is for.
     pub item: WorkItem,
     pub branches: BranchList,
     pub forest_dir: PathBuf,
@@ -1434,8 +1414,8 @@ impl StartWorkConfirmModal {
         }
     }
 
-    /// `names` are passed in rather than derived from `item`: a free-text
-    /// feature's may carry a suffix the clash question chose. `template` is
+    /// `names` are passed in rather than derived from `item`: a session's
+    /// may carry a suffix the clash question chose. `template` is
     /// the text of `item.template(mode)`, read by the caller.
     pub fn new(
         repo: &Repository,
@@ -1485,15 +1465,13 @@ impl StartWorkConfirmModal {
         if let Some(edited) = &self.edited_prompt {
             return edited.clone();
         }
-        // A free-text feature has no number and no title of its own; its
-        // description stands in for the title and is the only `{body}`.
+        // A session has no number and no title of its own; its prompt
+        // stands in for the title and is the only `{body}`.
         let (number, title, body) = match &self.item {
             WorkItem::Issue { number, title } | WorkItem::PullRequest { number, title, .. } => {
                 (Some(*number), title.as_str(), None)
             }
-            WorkItem::FreeText { description } => {
-                (None, description.as_str(), Some(description.as_str()))
-            }
+            WorkItem::Session { prompt } => (None, prompt.as_str(), Some(prompt.as_str())),
         };
         prompt::fill(
             &self.template,

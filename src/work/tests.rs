@@ -185,10 +185,8 @@ fn each_work_item_fills_its_own_template() {
     };
     assert_eq!(issue.template(WorkMode::Issue), Template::Issue);
     assert_eq!(issue.template(WorkMode::Feature), Template::Feature);
-    let free = WorkItem::FreeText {
-        description: "x".into(),
-    };
-    assert_eq!(free.template(WorkMode::Feature), Template::FreeFeature);
+    let session = WorkItem::Session { prompt: "x".into() };
+    assert_eq!(session.template(WorkMode::Session), Template::Session);
     assert_eq!(
         pull_request(ReviewKind::Others).template(WorkMode::PrReview),
         Template::PrReviewOthers
@@ -213,51 +211,51 @@ fn an_issue_entry_is_searched_by_number_and_title() {
     );
 }
 
-/// A free-text feature is named from its first words alone: there is no
+/// A session is named from its prompt's first words alone: there is no
 /// number to put in front of them.
 #[test]
-fn a_free_text_feature_is_named_from_its_first_words() {
+fn a_session_is_named_from_its_first_words() {
     assert_eq!(
-        free_text_names(
+        session_names(
             &defaults(),
             "Try a dark theme for the sidebar and every modal"
         ),
         Some(WorktreeNames {
-            worktree: "feat-try-a-dark-theme-for-the".into(),
-            branch: "feat/feat-try-a-dark-theme-for-the".into(),
+            worktree: "session-try-a-dark-theme-for-the".into(),
+            branch: "session/session-try-a-dark-theme-for-the".into(),
         })
     );
     assert_eq!(
-        free_text_names(&defaults(), "  Spike:   GraphQL?  ").map(|n| n.worktree),
-        Some("feat-spike-graphql".into())
+        session_names(&defaults(), "  Spike:   GraphQL?  ").map(|n| n.worktree),
+        Some("session-spike-graphql".into())
     );
 }
 
-/// A description with nothing sluggable names nothing, rather than a bare
-/// `feat-` that every such description would share.
+/// A prompt with nothing sluggable names nothing, rather than a bare
+/// `session-` that every such prompt would share.
 #[test]
-fn a_description_with_nothing_sluggable_has_no_names() {
-    assert_eq!(free_text_names(&defaults(), ""), None);
-    assert_eq!(free_text_names(&defaults(), "!!! ???"), None);
+fn a_prompt_with_nothing_sluggable_has_no_names() {
+    assert_eq!(session_names(&defaults(), ""), None);
+    assert_eq!(session_names(&defaults(), "!!! ???"), None);
 }
 
 #[test]
 fn long_first_words_are_still_capped() {
-    let names = free_text_names(&defaults(), &"abcdefghij ".repeat(6)).unwrap();
-    assert!(names.worktree.len() <= "feat-".len() + 40, "{names:?}");
+    let names = session_names(&defaults(), &"abcdefghij ".repeat(6)).unwrap();
+    assert!(names.worktree.len() <= "session-".len() + 40, "{names:?}");
     assert!(!names.worktree.ends_with('-'), "{names:?}");
 }
 
 #[test]
 fn a_copy_takes_the_first_free_suffix_from_two() {
-    let names = free_text_names(&defaults(), "Dark mode").unwrap();
+    let names = session_names(&defaults(), "Dark mode").unwrap();
     let copy = first_free_copy(&names, |_| false);
-    assert_eq!(copy.worktree, "feat-dark-mode-2");
-    assert_eq!(copy.branch, "feat/feat-dark-mode-2");
+    assert_eq!(copy.worktree, "session-dark-mode-2");
+    assert_eq!(copy.branch, "session/session-dark-mode-2");
 
-    let copy = first_free_copy(&names, |n| n.worktree == "feat-dark-mode-2");
-    assert_eq!(copy.worktree, "feat-dark-mode-3");
-    assert_eq!(copy.branch, "feat/feat-dark-mode-3");
+    let copy = first_free_copy(&names, |n| n.worktree == "session-dark-mode-2");
+    assert_eq!(copy.worktree, "session-dark-mode-3");
+    assert_eq!(copy.branch, "session/session-dark-mode-3");
 }
 
 fn worktree(name: &str, branch: &str) -> crate::models::Worktree {
@@ -268,13 +266,16 @@ fn worktree(name: &str, branch: &str) -> crate::models::Worktree {
 /// would make git refuse the create.
 #[test]
 fn names_clash_on_the_worktree_name_or_the_branch() {
-    let names = free_text_names(&defaults(), "Dark mode").unwrap();
-    let by_name = [worktree("feat-dark-mode", "elsewhere")];
-    let by_branch = [worktree("renamed", "feat/feat-dark-mode")];
-    let neither = [worktree("feat-dark-mode-2", "feat/feat-dark-mode-2")];
+    let names = session_names(&defaults(), "Dark mode").unwrap();
+    let by_name = [worktree("session-dark-mode", "elsewhere")];
+    let by_branch = [worktree("renamed", "session/session-dark-mode")];
+    let neither = [worktree(
+        "session-dark-mode-2",
+        "session/session-dark-mode-2",
+    )];
     assert_eq!(
         clash(&names, &by_name).map(|w| w.name.as_str()),
-        Some("feat-dark-mode")
+        Some("session-dark-mode")
     );
     assert_eq!(
         clash(&names, &by_branch).map(|w| w.name.as_str()),
@@ -286,12 +287,12 @@ fn names_clash_on_the_worktree_name_or_the_branch() {
 #[test]
 fn a_work_item_links_to_what_it_was_started_for() {
     assert_eq!(
-        WorkItem::FreeText {
-            description: "Dark mode".into()
+        WorkItem::Session {
+            prompt: "Dark mode".into()
         }
         .link(),
-        crate::models::WorkItemLink::FreeText {
-            description: "Dark mode".into()
+        crate::models::WorkItemLink::Session {
+            prompt: "Dark mode".into()
         }
     );
     assert_eq!(
@@ -321,7 +322,7 @@ fn open_pr(number: i64, title: &str, draft: bool) -> crate::models::GitHubPullRe
 }
 
 /// The `pr-review` list holds the PRs, searched by number and title, each
-/// with the worktree it was started in; there is no free-text entry.
+/// with the worktree it was started in.
 #[test]
 fn the_pr_review_list_holds_the_pull_requests() {
     let prs = vec![
@@ -353,25 +354,24 @@ fn the_pr_review_list_holds_the_pull_requests() {
     );
 }
 
-/// The free-text entry is first, and the issues follow in their own order.
+/// The `feature` list holds its issues alone, in their own order.
 #[test]
-fn the_feature_list_leads_with_free_text() {
+fn the_feature_list_holds_only_issues() {
     let issues = vec![labelled(2, &["enhancement"]), labelled(3, &["enhancement"])];
     let entries = item_entries(WorkMode::Feature, &issues, &default_labels(), false, |_| {
         None
     });
-    assert!(matches!(entries[0], ItemEntry::FreeText));
     let numbers: Vec<_> = entries
         .iter()
-        .filter_map(|e| match e {
-            ItemEntry::Issue(entry) => Some(entry.issue.number),
-            _ => None,
+        .map(|e| match e {
+            ItemEntry::Issue(entry) => entry.issue.number,
+            other => panic!("only issues expected, found {other:?}"),
         })
         .collect();
     assert_eq!(numbers, vec![2, 3]);
 
     let entries = item_entries(WorkMode::Issue, &issues, &default_labels(), false, |_| None);
-    assert!(entries.is_empty(), "no free text outside `feature`");
+    assert!(entries.is_empty(), "every issue here is a feature");
 }
 
 /// The configured prefix and pattern name the worktree and branch, per mode.
@@ -404,24 +404,24 @@ fn naming_follows_the_configured_prefix_and_pattern() {
     );
 }
 
-/// A free-text feature has its own naming, and no number to fill in.
+/// A session has its own naming, and no number to fill in.
 #[test]
-fn a_free_text_feature_follows_its_own_naming() {
+fn a_session_follows_its_own_naming() {
     let mut settings = defaults();
-    settings.free_feature = Naming {
+    settings.session = Naming {
         branch_prefix: "spike/".into(),
         name_pattern: "try-{slug}".into(),
     };
     assert_eq!(
-        free_text_names(&settings, "Dark mode"),
+        session_names(&settings, "Dark mode"),
         Some(WorktreeNames {
             worktree: "try-dark-mode".into(),
             branch: "spike/try-dark-mode".into(),
         })
     );
-    settings.free_feature.name_pattern = "idea-{number}-{slug}".into();
+    settings.session.name_pattern = "idea-{number}-{slug}".into();
     assert_eq!(
-        free_text_names(&settings, "Dark mode").map(|n| n.worktree),
+        session_names(&settings, "Dark mode").map(|n| n.worktree),
         Some("idea-dark-mode".into())
     );
 }
@@ -553,9 +553,9 @@ fn pr(number: i64) -> WorkItemLink {
     WorkItemLink::PullRequest { number }
 }
 
-fn free_text() -> WorkItemLink {
-    WorkItemLink::FreeText {
-        description: "try a thing".to_string(),
+fn session() -> WorkItemLink {
+    WorkItemLink::Session {
+        prompt: "try a thing".to_string(),
     }
 }
 
@@ -588,28 +588,28 @@ fn a_pull_request_is_finished_once_merged_or_closed() {
 }
 
 #[test]
-fn a_free_text_feature_is_finished_once_its_own_commits_are_merged() {
+fn a_session_is_finished_once_its_own_commits_are_merged() {
     let merged = Observed::Branch {
         merged: true,
         has_commits: true,
     };
-    assert_eq!(is_finished(&free_text(), merged), Some(true));
+    assert_eq!(is_finished(&session(), merged), Some(true));
     let unmerged = Observed::Branch {
         merged: false,
         has_commits: true,
     };
-    assert_eq!(is_finished(&free_text(), unmerged), Some(false));
+    assert_eq!(is_finished(&session(), unmerged), Some(false));
 }
 
 /// A branch fresh off the default branch is trivially "merged" into it —
 /// it has nothing of its own yet, which is the opposite of finished.
 #[test]
-fn a_free_text_branch_with_no_commits_of_its_own_is_not_finished() {
+fn a_session_branch_with_no_commits_of_its_own_is_not_finished() {
     let fresh = Observed::Branch {
         merged: true,
         has_commits: false,
     };
-    assert_eq!(is_finished(&free_text(), fresh), Some(false));
+    assert_eq!(is_finished(&session(), fresh), Some(false));
 }
 
 #[test]
@@ -621,7 +621,7 @@ fn an_observation_of_the_wrong_kind_decides_nothing() {
     assert_eq!(is_finished(&issue(1), branch), None);
     assert_eq!(is_finished(&pr(2), branch), None);
     assert_eq!(
-        is_finished(&free_text(), Observed::State(ItemState::Closed)),
+        is_finished(&session(), Observed::State(ItemState::Closed)),
         None
     );
 }

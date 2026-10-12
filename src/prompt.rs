@@ -9,9 +9,9 @@ pub const ISSUE_TEMPLATE: &str = include_str!("../assets/prompts/issue.md");
 /// The built-in `feature` template: plan first, build once the plan is approved.
 pub const FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/feature.md");
 
-/// The built-in `free-feature` template: the typed description as `{body}`,
-/// and the same plan-first rule as a feature from an issue.
-pub const FREE_FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/free-feature.md");
+/// The built-in `session` template: the session prompt as typed, and
+/// nothing else, so by default Claude gets exactly what the user wrote.
+pub const SESSION_TEMPLATE: &str = include_str!("../assets/prompts/session.md");
 
 /// The built-in `pr-review-others` template: review someone else's PR and
 /// report, changing nothing.
@@ -27,7 +27,7 @@ pub const PR_REVIEW_OWN_TEMPLATE: &str = include_str!("../assets/prompts/pr-revi
 pub enum Template {
     Issue,
     Feature,
-    FreeFeature,
+    Session,
     PrReviewOthers,
     PrReviewOwn,
 }
@@ -37,7 +37,7 @@ impl Template {
     pub const ALL: [Template; 5] = [
         Template::Issue,
         Template::Feature,
-        Template::FreeFeature,
+        Template::Session,
         Template::PrReviewOthers,
         Template::PrReviewOwn,
     ];
@@ -47,7 +47,7 @@ impl Template {
         match self {
             Template::Issue => "issue.md",
             Template::Feature => "feature.md",
-            Template::FreeFeature => "free-feature.md",
+            Template::Session => "session.md",
             Template::PrReviewOthers => "pr-review-others.md",
             Template::PrReviewOwn => "pr-review-own.md",
         }
@@ -58,7 +58,7 @@ impl Template {
         match self {
             Template::Issue => "Issue",
             Template::Feature => "Feature",
-            Template::FreeFeature => "Free-text feature",
+            Template::Session => "Session",
             Template::PrReviewOthers => "Review someone else's PR",
             Template::PrReviewOwn => "Review my own PR",
         }
@@ -68,7 +68,7 @@ impl Template {
         match self {
             Template::Issue => ISSUE_TEMPLATE,
             Template::Feature => FEATURE_TEMPLATE,
-            Template::FreeFeature => FREE_FEATURE_TEMPLATE,
+            Template::Session => SESSION_TEMPLATE,
             Template::PrReviewOthers => PR_REVIEW_OTHERS_TEMPLATE,
             Template::PrReviewOwn => PR_REVIEW_OWN_TEMPLATE,
         }
@@ -143,7 +143,7 @@ pub struct TemplateVars<'a> {
     pub branch: &'a str,
     pub worktree: &'a str,
     pub repo: &'a str,
-    /// The typed description of a free-text feature, and nothing else: an
+    /// The session prompt, and nothing else: an
     /// issue's or PR's body would be a stale copy of text Claude can read
     /// fresh with `gh`.
     pub body: Option<&'a str>,
@@ -153,7 +153,7 @@ pub struct TemplateVars<'a> {
 ///
 /// One pass, left to right, so a value is never itself expanded — an issue
 /// titled `{branch}` stays that title. A placeholder this does not know, or
-/// `{body}` outside a free-text feature, is left as written rather than
+/// `{body}` outside a session, is left as written rather than
 /// failing: a typo in a template should show up in the prompt, not stop the
 /// launch.
 pub fn fill(template: &str, vars: &TemplateVars<'_>) -> String {

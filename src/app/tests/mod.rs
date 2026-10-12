@@ -8,7 +8,6 @@ use std::path::PathBuf;
 
 mod blocked_issues;
 mod finished_worktrees;
-mod free_text;
 mod linked_worktrees;
 mod mouse;
 mod navigation;
@@ -18,6 +17,7 @@ mod prompt_templates;
 mod prune;
 mod repaint;
 mod repository_settings;
+mod session_mode;
 mod sessions;
 mod start_work;
 mod start_work_scope;
@@ -146,7 +146,7 @@ fn open_pr(number: i64, title: &str, author: &str, head: &str) -> crate::models:
 fn confirm_number(confirm: &crate::modal::StartWorkConfirmModal) -> Option<i64> {
     match &confirm.item {
         crate::work::WorkItem::Issue { number, .. } => Some(*number),
-        crate::work::WorkItem::PullRequest { .. } | crate::work::WorkItem::FreeText { .. } => None,
+        crate::work::WorkItem::PullRequest { .. } | crate::work::WorkItem::Session { .. } => None,
     }
 }
 
@@ -280,6 +280,18 @@ fn two_issues() -> Vec<crate::models::GitHubIssue> {
 }
 
 /// What the GitHub probe reports for a repository with no GitHub remote.
+/// Move Start work's mode highlight down to `mode`, by key, so a test does
+/// not count rows the mode list may gain.
+fn highlight_mode(app: &mut App, mode: crate::work::WorkMode) {
+    for _ in crate::work::WorkMode::ALL {
+        if start_work(app).mode == mode {
+            return;
+        }
+        app.handle_key(key(KeyCode::Down));
+    }
+    assert_eq!(start_work(app).mode, mode);
+}
+
 fn no_github(app: &mut App, path: &str) {
     app.handle_event(AppEvent::GitHubChecked {
         path: path.to_string(),

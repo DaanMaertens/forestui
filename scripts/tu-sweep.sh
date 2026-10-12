@@ -495,12 +495,12 @@ for spec in "a:UC-55:modal-add-repository:Repository Path" \
   focus_app; press Escape; sleep 1.0
 done
 
-# The plain worktree form is Start work's last mode. Three Downs reach it
+# The plain worktree form is Start work's last mode. Four Downs reach it
 # whether or not the GitHub probe has greyed out the modes before it, and Esc
 # steps back to the mode list before a second one closes the flow.
 focus_app; press s
 await "Work Mode"
-press Down; press Down; press Down; press Enter
+press Down; press Down; press Down; press Down; press Enter
 await "Worktree Name"; sleep 0.8
 capture UC-56 modal-add-worktree
 focus_app; press Escape
@@ -838,9 +838,8 @@ if [ "$LABEL" = "rust" ]; then
   press Down Enter; await "#77"; sleep 0.8
   capture UC-100 start-work-feature-item
   assert UC-100 bug-issues-not-listed "no" "$(screen_has '#298|#326')"
-  assert UC-100 free-text-entry-listed "yes" "$(screen_has 'Free-text feature')"
-  # Down past the free-text entry, which leads the list (UC-103).
-  press Down Enter
+  assert UC-100 no-free-text-entry "no" "$(screen_has 'Free-text feature')"
+  press Enter
   await "Launch"; sleep 0.8
   capture UC-100 start-work-feature-confirm
   assert UC-100 titled-as-a-feature "yes" "$(screen_has 'Start Work: Feature #77')"
@@ -872,7 +871,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-101 start-work-linked-item
   assert UC-101 linked-item-marked "yes" \
     "$(screen_has '#77 Dark mode for the dashboard +→ feat-77-dark-mode-for-the-dashboard')"
-  press Down Enter
+  press Enter
   # The switch lands on the Claude window: the stub's output is on screen and
   # the window is the current one in the status bar.
   await "claude stub" 15000; sleep 1
@@ -884,56 +883,59 @@ if [ "$LABEL" = "rust" ]; then
   assert UC-101 worktree-selected "yes" "$(screen_has 'Worktree: +feat-77')"
 fi
 
-# --- UC-103: Start work for a free-text feature --------------------------------
+# --- UC-103: Start work for a session ------------------------------------------
 #
-# Rust only, after UC-101. The free-text entry leads beta's `feature` list; the
-# description names the worktree, rides into the prompt as `{body}`, and is
-# what the worktree's link records. Nothing is asked of GitHub. Starting the
-# same words a second time asks about the taken name instead of matching it.
+# Rust only, after UC-101. `session` goes from the mode step straight to the
+# prompt; the prompt names the worktree, is the whole first prompt (the
+# `session` template is `{body}`), and is what the worktree's link records,
+# under the free-text feature's wire format. Nothing is asked of GitHub.
+# Starting the same words a second time asks about the taken name instead of
+# matching it.
 if [ "$LABEL" = "rust" ]; then
   focus_app
   tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
   await "Repository: beta"
   press s; await "Work Mode"; sleep 0.8
-  press Down Enter; await "Free-text feature"; sleep 0.8
-  press Enter; await "Description"; sleep 0.8
+  capture UC-103 session-mode
+  assert UC-103 session-listed "yes" \
+    "$(screen_has 'session +A Claude session for anything else')"
+  press Down Down Enter; await "Prompt"; sleep 0.8
   type_ "Try a quick spike on caching"; sleep 0.5
-  await "Worktree: feat-try-a-quick-spike-on-caching"
-  capture UC-103 free-text-describe
+  await "Worktree: session-try-a-quick-spike-on-caching"
+  capture UC-103 session-prompt
   press Enter
   await "Launch"; sleep 0.8
-  capture UC-103 free-text-confirm
-  assert UC-103 titled-as-free-text "yes" "$(screen_has 'Start Work: Free-text feature')"
-  assert UC-103 prompt-carries-description "yes" "$(screen_has 'Try a quick spike on caching')"
+  capture UC-103 session-confirm
+  assert UC-103 titled-as-session "yes" "$(screen_has 'Start Work: Session')"
+  assert UC-103 prompt-carries-the-prompt "yes" "$(screen_has 'Try a quick spike on caching')"
   assert UC-103 prompt-reads-no-issue "no" "$(screen_has 'gh issue view')"
+  assert UC-103 prompt-asks-for-no-plan "no" "$(screen_has 'approved the plan')"
   press Enter
-  await "[0-9]:feat-try-a-quick" 15000; sleep 2
-  capture UC-103 free-text-launched
-  wt="$ROOT/forest/beta/feat-try-a-quick-spike-on-caching"
+  await "[0-9]:session-try-a-quick" 15000; sleep 2
+  capture UC-103 session-launched
+  wt="$ROOT/forest/beta/session-try-a-quick-spike-on-caching"
   assert UC-103 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
-  assert UC-103 branch-checked-out "feat/feat-try-a-quick-spike-on-caching" \
+  assert UC-103 branch-checked-out "session/session-try-a-quick-spike-on-caching" \
     "$(git -C "$wt" branch --show-current 2>/dev/null)"
   assert UC-103 work-item-linked \
     "{'kind': 'free_text', 'description': 'Try a quick spike on caching'}" \
-    "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('feat-try')][0]")"
+    "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('session-try')][0]")"
 
   focus_app
   worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
   press s; await "Work Mode"; sleep 0.8
-  press Down Enter; await "Free-text feature"; sleep 0.8
-  press Enter; await "Description"; sleep 0.8
+  press Down Down Enter; await "Prompt"; sleep 0.8
   type_ "Try a quick spike on caching"; sleep 0.5; press Enter
   await "already exists"; sleep 0.8
-  capture UC-103 free-text-clash
+  capture UC-103 session-clash
   assert UC-103 clash-offers-three-choices "yes" \
     "$(screen_has 'Open existing.*Create copy.*Edit name')"
   assert UC-103 clash-names-the-copy "yes" \
-    "$(screen_has 'create feat-try-a-quick-spike-on-caching-2 instead')"
-  # Esc walks back: clash → description → list → modes → closed. One press
-  # at a time: ESC bytes sent back to back read as Alt+Escape, and a lost
-  # press leaves the flow open under every case after this one.
-  press Escape; await "Describe the feature|Description"; sleep 0.5
-  press Escape; await "Enter picks"; sleep 0.5
+    "$(screen_has 'create session-try-a-quick-spike-on-caching-2 instead')"
+  # Esc walks back: clash → prompt → modes → closed. One press at a time:
+  # ESC bytes sent back to back read as Alt+Escape, and a lost press leaves
+  # the flow open under every case after this one.
+  press Escape; await "What should Claude do|Prompt"; sleep 0.5
   press Escape; await "Work Mode"; sleep 0.5
   press Escape; sleep 1
   assert UC-103 flow-closed "no" "$(screen_has 'Start Work')"
@@ -952,7 +954,7 @@ if [ "$LABEL" = "rust" ]; then
   tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
   await "Repository: beta"
   press s; await "Work Mode"; sleep 0.8
-  press Down Down Enter; await "#45"; sleep 0.8
+  press Down Down Down Enter; await "#45"; sleep 0.8
   capture UC-104 pr-review-item
   assert UC-104 draft-marked "yes" "$(screen_has '#46 Cache the session index +draft')"
   type_ "retry"; sleep 0.5; press Enter
@@ -975,7 +977,7 @@ if [ "$LABEL" = "rust" ]; then
   focus_app
   worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
   press s; await "Work Mode"; sleep 0.8
-  press Down Down Enter; await "#46"; sleep 0.8
+  press Down Down Down Enter; await "#46"; sleep 0.8
   type_ "cache"; sleep 0.5; press Enter
   await "Launch"; sleep 0.8
   capture UC-104 own-pr-confirm
@@ -994,8 +996,8 @@ fi
 # Rust only, after UC-104. #45 merges on GitHub (the stub's flag); the next
 # finished check — a selection change, past the per-repository throttle, or
 # the 30-second sweep — marks pr-45's row with a ✓ and dims it. The issue and
-# free-text worktrees beside it stay unmarked: #77 is still open, and beta has
-# no remote whose default branch the free-text branch could be merged into.
+# session worktrees beside it stay unmarked: #77 is still open, and beta has
+# no remote whose default branch the session's branch could be merged into.
 if [ "$LABEL" = "rust" ]; then
   touch "$ROOT/pr-45-merged"
   focus_app
@@ -1007,7 +1009,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-105 finished-marked
   assert UC-105 merged-pr-marked "yes" "$(screen_has '[├└]─ ✓ pr-45')"
   assert UC-105 open-issue-unmarked "no" "$(screen_has '✓ feat-77')"
-  assert UC-105 free-text-unmarked "no" "$(screen_has '✓ feat-try')"
+  assert UC-105 session-unmarked "no" "$(screen_has '✓ session-try')"
   assert UC-105 mark-not-saved "False" \
     "$(cfg "any('finished' in w for r in d['repositories'] for w in r['worktrees'])")"
 fi

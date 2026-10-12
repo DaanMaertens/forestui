@@ -236,7 +236,7 @@ pub struct App {
 }
 
 /// What Start work's confirm screen opens on once the branches load. The
-/// names travel separately from the item: a free-text feature's may carry the
+/// names travel separately from the item: a session's may carry the
 /// suffix its clash question chose.
 #[derive(Debug)]
 pub(crate) struct PendingStart {

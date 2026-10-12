@@ -298,15 +298,16 @@ work in three steps:
 
 ![Start work's issue picker, with one blocked issue hidden](doc/screenshot_start_work.png)
 
-1. **Pick a work mode**: `issue`, `feature`, `pr-review` or `worktree`. Open
-   issues carrying a feature label (`enhancement` by default) are listed
-   under `feature`, every other open issue under `issue`.
+1. **Pick a work mode**: `issue`, `feature`, `session`, `pr-review` or
+   `worktree`. Open issues carrying a feature label (`enhancement` by
+   default) are listed under `feature`, every other open issue under
+   `issue`.
 2. **Pick a work item** from a fuzzy-searchable list. By default it holds
    only your items: issues assigned to or opened by you, PRs with a review
    requested from you or opened by you. Tick **Not just mine** to list every
-   open one for this pick. The top of the `feature` list starts a
-   **free-text feature** instead, from a description you type. It stays
-   local and never creates a GitHub issue.
+   open one for this pick. The `session` mode has no list: you type a
+   **session prompt** instead, for a Claude session that is not about an
+   issue or a PR. It stays local and never creates a GitHub issue.
 3. **Confirm** the worktree name, branch, base branch (with **Pull repo
    before creating**) and the filled-in prompt. **Edit prompt** opens the
    prompt in `$EDITOR` for this launch only, and **YOLO** skips permission
@@ -325,8 +326,7 @@ nothing in it. It needs no GitHub remote.
 
 Selecting a repository fetches its open issues in the background, so the
 `issue` and `feature` lists are usually filled by the time you open them. A
-repository without a GitHub remote offers free-text features and plain
-worktrees only.
+repository without a GitHub remote offers sessions and plain worktrees only.
 
 #### Blocked issues
 
@@ -339,10 +339,11 @@ remembered across runs as `show_blocked_issues`.
 #### Prompt templates
 
 Each prompt comes from a Markdown template, with `{number}`, `{title}`,
-`{branch}`, `{worktree}` and `{repo}` filled in. A free-text feature also gets
-`{body}`, the text you typed. Issue and PR prompts tell Claude to read the
-item with `gh` instead, so it sees the current text and comments. The
-templates are `issue.md`, `feature.md`, `free-feature.md`,
+`{branch}`, `{worktree}` and `{repo}` filled in. A session also gets
+`{body}`, the prompt you typed, and its template, `session.md`, is `{body}`
+alone, so by default Claude gets exactly what you typed. Issue and PR prompts
+tell Claude to read the item with `gh` instead, so it sees the current text
+and comments. The templates are `issue.md`, `feature.md`, `session.md`,
 `pr-review-others.md` and `pr-review-own.md`. Each one that has no file yet
 uses the built-in default. Settings → **Edit Prompt Templates...** lists them;
 picking one opens it in your editor under `~/.config/forestui/prompts/`,
@@ -361,7 +362,7 @@ version on first use.
 ### Pruning finished worktrees
 
 A worktree whose issue is closed, whose pull request is merged or closed, or
-whose free-text branch is merged into the default branch is *finished*. The
+whose session branch is merged into the default branch is *finished*. The
 repository pane's **Prune finished (N)** removes those worktrees together with
 their local branches. The same prune runs from a shell, over every repository
 in a forest, without tmux:
@@ -407,7 +408,7 @@ Settings are stored in `~/.config/forestui/settings.json`:
     "feature_labels": ["enhancement"],
     "issue": { "branch_prefix": "fix/", "name_pattern": "issue-{number}-{slug}" },
     "feature": { "branch_prefix": "feat/", "name_pattern": "feat-{number}-{slug}" },
-    "free_feature": { "branch_prefix": "feat/", "name_pattern": "feat-{slug}" },
+    "session": { "branch_prefix": "session/", "name_pattern": "session-{slug}" },
     "pr_review": { "name_pattern": "pr-{number}-{slug}" }
   }
 }
@@ -423,7 +424,7 @@ Press `S` in the app to open the settings modal.
 - `feature_labels` — an issue carrying any of these (case-insensitive) is a
   `feature`; every other open issue is an `issue`.
 - Per work mode, the worktree is named by `name_pattern` with `{number}` and
-  `{slug}` (from the title, or a free-text feature's first words) filled in,
+  `{slug}` (from the title, or a session prompt's first six words) filled in,
   and the branch is `branch_prefix` followed by that name. A `pr-review`
   worktree checks out the PR's own branch, so it has no prefix.
 

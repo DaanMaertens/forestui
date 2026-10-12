@@ -183,8 +183,6 @@ async fn a_feature_confirms_with_feat_names_and_the_feature_prompt() {
     app.handle_key(key(KeyCode::Char('s')));
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
-    // Past the free-text entry, which leads the list.
-    app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(pending_number(&app), Some(7));
     assert_eq!(
