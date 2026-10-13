@@ -9,9 +9,9 @@
 # than silently overwritten.
 #
 # One file per session under ~/.config/forestui/live/, written on SessionStart
-# and refreshed on UserPromptSubmit (each also records the session's state,
-# which state.sh keeps up to date in between) (which also covers a plugin installed
-# mid-session), removed on SessionEnd. The file records the *claude* process
+# and refreshed on UserPromptSubmit (which also covers a plugin installed
+# mid-session), removed on SessionEnd. Each write also records the session's
+# state, which state.sh keeps up to date in between. The file records the *claude* process
 # id — found by walking up from this hook, which runs under a shell claude
 # spawned and threw away — so forestui can tell a live session from a
 # heartbeat a crash left behind: a dead pid, or a reused one that is not

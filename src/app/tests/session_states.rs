@@ -64,7 +64,7 @@ async fn the_live_scan_rolls_states_onto_worktree_rows() {
         activity_of(&app, "alpha"),
         Some(Activity {
             state: SessionState::NeedsYou,
-            sessions: 2
+            count: 2
         })
     );
     assert_eq!(activity_of(&app, "beta"), None);

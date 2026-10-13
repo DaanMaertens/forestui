@@ -324,9 +324,12 @@ window instead.
   in place in between: `Notification` for a permission prompt or question
   and `PreToolUse` of `AskUserQuestion` → needs you, any tool use *after*
   needs you → busy (the user answered), `Stop` and the `idle_prompt`
-  notification → idle. Only those two scripts write the file, never on the
-  same event, so their whole-file writes cannot race. The tool-use hooks fire
-  on every tool call, so their common path writes nothing. Esc fires no
+  notification → idle. Only those two scripts write the file and never on
+  the same event; their writes can still interleave across events (an
+  `idle_prompt` landing as a prompt is submitted), a millisecond window the
+  turn's `Stop` repairs, so it is documented in `state.sh` rather than
+  locked. The tool-use hooks fire on every tool call, so their common path
+  writes nothing. Esc fires no
   `Stop`, so an interrupted session reads busy until `idle_prompt` (~60 s)
   corrects it — accepted, not worked around. A heartbeat with no `state`
   (an older plugin) is *unknown* and shows as it always did; it is never a
@@ -335,7 +338,8 @@ window instead.
   `ps`) and repaints only when one changed. A session card's badge reads
   `● live · busy`; a worktree's sidebar row takes the colour of the most
   urgent state among sessions in forestui's *own* windows (needs you > busy >
-  idle) and leads with `{N}` from two of them — a finished worktree keeps its
+  idle) and leads with `{N}` from two of them (a stateless one counts but
+  lends no colour) — a finished worktree keeps its
   finished name colour, the count still wears the state's.
 - **`@claude_birth_name`**, a tmux window option stamped when the window is
   created, answers one question: did forestui open this window? A window the

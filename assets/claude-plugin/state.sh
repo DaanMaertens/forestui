@@ -19,6 +19,12 @@
 # read busy until the idle_prompt notification about a minute later. That
 # self-heal is accepted on purpose.
 #
+# heartbeat.sh rewrites the file on other events, so a write here can still
+# interleave with one there — the idle_prompt notification landing in the
+# same instant as a new prompt could put idle back over busy. The window is a
+# few milliseconds and the turn's Stop rewrites the state anyway, so it is
+# left at that rather than locked.
+#
 # The tool-use hooks fire on every tool call, so the common path — busy and
 # still busy — costs one jq and one grep, and writes nothing.
 set -u
@@ -32,15 +38,12 @@ command -v jq >/dev/null 2>&1 || exit 0
 # "resume" is "busy, but only if it was waiting on the user" — tool use while
 # already busy, or after the turn ended, says nothing new.
 out=$(printf '%s' "$input" | jq -r --arg event "$event" '
+  # Only the typed notifications: guessing from the message text would read
+  # any notification that mentions a permission as one asking for it.
   def notified:
     (.notification_type // "") as $type
-    | (.message // "") as $message
     | if $type == "idle_prompt" then "idle"
       elif $type == "permission_prompt" or $type == "elicitation_dialog" then "needs_you"
-      elif $type != "" then ""
-      # Older Claude sends no type; its message is all there is to go on.
-      elif ($message | test("permission"; "i")) then "needs_you"
-      elif ($message | test("waiting for your input"; "i")) then "idle"
       else "" end;
   (.session_id // "") + " " +
   (if $event == "Stop" then "idle"

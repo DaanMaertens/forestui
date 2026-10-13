@@ -81,10 +81,7 @@ fn a_worktree_name_takes_its_sessions_state_colour() {
         SessionState::Busy,
         SessionState::NeedsYou,
     ] {
-        let line = row_line(&a_worktree_row(
-            false,
-            Some(Activity { state, sessions: 1 }),
-        ));
+        let line = row_line(&a_worktree_row(false, Some(Activity { state, count: 1 })));
         assert_eq!(line.to_string(), "├─ wt-two [release-2]");
         assert_eq!(span_style(&line, "wt-two"), theme::session_state(state));
     }
@@ -101,7 +98,7 @@ fn several_sessions_lead_the_name_with_a_count() {
     let _theme = crate::theme::test_lock();
     let busy = Some(Activity {
         state: SessionState::Busy,
-        sessions: 3,
+        count: 3,
     });
     let line = row_line(&a_worktree_row(false, busy));
     assert_eq!(line.to_string(), "├─ {3} wt-two [release-2]");
@@ -112,7 +109,7 @@ fn several_sessions_lead_the_name_with_a_count() {
 
     let needs_you = Some(Activity {
         state: SessionState::NeedsYou,
-        sessions: 2,
+        count: 2,
     });
     let line = row_line(&a_worktree_row(true, needs_you));
     assert_eq!(line.to_string(), "├─ ✓ {2} wt-two [release-2]");

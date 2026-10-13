@@ -86,20 +86,21 @@ pub struct Activity {
     /// The most urgent state among them.
     pub state: SessionState,
     /// How many there are; the row prints a count only from two.
-    pub sessions: usize,
+    pub count: usize,
 }
 
 /// Roll the sessions running under `worktree` up into one row's worth.
 ///
 /// Only sessions in windows of forestui's own tmux session count — the row
-/// is about what a keypress away needs you, and a session elsewhere is not —
-/// and only those with a known state, since an unknown one has nothing to
-/// show. `None` when nothing counts, so the row looks as it always did.
+/// is about what a keypress away needs you, and a session elsewhere is not.
+/// A session with no known state (an older plugin) still counts towards the
+/// number but lends the row no colour; with no known state at all the row
+/// is `None` and looks as it always did.
 pub fn activity<'a>(
     sessions: impl IntoIterator<Item = &'a LiveSession>,
     worktree: &Path,
 ) -> Option<Activity> {
-    let states: Vec<SessionState> = sessions
+    let counted: Vec<&LiveSession> = sessions
         .into_iter()
         .filter(|session| matches!(session.place, LivePlace::Window { .. }))
         .filter(|session| {
@@ -111,11 +112,10 @@ pub fn activity<'a>(
                 .as_deref()
                 .is_some_and(|cwd| Path::new(cwd).starts_with(worktree))
         })
-        .filter_map(|session| session.state)
         .collect();
     Some(Activity {
-        state: states.iter().copied().max()?,
-        sessions: states.len(),
+        state: counted.iter().filter_map(|session| session.state).max()?,
+        count: counted.len(),
     })
 }
 
@@ -133,6 +133,13 @@ pub struct Heartbeat {
     /// build does not know must not cost the session its liveness.
     #[serde(default, deserialize_with = "lenient_state")]
     pub state: Option<SessionState>,
+}
+
+impl Heartbeat {
+    /// The recorded directory, if the hook had one to record.
+    fn cwd(&self) -> Option<String> {
+        (!self.cwd.is_empty()).then(|| self.cwd.clone())
+    }
 }
 
 fn lenient_state<'de, D: serde::Deserializer<'de>>(
@@ -176,19 +183,18 @@ pub fn merge(
     let mut out: Vec<LiveSession> = Vec::new();
     // A stamped window outranks its heartbeat for the place, but only the
     // heartbeat knows what the session is doing and where it runs.
-    let detail: HashMap<String, (Option<SessionState>, Option<String>)> = beats
+    let by_heartbeat: HashMap<&str, &Heartbeat> = beats
         .iter()
-        .map(|beat| {
-            let cwd = (!beat.cwd.is_empty()).then(|| beat.cwd.clone());
-            (beat.session_id.clone(), (beat.state, cwd))
-        })
+        .map(|beat| (beat.session_id.as_str(), beat))
         .collect();
 
     // Stamped windows where Claude is the pane's foreground process. A window
     // whose Claude exited deliberately stays out: that session is free again.
     for window in windows {
         if window.running && seen.insert(window.session_id.clone()) {
-            let (state, cwd) = detail.get(&window.session_id).cloned().unwrap_or_default();
+            let beat = by_heartbeat.get(window.session_id.as_str());
+            let state = beat.and_then(|beat| beat.state);
+            let cwd = beat.and_then(|beat| beat.cwd());
             out.push(LiveSession {
                 session_id: window.session_id,
                 place: LivePlace::Window {
@@ -218,10 +224,10 @@ pub fn merge(
             _ => LivePlace::Elsewhere { pid: beat.pid },
         };
         out.push(LiveSession {
+            cwd: beat.cwd(),
+            state: beat.state,
             session_id: beat.session_id,
             place,
-            state: beat.state,
-            cwd: (!beat.cwd.is_empty()).then_some(beat.cwd),
         });
     }
     out

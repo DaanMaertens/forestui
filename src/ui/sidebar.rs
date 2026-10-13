@@ -260,9 +260,9 @@ fn row_line(row: &SidebarRow) -> Line<'static> {
             }
             // One session is said by the colour alone; a count from two.
             if let (Some(activity), Some(style)) = (activity, state_style)
-                && activity.sessions >= 2
+                && activity.count >= 2
             {
-                spans.push(Span::styled(format!("{{{}}} ", activity.sessions), style));
+                spans.push(Span::styled(format!("{{{}}} ", activity.count), style));
             }
             spans.push(Span::styled(name.clone(), name_style));
             if let Some(branch) = branch {

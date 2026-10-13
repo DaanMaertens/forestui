@@ -298,18 +298,11 @@ fn hook_payloads_drive_the_session_state() {
         ),
         Some(Idle)
     );
-    // A Claude too old to send notification_type is read by its message.
+    // An untyped notification is not read by its wording.
     assert_eq!(
         state(
             "Notification",
             r#"{"session_id":"s-1","message":"Claude needs your permission to use Edit"}"#
-        ),
-        Some(NeedsYou)
-    );
-    assert_eq!(
-        state(
-            "Notification",
-            r#"{"session_id":"s-1","message":"Claude is waiting for your input"}"#
         ),
         Some(Idle)
     );
@@ -502,7 +495,7 @@ fn live_in(sid: &str, cwd: &str, state: Option<SessionState>, ours: bool) -> Liv
 }
 
 /// A worktree row's roll-up: only sessions in forestui's own windows, in
-/// that worktree, with a known state count — and the most urgent wins.
+/// that worktree count — and the most urgent known state wins.
 #[test]
 fn a_worktree_rolls_up_the_most_urgent_state_of_its_own_windows() {
     use SessionState::*;
@@ -514,7 +507,7 @@ fn a_worktree_rolls_up_the_most_urgent_state_of_its_own_windows() {
         live_in("d", "/f/repo/wt", Some(NeedsYou), false),
         // A sibling whose name merely starts with ours.
         live_in("e", "/f/repo/wt-two", Some(NeedsYou), true),
-        // No state known: not counted.
+        // No state known: counted, but lends no colour.
         live_in("f", "/f/repo/wt", None, true),
     ];
     let activity = activity(sessions.iter(), Path::new("/f/repo/wt"));
@@ -522,10 +515,12 @@ fn a_worktree_rolls_up_the_most_urgent_state_of_its_own_windows() {
         activity,
         Some(Activity {
             state: NeedsYou,
-            sessions: 3
+            count: 4
         })
     );
 
+    let unknown = [live_in("a", "/f/repo/wt", None, true)];
+    assert_eq!(activity_of(&unknown, "/f/repo/wt"), None, "nothing to show");
     let only_elsewhere = [live_in("d", "/f/repo/wt", Some(Busy), false)];
     assert_eq!(activity_of(&only_elsewhere, "/f/repo/wt"), None);
     let one = [live_in("a", "/f/repo/wt", Some(Busy), true)];
@@ -533,7 +528,7 @@ fn a_worktree_rolls_up_the_most_urgent_state_of_its_own_windows() {
         activity_of(&one, "/f/repo/wt"),
         Some(Activity {
             state: Busy,
-            sessions: 1
+            count: 1
         })
     );
 }
