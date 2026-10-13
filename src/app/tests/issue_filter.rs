@@ -71,10 +71,7 @@ async fn an_issue_listed_under_bugs_still_starts_as_a_feature() {
     };
     let (_dir, mut app, _) = app_with_settings_and_issues(settings, Scope::Mine, mixed_issues());
     walk_to_confirm(&mut app, "export");
-    assert_eq!(
-        confirm_screen(&app).branch.value(),
-        "feat/feat-3-slow-export"
-    );
+    assert_eq!(confirm_screen(&app).branch.value(), "feat/3-slow-export");
 }
 
 /// The filter is a preference like "Show blocked": saved as it changes, and

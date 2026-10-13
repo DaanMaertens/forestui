@@ -454,19 +454,23 @@ impl Scope {
 /// How one work mode names its worktree and branch.
 ///
 /// `name_pattern` is the worktree name, with `{number}` and `{slug}` (the
-/// title's, or a session prompt's first words) filled in; the branch
-/// is `branch_prefix` followed by that name.
+/// title's, or a session prompt's first words) filled in; the branch is
+/// `branch_prefix` followed by `branch_pattern`, filled the same way. The
+/// two patterns are separate because the worktree name carries the kind for
+/// the sidebar, and on the branch the prefix already says it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Naming {
     pub branch_prefix: String,
     pub name_pattern: String,
+    pub branch_pattern: String,
 }
 
 impl Naming {
-    fn new(branch_prefix: &str, name_pattern: &str) -> Self {
+    fn new(branch_prefix: &str, name_pattern: &str, branch_pattern: &str) -> Self {
         Self {
             branch_prefix: branch_prefix.into(),
             name_pattern: name_pattern.into(),
+            branch_pattern: branch_pattern.into(),
         }
     }
 
@@ -482,6 +486,10 @@ impl Naming {
                 .name_pattern
                 .clone()
                 .unwrap_or_else(|| self.name_pattern.clone()),
+            branch_pattern: partial
+                .branch_pattern
+                .clone()
+                .unwrap_or_else(|| self.branch_pattern.clone()),
         }
     }
 }
@@ -540,9 +548,10 @@ impl Default for StartWorkSettings {
             scope: Scope::Mine,
             feature_labels: vec!["enhancement".into()],
             bug_labels: vec!["bug".into()],
-            issue: Naming::new("fix/", "issue-{number}-{slug}"),
-            feature: Naming::new("feat/", "feat-{number}-{slug}"),
-            session: Naming::new("session/", "session-{slug}"),
+            // `fix/` does not say `issue`, so an issue branch keeps it.
+            issue: Naming::new("fix/", "issue-{number}-{slug}", "issue-{number}-{slug}"),
+            feature: Naming::new("feat/", "feat-{number}-{slug}", "{number}-{slug}"),
+            session: Naming::new("session/", "session-{slug}", "{slug}"),
             pr_review: PrReviewNaming {
                 name_pattern: "pr-{number}-{slug}".into(),
             },
@@ -607,6 +616,7 @@ pub struct PartialStartWork {
 pub struct PartialNaming {
     pub branch_prefix: Option<String>,
     pub name_pattern: Option<String>,
+    pub branch_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]

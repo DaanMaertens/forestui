@@ -868,7 +868,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-100 start-work-feature-launched
   wt="$ROOT/forest/beta/feat-77-dark-mode-for-the-dashboard"
   assert UC-100 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
-  assert UC-100 branch-checked-out "feat/feat-77-dark-mode-for-the-dashboard" \
+  assert UC-100 branch-checked-out "feat/77-dark-mode-for-the-dashboard" \
     "$(git -C "$wt" branch --show-current 2>/dev/null)"
   assert UC-100 work-item-linked "{'kind': 'issue', 'number': 77}" \
     "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('feat-77')][0]")"
@@ -924,8 +924,8 @@ if [ "$LABEL" = "rust" ]; then
   press Enter
   await "suggesting a name"
   assert UC-103 first-words-while-suggesting "yes" \
-    "$(screen_has 'session/session-try-a-quick-spike-on-caching')"
-  await "session/session-caching-spike" 15000; sleep 0.8
+    "$(screen_has 'session/try-a-quick-spike-on-caching')"
+  await "session/caching-spike" 15000; sleep 0.8
   capture UC-103 session-confirm
   assert UC-103 suggestion-stopped-spinning "no" "$(screen_has 'suggesting a name')"
   assert UC-103 titled-as-session "yes" "$(screen_has 'Start Work: Session')"
@@ -937,7 +937,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-103 session-launched
   wt="$ROOT/forest/beta/session-caching-spike"
   assert UC-103 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
-  assert UC-103 branch-checked-out "session/session-caching-spike" \
+  assert UC-103 branch-checked-out "session/caching-spike" \
     "$(git -C "$wt" branch --show-current 2>/dev/null)"
   assert UC-103 work-item-linked \
     "{'kind': 'free_text', 'description': 'Try a quick spike on caching'}" \
@@ -948,7 +948,7 @@ if [ "$LABEL" = "rust" ]; then
   press s; await "Work Mode"; sleep 0.8
   press Down Enter; await "Prompt"; sleep 0.8
   type_ "Try a quick spike on caching"; sleep 0.5; press Enter
-  await "session/session-caching-spike" 15000; sleep 0.8
+  await "session/caching-spike" 15000; sleep 0.8
   press Enter
   await "already exists"; sleep 0.8
   capture UC-103 session-clash

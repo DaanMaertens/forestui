@@ -5,7 +5,7 @@
   alpha                                │  Repository: beta
 ▼ beta                                 │  Branch:     main
 ├─ ✓ pr-45-retry-uploads-with-backoff [│  Commit:     <sha> (<rel>)
-├─ session-caching-spike [session/sessi│
+├─ session-caching-spike [session/cachi│
 └─ feat-77-dark-mode-for-the-dashboard │  ┌────────────┐ ┌────────────────────────┐ ┌────────────────────┐
 ▼ gamma                                │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Prune finished (1) │
 └─ gamma-imported [feat/imported]      │  └────────────┘ └────────────────────────┘ └────────────────────┘
