@@ -362,6 +362,21 @@ pub struct Settings {
     /// newer one — loads as All rather than taking the file down with it.
     #[serde(default, deserialize_with = "lenient_issue_filter")]
     pub issue_filter: IssueFilter,
+    /// The back key: the tmux key, after the prefix, that takes the viewer
+    /// from a Claude window forestui opened back to forestui. `None` is off —
+    /// written as `null`, so a file without the key still loads as the
+    /// default, prefix + ←.
+    #[serde(default = "default_back_key")]
+    pub back_key: Option<String>,
+    /// The user's own binding for `back_key` that they said to take anyway,
+    /// as the command tmux printed for it. The offer stays answered while the
+    /// key is bound to exactly this; a different binding is a new conflict.
+    #[serde(default)]
+    pub back_key_accepted: Option<String>,
+}
+
+fn default_back_key() -> Option<String> {
+    Some(crate::services::tmux::back_key::DEFAULT_KEY.to_string())
 }
 
 fn lenient_issue_filter<'de, D>(deserializer: D) -> Result<IssueFilter, D::Error>
@@ -593,6 +608,8 @@ impl Default for Settings {
             start_work: StartWorkSettings::default(),
             show_blocked_issues: false,
             issue_filter: IssueFilter::All,
+            back_key: default_back_key(),
+            back_key_accepted: None,
         }
     }
 }

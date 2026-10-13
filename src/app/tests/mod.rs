@@ -6,6 +6,7 @@ use crate::repo_settings::ConfigFile;
 use ratatui::crossterm::event::KeyCode;
 use std::path::PathBuf;
 
+mod back_key;
 mod blocked_issues;
 mod finished_worktrees;
 mod issue_filter;

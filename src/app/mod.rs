@@ -21,6 +21,7 @@ pub use mouse::{Direction, Hit, HitTarget, ModalClick, ScrollbarGeom};
 use crate::event::{AppEvent, DetailMeta, EventTx, Severity};
 use crate::modal::{Modal, StartWorkModal};
 use crate::models::{ClaudeSession, Scope, Settings};
+use crate::services::tmux::back_key;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use crate::state::AppState;
 use crate::ui::widgets::TextInput;
@@ -377,6 +378,54 @@ impl App {
         if std::mem::take(&mut self.focus_events_owned) {
             tmux::disable_focus_events();
         }
+        // Whether or not this run bound the back key: releasing with nobody
+        // else left also restores what a killed run left bound.
+        back_key::release_on_exit();
+    }
+
+    /// Bind, move or release the back key to match the settings — at
+    /// startup, and whenever they change. A dozen tmux calls, so off the loop;
+    /// the verdict comes back as [`AppEvent::BackKeyApplied`].
+    pub(crate) fn apply_back_key(&mut self) {
+        let key = self.settings.back_key.clone();
+        let accepted = self.settings.back_key_accepted.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let applying = key.clone();
+            let claim = tokio::task::spawn_blocking(move || {
+                back_key::apply(applying.as_deref(), accepted.as_deref())
+            })
+            .await
+            .unwrap_or(back_key::Claim::Unavailable);
+            tx.send(AppEvent::BackKeyApplied { key, claim });
+        });
+    }
+
+    /// Ask about a key the user bound themselves, once at a time.
+    ///
+    /// `key` is the setting the claim was made for: one that has changed
+    /// since is answered by its own claim, still on its way.
+    pub(crate) fn on_back_key_claim(&mut self, key: Option<String>, claim: back_key::Claim) {
+        if key != self.settings.back_key {
+            return;
+        }
+        let binding = match claim {
+            back_key::Claim::Conflict(binding) => binding,
+            back_key::Claim::Refused => {
+                self.notify("tmux refused the back key binding", Severity::Warning);
+                return;
+            }
+            back_key::Claim::Bound | back_key::Claim::Unavailable => return,
+        };
+        let Some(key) = key else {
+            return;
+        };
+        self.modals.retain(|m| !matches!(m, Modal::BackKey(_)));
+        self.modals
+            .push(Modal::BackKey(crate::modal::BackKeyModal::offer(
+                key, binding,
+            )));
+        self.redraw = true;
     }
 
     // ------------------------------------------------------------------ startup
@@ -412,6 +461,7 @@ impl App {
         }
         self.check_plugin_version();
         self.probe_claude_cli();
+        self.apply_back_key();
     }
 
     /// Ask the installed Claude, once, whether it knows `--remote-control`.
@@ -1152,6 +1202,7 @@ impl App {
         }
         match event {
             AppEvent::Term(term_event) => self.handle_term_event(term_event),
+            AppEvent::BackKeyApplied { key, claim } => self.on_back_key_claim(key, claim),
             AppEvent::Tick => self.on_tick(),
             AppEvent::GhStatus(status, username) => {
                 self.gh_status = status.display(username.as_deref());

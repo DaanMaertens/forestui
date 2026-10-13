@@ -1,5 +1,5 @@
 use super::*;
-use crate::modal::{ConfirmAction, CustomButtonsModal};
+use crate::modal::{BackKeyModal, ConfirmAction, CustomButtonsModal};
 use crate::models::{CustomClaudeButton, GitHubIssue, Repository, Settings};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -198,6 +198,11 @@ fn every_modal() -> Vec<(Modal, &'static str)> {
             )),
             "Delete Worktree",
         ),
+        (
+            Modal::BackKey(BackKeyModal::offer("Left", "previous-window")),
+            "Back Key",
+        ),
+        (Modal::BackKey(BackKeyModal::pick()), "Back Key"),
     ]
 }
 
@@ -404,6 +409,8 @@ fn clicking_a_modal_control_maps_to_its_focus_index() {
             "│ Edit Prompt Templates... │",
             SettingsModal::FOCUS_TEMPLATES,
         ),
+        ("│ [x] prefix ← │", SettingsModal::FOCUS_BACK_KEY),
+        ("│ Change Key... │", SettingsModal::FOCUS_BACK_KEY_CHANGE),
         (
             "│ Manage Integration... │",
             SettingsModal::FOCUS_INTEGRATION,
@@ -543,4 +550,45 @@ fn a_single_branch_is_counted_in_the_singular() {
     form.picker = SearchPicker::new(form.picker.entries().take(1).cloned().collect(), "");
     let screen = render(&in_flow(form), 100, 40);
     assert!(screen.contains("1 branch "), "{screen}");
+}
+
+/// The offer names the key and the user's binding, and each answer is a
+/// click away.
+#[test]
+fn the_back_key_offer_shows_the_binding_and_its_three_answers() {
+    let offer = Modal::BackKey(BackKeyModal::offer("Left", "previous-window"));
+    let (screen, hits) = render_with_hits(&offer, 120, 40);
+    assert!(screen.contains("prefix ←"), "{screen}");
+    assert!(screen.contains("previous-window"), "{screen}");
+    for (needle, index) in [
+        ("│ Pick Another Key │", BackKeyModal::FOCUS_PICK),
+        ("│ Use It Anyway │", BackKeyModal::FOCUS_ANYWAY),
+        ("│  Off   │", BackKeyModal::FOCUS_OFF),
+    ] {
+        assert_eq!(
+            index_at(&hits, cell_of(&screen, needle)),
+            Some(index),
+            "{needle} in:\n{screen}"
+        );
+    }
+}
+
+/// The back key shares the templates' row; the dialog must still fit a
+/// plain 80x40 terminal whole, Save included.
+#[test]
+fn the_settings_dialog_still_fits_80_by_40_with_the_back_key() {
+    let settings = Modal::Settings(Box::new(SettingsModal::new(&Settings::default())));
+    let (screen, hits) = render_with_hits(&settings, 80, 40);
+    for (needle, index) in [
+        ("│ [x] prefix ← │", SettingsModal::FOCUS_BACK_KEY),
+        ("│ Change Key... │", SettingsModal::FOCUS_BACK_KEY_CHANGE),
+        ("│  Save  │", SettingsModal::FOCUS_SAVE),
+    ] {
+        assert_eq!(
+            index_at(&hits, cell_of(&screen, needle)),
+            Some(index),
+            "{needle} in:\n{screen}"
+        );
+    }
+    assert!(screen.contains("BACK KEY TO FORESTUI"), "{screen}");
 }

@@ -8,11 +8,11 @@
 use super::{Action, App, Field, PendingJump, PendingStart};
 use crate::event::Severity;
 use crate::event::{AppEvent, BranchList, BranchTarget, EventTx};
+use crate::modal::{BackKeyAnswer, IntegrationAction, ModalOutcome};
 use crate::modal::{
     Clash, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult, PromptTemplatesModal,
     StartWorkConfirmModal, StartWorkModal, WorktreeForm,
 };
-use crate::modal::{IntegrationAction, ModalOutcome};
 use crate::models::{
     CustomClaudeButton, GitHubIssue, IssueFilter, Repository, WorkItemLink, Worktree,
 };
@@ -189,6 +189,22 @@ impl App {
         }
     }
 
+    /// Save the answer to the back key offer and act on it. A new key goes
+    /// through the same check, so it can bring the offer back for itself.
+    fn answer_back_key(&mut self, answer: BackKeyAnswer) {
+        let (key, accepted) = match answer {
+            BackKeyAnswer::Key(key) => (Some(key), None),
+            BackKeyAnswer::UseAnyway { key, binding } => (Some(key), Some(binding)),
+            BackKeyAnswer::Off => (None, None),
+        };
+        self.settings.back_key = key;
+        self.settings.back_key_accepted = accepted;
+        if let Err(error) = settings_service::save_settings(&self.settings) {
+            self.notify(format!("Could not save settings: {error}"), Severity::Error);
+        }
+        self.apply_back_key();
+    }
+
     fn run_modal_effect(&mut self, effect: ModalEffect) {
         match effect {
             ModalEffect::ClaudePlugin(action) => self.run_claude_plugin_action(action),
@@ -309,6 +325,8 @@ impl App {
                 );
             }
             ModalResult::SettingsSaved(settings) => {
+                let back_key_moved = settings.back_key != self.settings.back_key
+                    || settings.back_key_accepted != self.settings.back_key_accepted;
                 self.settings = *settings;
                 // On every path that reaches Save the picker has already made
                 // active == theme_name (commit applies, Esc reverts), so this
@@ -326,13 +344,18 @@ impl App {
                 // `branch_prefix`, so a changed prefix has to rebuild the rows
                 // or they keep showing the old elision until something else does.
                 self.rebuild_rows();
+                if back_key_moved {
+                    self.apply_back_key();
+                }
             }
+            ModalResult::BackKeyAnswered(answer) => self.answer_back_key(answer),
             // The picker already applied the theme live and `receive_child`
             // carried the slug into the Settings dialog; persisting waits for
             // Save.
             ModalResult::CustomButtonsSaved(_)
             | ModalResult::CustomButtonSaved(_)
-            | ModalResult::ThemeChosen(_) => {}
+            | ModalResult::ThemeChosen(_)
+            | ModalResult::BackKeyPicked(_) => {}
             ModalResult::Confirmed(action) => self.apply_confirmed(action),
             ModalResult::SessionRenamed {
                 path,
