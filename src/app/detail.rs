@@ -418,7 +418,10 @@ fn open_in(nodes: &mut Vec<DetailNode>) {
 /// One launch vocabulary everywhere: the CLAUDE section and every session
 /// card offer the same buttons under the same names in the same accent —
 /// `Claude`, `YOLO`, then the user's own. The section header already says
-/// these start something; "New Session" restated it on every button.
+/// these start something; "New Session" restated it on every button. The
+/// one deliberate exception is the card's plain button, which reads
+/// `Resume`: beside the new-session row, "Claude" on a card read as "start
+/// Claude" rather than "go back to this conversation".
 fn claude(nodes: &mut Vec<DetailNode>, app: &App) {
     nodes.push(DetailNode::Section("CLAUDE: NEW SESSION"));
     let mut row = vec![
@@ -606,18 +609,40 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
         // The whole launch row wears the accent, YOLO-style customs included:
         // five cards of red YOLO buttons read as a wall of warnings, and the
         // CLAUDE section above already colours that choice at full strength.
-        let mut launch = vec![
-            ControlSpec::new(
-                Action::ResumeSession(index),
-                "Claude",
+        //
+        // A live session is a conversation already running: Resume goes to
+        // it, while YOLO or a custom button could only start a second Claude
+        // on the same transcript with other flags. Those keep their slots,
+        // like Del below, but cannot fire.
+        let mut launch = vec![ControlSpec::new(
+            Action::ResumeSession(index),
+            "Resume",
+            theme::Variant::Accent,
+        )];
+        if live.is_some() {
+            launch.push(ControlSpec::disabled(Action::ResumeYolo(index), "YOLO"));
+            launch.extend(app.settings.custom_buttons.iter().enumerate().map(
+                |(button, custom)| {
+                    ControlSpec::disabled(
+                        Action::ResumeCustom {
+                            button,
+                            session: index,
+                        },
+                        custom.label.as_str(),
+                    )
+                },
+            ));
+        } else {
+            launch.push(ControlSpec::new(
+                Action::ResumeYolo(index),
+                "YOLO",
                 theme::Variant::Accent,
-            ),
-            ControlSpec::new(Action::ResumeYolo(index), "YOLO", theme::Variant::Accent),
-        ];
-        launch.extend(custom_controls(app, move |button| Action::ResumeCustom {
-            button,
-            session: index,
-        }));
+            ));
+            launch.extend(custom_controls(app, move |button| Action::ResumeCustom {
+                button,
+                session: index,
+            }));
+        }
         let manage = vec![
             ControlSpec::new(
                 Action::RenameSession(index),

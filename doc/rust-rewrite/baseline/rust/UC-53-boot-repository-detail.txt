@@ -37,7 +37,7 @@
                                        │
                                        │  ┌───────────────────────────────────────────────────────────────────────────────────────────┐
                                        │  │ session 3: refactor the detail pane so the cards line up      ┌────────┐ ┌──────┐ ┌──────┐│
-                                       │  │                                                               │ Claude │ │ YOLO │ │ Opus ││
+                                       │  │                                                               │ Resume │ │ YOLO │ │ Opus ││
                                        │  │ claude: looking at the card layout now                        └────────┘ └──────┘ └──────┘│
                                        │  │ user: and then check it against the python build                ┌────────┐ ┌─────┐ ┌─────┐│
  a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived

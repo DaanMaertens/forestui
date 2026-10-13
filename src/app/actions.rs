@@ -487,10 +487,6 @@ impl App {
                     });
                 });
             }
-            ConfirmAction::SwitchToWindow {
-                window_id,
-                window_name,
-            } => self.switch_to_window(&window_id, &window_name),
             ConfirmAction::BringWindow {
                 window_id,
                 window_name,
@@ -679,14 +675,23 @@ impl App {
     }
 
     pub(super) fn switch_to_window(&mut self, window_id: &str, window_name: &str) {
-        if tmux::select_window(window_id) {
+        if self.select_live_window(window_id, window_name) {
             self.notify(format!("Switched to {window_name}"), Severity::Information);
-        } else {
-            // The window closed between the scan and the click; the next
-            // sweep drops its badge.
-            self.notify(format!("Window {window_name} is gone"), Severity::Warning);
-            self.scan_live_sessions();
         }
+    }
+
+    /// Select a window the live scan found, saying nothing on success. A
+    /// failure is still worth a warning: the switch the user asked for did
+    /// not happen.
+    fn select_live_window(&mut self, window_id: &str, window_name: &str) -> bool {
+        if tmux::select_window(window_id) {
+            return true;
+        }
+        // The window closed between the scan and the click; the next sweep
+        // drops its badge.
+        self.notify(format!("Window {window_name} is gone"), Severity::Warning);
+        self.scan_live_sessions();
+        false
     }
 
     /// Move a session's window over from another tmux session and switch to
@@ -1042,7 +1047,7 @@ impl App {
     /// running would start a second Claude on the same transcript — two
     /// conversations diverging from one history, exactly the mess the
     /// liveness tracking exists to prevent. A session in one of our windows
-    /// gets an offer to switch there; one running somewhere unreachable (seen
+    /// is switched to; one running somewhere unreachable (seen
     /// via its heartbeat) gets an eyes-open "resume anyway". Returns true
     /// when the guard took the action over.
     ///
@@ -1063,19 +1068,15 @@ impl App {
             return false;
         };
         match &live.place {
+            // Going to the conversation is what Resume means, so there is
+            // nothing to ask and nothing to announce: the switch is the
+            // feedback.
             crate::services::live::LivePlace::Window {
                 window_id,
                 window_name,
             } => {
                 let (window_id, window_name) = (window_id.clone(), window_name.clone());
-                self.modals.push(Modal::Confirm(ConfirmModal::new(
-                    "Session Already Open",
-                    format!("This session is running in window '{window_name}'.\nSwitch to it?"),
-                    ConfirmAction::SwitchToWindow {
-                        window_id,
-                        window_name,
-                    },
-                )));
+                self.select_live_window(&window_id, &window_name);
             }
             crate::services::live::LivePlace::OtherSession {
                 window_id,

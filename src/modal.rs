@@ -148,13 +148,6 @@ pub enum ConfirmAction {
         session_id: String,
         title: String,
     },
-    /// The duplicate-open guard's offer: the session is already open in a tmux
-    /// window, so jump there instead of starting a second Claude on the same
-    /// transcript and letting the two halves diverge.
-    SwitchToWindow {
-        window_id: String,
-        window_name: String,
-    },
     /// The session runs in a window of another tmux session on our server:
     /// move that window into forestui's session and switch to it. Its Claude
     /// keeps running — nothing is resumed, so nothing can fork.
@@ -189,18 +182,16 @@ impl ConfirmAction {
             | ConfirmAction::RemoveRepository(_)
             | ConfirmAction::DeleteClaudeSession { .. } => "Delete",
             ConfirmAction::PruneFinished(_) => "Prune",
-            ConfirmAction::SwitchToWindow { .. } => "Switch",
             ConfirmAction::BringWindow { .. } => "Bring here",
             ConfirmAction::ForceResume { .. } => "Resume anyway",
         }
     }
 
     /// Whether confirming destroys something. Drives the button's colour: a
-    /// "Switch" painted destructive-red would warn against the safe choice,
+    /// "Bring here" painted destructive-red would warn against the safe choice,
     /// while "Resume anyway" — forking a running conversation — earns it.
     pub fn is_destructive(&self) -> bool {
         match self {
-            ConfirmAction::SwitchToWindow { .. } => false,
             // Moving a window loses nothing — unless it takes the other
             // tmux session down with it.
             ConfirmAction::BringWindow { closes_session, .. } => *closes_session,

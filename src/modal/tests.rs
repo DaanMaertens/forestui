@@ -363,9 +363,16 @@ fn rename_session_validates_and_carries_the_mechanism() {
     assert_eq!(live_window_id, None);
 }
 
-/// "Switch" is the safe choice and must not wear the destructive colour.
+/// "Bring here" is the safe choice and must not wear the destructive colour.
 #[test]
 fn only_destructive_confirms_read_as_destructive() {
+    let bring = ConfirmAction::BringWindow {
+        window_id: "@1".into(),
+        window_name: "claude:wt".into(),
+        session_id: "s".into(),
+        closes_session: false,
+    };
+    assert!(!bring.is_destructive());
     assert!(ConfirmAction::DeleteWorktree(Uuid::new_v4()).is_destructive());
     assert!(
         ConfirmAction::DeleteClaudeSession {
@@ -375,12 +382,6 @@ fn only_destructive_confirms_read_as_destructive() {
         }
         .is_destructive()
     );
-    let switch = ConfirmAction::SwitchToWindow {
-        window_id: "@1".into(),
-        window_name: "claude:wt".into(),
-    };
-    assert!(!switch.is_destructive());
-    assert_eq!(switch.confirm_label(), "Switch");
 }
 
 #[test]
