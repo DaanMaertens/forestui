@@ -1047,9 +1047,9 @@ impl App {
     /// running would start a second Claude on the same transcript — two
     /// conversations diverging from one history, exactly the mess the
     /// liveness tracking exists to prevent. A session in one of our windows
-    /// is switched to; one running somewhere unreachable (seen
-    /// via its heartbeat) gets an eyes-open "resume anyway". Returns true
-    /// when the guard took the action over.
+    /// is switched to; one running somewhere unreachable (seen via its
+    /// heartbeat) gets an eyes-open "resume anyway". Returns true when the
+    /// guard took the action over.
     ///
     /// Only a *running* session guards — the live map holds nothing else. A
     /// window whose Claude exited leaves the session free to resume anywhere,
@@ -1075,6 +1075,8 @@ impl App {
                 window_id,
                 window_name,
             } => {
+                // Owned copies end the borrow of the live map, which the
+                // select's failure path rescans.
                 let (window_id, window_name) = (window_id.clone(), window_name.clone());
                 self.select_live_window(&window_id, &window_name);
             }

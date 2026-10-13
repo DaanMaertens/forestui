@@ -83,10 +83,16 @@ impl ControlSpec {
     }
 
     fn disabled(action: Action, label: impl Into<String>) -> Self {
-        Self {
-            enabled: false,
-            ..Self::new(action, label, theme::Variant::Normal)
-        }
+        let mut control = Self::new(action, label, theme::Variant::Normal);
+        control.disable();
+        control
+    }
+
+    /// Keep the slot, lose the accent: a disabled control is drawn plain
+    /// whatever it would have worn enabled.
+    fn disable(&mut self) {
+        self.enabled = false;
+        self.variant = theme::Variant::Normal;
     }
 }
 
@@ -614,34 +620,22 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
         // it, while YOLO or a custom button could only start a second Claude
         // on the same transcript with other flags. Those keep their slots,
         // like Del below, but cannot fire.
-        let mut launch = vec![ControlSpec::new(
-            Action::ResumeSession(index),
-            "Resume",
-            theme::Variant::Accent,
-        )];
-        if live.is_some() {
-            launch.push(ControlSpec::disabled(Action::ResumeYolo(index), "YOLO"));
-            launch.extend(app.settings.custom_buttons.iter().enumerate().map(
-                |(button, custom)| {
-                    ControlSpec::disabled(
-                        Action::ResumeCustom {
-                            button,
-                            session: index,
-                        },
-                        custom.label.as_str(),
-                    )
-                },
-            ));
-        } else {
-            launch.push(ControlSpec::new(
-                Action::ResumeYolo(index),
-                "YOLO",
+        let mut launch = vec![
+            ControlSpec::new(
+                Action::ResumeSession(index),
+                "Resume",
                 theme::Variant::Accent,
-            ));
-            launch.extend(custom_controls(app, move |button| Action::ResumeCustom {
-                button,
-                session: index,
-            }));
+            ),
+            ControlSpec::new(Action::ResumeYolo(index), "YOLO", theme::Variant::Accent),
+        ];
+        launch.extend(custom_controls(app, move |button| Action::ResumeCustom {
+            button,
+            session: index,
+        }));
+        if live.is_some() {
+            for control in &mut launch[1..] {
+                control.disable();
+            }
         }
         let manage = vec![
             ControlSpec::new(

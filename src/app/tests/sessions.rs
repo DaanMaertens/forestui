@@ -144,16 +144,8 @@ async fn resuming_an_open_session_switches_to_its_window() {
     );
     // Under test tmux answers as if absent, so the select fails and the
     // only notice is the window-gone warning; a success would say nothing.
-    assert!(
-        app.notifications
-            .iter()
-            .all(|n| !n.text.starts_with("Switched")),
-        "{:?}",
-        app.notifications
-            .iter()
-            .map(|n| &n.text)
-            .collect::<Vec<_>>()
-    );
+    let notices: Vec<&str> = app.notifications.iter().map(|n| n.text.as_str()).collect();
+    assert_eq!(notices, ["Window claude:demo:wt is gone"]);
 
     // Running somewhere unreachable: the guard warns about the fork and
     // the confirm carries everything the resume needs, since there is no
@@ -603,4 +595,56 @@ async fn a_live_card_disables_all_but_resume() {
         let enabled: Vec<bool> = row.iter().map(|(.., e)| *e).collect();
         assert_eq!(enabled, [true, false, false], "{place}");
     }
+}
+
+/// The disabled launches really are dead, from the mouse and from Enter.
+/// Live elsewhere is the place that shows it: there a launch that fired
+/// would open the force-resume confirm, and Resume beside them still does.
+#[tokio::test]
+async fn a_live_cards_disabled_launches_do_not_fire() {
+    let (_dir, mut app) = app_with_a_custom_button();
+    // A launch refuses a missing directory before it reaches the guard.
+    std::fs::create_dir_all(app.state.selected_path().expect("a selection"))
+        .expect("the worktree directory");
+    app.handle_event(AppEvent::LiveSessions {
+        sessions: vec![a_live_elsewhere("one", 4242)],
+    });
+    app.notifications.clear();
+    snapshot_drawn(&mut app);
+    let index_of = |app: &App, item: DetailItem| {
+        app.detail_items()
+            .iter()
+            .position(|candidate| *candidate == item)
+            .expect("the control is in the pane")
+    };
+
+    for item in [
+        DetailItem::Action(Action::ResumeYolo(0)),
+        DetailItem::Action(Action::ResumeCustom {
+            button: 0,
+            session: 0,
+        }),
+    ] {
+        let index = index_of(&app, item.clone());
+        assert!(!app.drawn_items[index].1, "{item:?} drawn enabled");
+        app.push_hit(rect(40, 5, 8, 3), HitTarget::DetailItem(index));
+        app.handle_mouse(click(42, 6));
+        app.focus = Focus::Detail;
+        app.detail_index = index;
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.modals.is_empty(), "{item:?} fired");
+        assert!(app.notifications.is_empty(), "{item:?} fired");
+    }
+
+    app.detail_index = index_of(&app, DetailItem::Action(Action::ResumeSession(0)));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(
+        matches!(
+            app.modals.last(),
+            Some(crate::modal::Modal::Confirm(confirm))
+                if matches!(confirm.action, crate::modal::ConfirmAction::ForceResume { .. })
+        ),
+        "Resume must still reach the guard: {:?}",
+        app.modals.last()
+    );
 }
