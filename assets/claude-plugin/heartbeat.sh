@@ -67,6 +67,12 @@ mkdir -p "$dir" 2>/dev/null || exit 0
 
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 pane="${TMUX_PANE:-}"
+# Which tmux server the pane is on: `$TMUX` is `<socket>,<pid>,<index>`, and
+# the first two name the server. A pane id is only unique per server, so
+# without this forestui would resolve `%3` on its own server whatever server
+# wrote it. Empty when not in tmux.
+server=""
+[ -n "$pane" ] && [ -n "${TMUX:-}" ] && server="${TMUX%,*}"
 
 # What the session is doing (see state.sh for the other events). A prompt
 # makes it busy. A session that starts, resumes or is cleared sits at its
@@ -87,8 +93,9 @@ state_field=""
 
 # Written whole then renamed, so forestui never reads half a file.
 tmp="$dir/.$sid.$$.tmp"
-printf '{"session_id":"%s","pid":%s,"tmux_pane":"%s","cwd":%s%s}\n' \
-  "$sid" "$found" "$pane" "$(printf '%s' "$cwd" | jq -R .)" "$state_field" \
+printf '{"session_id":"%s","pid":%s,"tmux_pane":"%s","tmux_server":%s,"cwd":%s%s}\n' \
+  "$sid" "$found" "$pane" "$(jq -n --arg s "$server" '$s')" \
+  "$(printf '%s' "$cwd" | jq -R .)" "$state_field" \
   > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; exit 0; }
 mv -f "$tmp" "$dir/$sid.json" 2>/dev/null || rm -f "$tmp" 2>/dev/null
 

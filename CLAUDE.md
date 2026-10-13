@@ -314,7 +314,11 @@ window instead.
   believed, swept when stale. `services/live.rs` merges heartbeats with the
   window stamps: a heartbeat whose recorded pane sits on forestui's own tmux
   session is switchable like a stamped window, anything else shows as
-  "live elsewhere" and resuming it is an eyes-open confirm. The hook also
+  "live elsewhere" and resuming it is an eyes-open confirm. The heartbeat
+  records its pane's tmux *server* too (`$TMUX` minus the session index):
+  pane ids are only unique per server, so a pane is resolved only when it was
+  written on forestui's own server, and one with no server recorded is
+  elsewhere, never a guessed window. The hook also
   re-stamps `@claude_session_id` on its window, healing a stale stamp left by
   an earlier launch.
 - **Session state** — *busy*, *needs you* or *idle* — rides in the same
