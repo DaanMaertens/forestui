@@ -41,4 +41,4 @@ roved the plan.
 
 
 
-[forestui-<7:term:beta  8:issue-298-proactive-metrics-coalesced-fire-rows-ov  9:feat-77-dark-mode-for-the-dashboard*"<host>" <clock>
+[forestui-<sue-298-proactive-metrics-coalesced-fire-rows-ov  9:feat-77-dark-mode-for-the-dashboard*C-b ← forestui │ "<host>" <clock>

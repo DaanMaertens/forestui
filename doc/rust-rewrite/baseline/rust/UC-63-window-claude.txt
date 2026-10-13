@@ -41,4 +41,4 @@ claude stub --remote-control -n claude:alpha:wt-a --session-id <uuid>
 
 
 
-[forestui-<forestui-dev-<hhmm>- 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a*"<host>" <clock>
+[forestui-<dev-<hhmm>- 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a*C-b ← forestui │ "<host>" <clock>

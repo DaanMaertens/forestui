@@ -41,4 +41,4 @@ then implement it.
 
 
 
-[forestui-<:yolo:alpha:wt-a  6:term:alpha:wt-a:2  7:term:beta  8:issue-298-proactive-metrics-coalesced-fire-rows-ov*"<host>" <clock>
+[forestui-< 6:term:alpha:wt-a:2  7:term:beta  8:issue-298-proactive-metrics-coalesced-fire-rows-ov*C-b ← forestui │ "<host>" <clock>

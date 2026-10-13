@@ -22,10 +22,10 @@
    │  ┌──────────────────────────┐                                                                                                     │
    │  │ Manage Custom Buttons... │                                                                                                     │
    │  └──────────────────────────┘                                                                                                     │
-   │  PROMPT TEMPLATES                                                                                                                 │
-   │  ┌──────────────────────────┐                                                                                                     │
-   │  │ Edit Prompt Templates... │                                                                                                     │
-   │  └──────────────────────────┘                                                                                                     │
+   │  PROMPT TEMPLATES             BACK KEY TO FORESTUI                                                                                │
+   │  ┌──────────────────────────┐ ┌──────────────┐ ┌───────────────┐                                                                  │
+   │  │ Edit Prompt Templates... │ │ [x] prefix ← │ │ Change Key... │                                                                  │
+   │  └──────────────────────────┘ └──────────────┘ └───────────────┘                                                                  │
    │                                                                                                                                   │
    │  CLAUDE CODE INTEGRATION                                                                                                          │
    │  Not installed                                                                                                                    │
@@ -41,4 +41,4 @@
 
 
 
-[forestui-0:forestui-dev-<hhmm>*                                                                              "<host>" <clock>
+[forestui-0:forestui-dev-<hhmm>*                                                                                      "<host>" <clock>
