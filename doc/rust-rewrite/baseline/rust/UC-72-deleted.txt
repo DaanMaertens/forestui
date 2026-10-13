@@ -6,7 +6,7 @@
 └─ wt-a-renamed [feat/wt-a-v2]         │  Branch:     main
 ▼ beta                                 │  Commit:     <sha> (<rel>)
 ├─ ✓ pr-45-retry-uploads-with-backoff [│
-├─ session-try-a-quick-spike-on-caching│  ┌────────────┐ ┌────────────────────────┐ ┌────────────────────┐
+├─ session-caching-spike [session/cachi│  ┌────────────┐ ┌────────────────────────┐ ┌────────────────────┐
 └─ feat-77-dark-mode-for-the-dashboard │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Prune finished (1) │
 ▼ gamma                                │  └────────────┘ └────────────────────────┘ └────────────────────┘
 └─ gamma-imported [feat/imported]      │

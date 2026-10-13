@@ -231,13 +231,14 @@ impl App {
                 let repo_id = flow.repo_id;
                 self.start_work_on_pull_request(repo_id, *item);
             }
-            ModalEffect::ConfirmSession { prompt, copy } => {
+            ModalEffect::ConfirmSession { prompt } => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
                     return;
                 };
                 let repo_id = flow.repo_id;
-                self.start_session(repo_id, prompt, copy);
+                self.start_session(repo_id, prompt);
             }
+            ModalEffect::LaunchSession => self.launch_session(),
             ModalEffect::OpenWorktree(worktree_id) => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
                     return;
@@ -676,6 +677,7 @@ impl App {
         if let Some(warning) = template.warning {
             self.notify(warning, Severity::Warning);
         }
+        self.suggest_session_name();
     }
 
     pub(super) fn switch_to_window(&mut self, window_id: &str, window_name: &str) {
@@ -792,11 +794,11 @@ impl App {
     }
 
     /// Start work on a session prompt: the confirm screen once the branches
-    /// load. Its link is never looked up — a prompt is not an identity, and
-    /// the same words may well mean new work. What can collide
-    /// is the names: then the flow asks, and `copy` is its answer to take the
-    /// next free suffix.
-    fn start_session(&mut self, repo_id: Uuid, prompt: String, copy: bool) {
+    /// load, named from the prompt's first words until a suggestion lands.
+    /// Its link is never looked up — a prompt is not an identity, and the
+    /// same words may well mean new work. What can collide is the names,
+    /// and those are checked on Launch, once they are final.
+    fn start_session(&mut self, repo_id: Uuid, prompt: String) {
         let Some(repo) = self.state.find_repository(repo_id) else {
             return;
         };
@@ -804,28 +806,104 @@ impl App {
         let Some(names) = work::session_names(&start_work, &prompt) else {
             return;
         };
-        let worktrees = &repo.worktrees;
-        let copy_names = work::first_free_copy(&names, |n| work::clash(n, worktrees).is_some());
-        let names = if copy {
-            copy_names
-        } else if let Some(existing) = work::clash(&names, worktrees) {
-            let clash = Clash {
-                worktree_id: existing.id,
-                worktree_name: existing.name.clone(),
-                copy_name: copy_names.worktree,
-            };
-            if let Some(Modal::StartWork(flow)) = self.modals.last_mut() {
-                flow.ask_clash(clash);
-            }
-            return;
-        } else {
-            names
-        };
         self.pending_start = Some(PendingStart {
             item: WorkItem::Session { prompt },
             names,
         });
         self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
+    }
+
+    /// Launch a session's confirm screen under the names it shows — typed,
+    /// first words or suggested — unless a worktree already has one of them:
+    /// then the screen steps aside for the clash question, which can put it
+    /// back.
+    fn launch_session(&mut self) {
+        let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last() else {
+            return;
+        };
+        let Some(repo) = self.state.find_repository(confirm.repo_id) else {
+            return;
+        };
+        let names = confirm.names();
+        let clash = work::clash(&names, &repo.worktrees).map(|existing| Clash {
+            worktree_id: existing.id,
+            worktree_name: existing.name.clone(),
+            copy: work::first_free_copy(&names, |n| work::clash(n, &repo.worktrees).is_some()),
+        });
+        let Some(Modal::StartWorkConfirm(confirm)) = self.modals.pop() else {
+            return;
+        };
+        let Some(clash) = clash else {
+            self.apply_modal_result(confirm.launch());
+            return;
+        };
+        match self.modals.last_mut() {
+            Some(Modal::StartWork(flow)) => flow.ask_clash(clash, confirm),
+            // Always opened over Start work; without it there is no
+            // question to ask, so the screen stays.
+            _ => self.modals.push(Modal::StartWorkConfirm(confirm)),
+        }
+    }
+
+    /// The name suggestion a session prompt typed in the checkout at
+    /// `path` gets: the `session-name` template, filled with the prompt, under
+    /// the repository's naming-call settings. `None` when there is nothing
+    /// to ask — the call is turned off, or the prompt is blank.
+    pub(super) fn session_name_call(&self, path: &str, prompt: &str) -> Option<NameCall> {
+        let naming = self.start_work_for(path).session_naming;
+        if !naming.enabled || prompt.trim().is_empty() {
+            return None;
+        }
+        let layers = self.prompt_layers_for(path);
+        let template = crate::prompt::resolve(
+            &layers.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
+            crate::prompt::Template::SessionName,
+        );
+        let instruction = crate::prompt::fill(
+            &template.text,
+            &crate::prompt::TemplateVars {
+                body: Some(prompt),
+                ..Default::default()
+            },
+        );
+        Some(NameCall {
+            cwd: PathBuf::from(path),
+            instruction,
+            naming,
+            warning: template.warning,
+        })
+    }
+
+    /// Ask for a name for the session on the confirm screen on top, if its
+    /// settings call for one. The answer comes back as
+    /// [`AppEvent::SessionNameSuggested`], keyed to this screen.
+    fn suggest_session_name(&mut self) {
+        let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last() else {
+            return;
+        };
+        let WorkItem::Session { prompt } = &confirm.item else {
+            return;
+        };
+        let Some(call) = self.session_name_call(&confirm.repo_path, prompt) else {
+            return;
+        };
+        let request = Uuid::new_v4();
+        if let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last_mut() {
+            confirm.name_request = Some(request);
+        }
+        if let Some(warning) = call.warning {
+            self.notify(warning, Severity::Warning);
+        }
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let reply = crate::services::name_suggestion::suggest(
+                &call.cwd,
+                &call.instruction,
+                &call.naming,
+            )
+            .await;
+            tx.send(AppEvent::SessionNameSuggested { request, reply });
+        });
     }
 
     /// Go to a worktree the work was already started in, closing Start work.
@@ -1716,4 +1794,14 @@ impl App {
             });
         });
     }
+}
+
+/// One name suggestion, ready to run: see [`App::session_name_call`].
+#[derive(Debug)]
+pub(super) struct NameCall {
+    pub cwd: PathBuf,
+    pub instruction: String,
+    pub naming: crate::models::SessionNaming,
+    /// Why the `session-name` template in use is not the user's file.
+    pub warning: Option<String>,
 }

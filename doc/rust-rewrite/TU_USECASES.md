@@ -1692,33 +1692,39 @@ appears in the config, or the window does not switch.
 ### UC-103 — Start work for a session
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
 **Steps:** after UC-101, click beta's sidebar row, `s` → `Down` `Enter`
-(mode `session`) → type `Try a quick spike on caching` → `Enter` → `Enter`
-(Launch). Then the same again up to the `Enter` on the prompt, and `Escape`
-three times.
+(mode `session`) → type `Try a quick spike on caching` → `Enter`, wait for
+the suggested name → `Enter` (Launch). Then the same again up to the
+suggested name, `Enter` (Launch), and `Escape` three times. The sweep's
+`claude` stub answers the name suggestion (`claude -p`) with `caching-spike`
+after two seconds.
 **Expected:** the mode step lists `issue`, `session`, `pr-review`,
 `worktree`, with `session` described as `A Claude session for anything else`.
 `session` opens the prompt step directly, which previews
 `Worktree: session-try-a-quick-spike-on-caching`. The confirm screen is titled
-`Start Work: Session`, names the worktree
-`session-try-a-quick-spike-on-caching` on
-`session/try-a-quick-spike-on-caching`, and its prompt is the typed
-prompt alone: no `gh issue view`, no plan-first rule. Launch creates the
-worktree on that branch and records
+`Start Work: Session` and opens at once with those first-words names and
+`Worktree Name  | suggesting a name…` turning; when the suggestion lands the
+spinner stops and the screen names the worktree `session-caching-spike` on
+`session/caching-spike`. Its prompt is the typed prompt alone: no
+`gh issue view`, no plan-first rule. Launch creates the worktree on that
+branch and records
 `{"kind": "free_text", "description": "Try a quick spike on caching"}` as its
 `work_item` — the free-text feature's wire format, kept so older worktrees keep
 their links; nothing is created on GitHub. The second run does not jump to
-that worktree — a session is never matched by its link — but asks, because
-the name is taken: `Open existing`, `Create copy` (naming
-`session-try-a-quick-spike-on-caching-2`) and `Edit name`, exactly those
-three. Each `Escape` steps back one screen (clash → prompt → modes → closed)
-and nothing is created. What each choice does, the session naming and
-`session.md` overrides, and that a repository without a GitHub remote offers
-only `session` and `worktree`, with the rest greyed out as `(needs GitHub)`,
-are unit-tested.
+that worktree — a session is never matched by its link — but, on Launch, asks
+because the name on screen is taken: `Open existing`, `Create copy` (naming
+`session-caching-spike-2`) and `Edit name`, exactly those three. Each
+`Escape` steps back one screen (clash → prompt → modes → closed) and nothing
+is created. What each choice does, a suggestion never replacing an edited
+name or reaching a screen that was left, a failed or disabled suggestion
+keeping the first-words names, the session naming, `session.md` and
+`session-name.md` overrides, and that a repository without a GitHub remote
+offers only `session` and `worktree`, with the rest greyed out as
+`(needs GitHub)`, are unit-tested.
 **Fails if:** `session` is missing or misplaced, a list stands between it and
-the prompt, the worktree or branch is named otherwise, the prompt points at an
-issue or asks for a plan, the link is missing, or the second run opens a
-confirm screen or jumps instead of asking.
+the prompt, the confirm screen waits for the suggestion or shows no spinner,
+the suggestion never replaces the names, the worktree or branch is named
+otherwise, the prompt points at an issue or asks for a plan, the link is
+missing, or the second run launches or jumps instead of asking.
 
 ### UC-104 — Start work for a pr-review
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
@@ -1751,7 +1757,7 @@ starts answering `MERGED` for it). Click alpha's sidebar row, then beta's.
 seconds have passed since beta's last one, or the 30-second sweep — beta's
 `pr-45-retry-uploads-with-backoff` row reads `├─ ✓ pr-45-…`, dimmed, with the
 ✓ in the success colour. `feat-77-…` stays unmarked (#77 is still open), as
-does `session-try-…` (beta has no remote, so its session branch has no default
+does `session-caching-spike` (beta has no remote, so its session branch has no default
 branch to be merged into). Nothing is written to the config. The rule per link
 type, what each `gh` answer means, keeping a mark through a check that could
 not tell, and discarding results for a removed repository or another

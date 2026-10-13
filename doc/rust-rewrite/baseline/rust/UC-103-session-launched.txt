@@ -1,5 +1,4 @@
-claude stub --remote-control -n session-try-a-quick-spike-on-caching --session-id <uuid> Try a quick spike on
-caching
+claude stub --remote-control -n session-caching-spike --session-id <uuid> Try a quick spike on caching
 
 
 
@@ -41,4 +40,5 @@ caching
 
 
 
-[forestui-<rows-ov  9:feat-77-dark-mode-for-the-dashboard  10:session-try-a-quick-spike-on-caching*C-b ← forestui │ "<host>" <clock>
+
+[forestui-<coalesced-fire-rows-ov  9:feat-77-dark-mode-for-the-dashboard  10:session-caching-spike*C-b ← forestui │ "<host>" <clock>

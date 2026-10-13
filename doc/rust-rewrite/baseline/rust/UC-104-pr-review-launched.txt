@@ -41,4 +41,4 @@ at does not fit the code around it. List your findings by severity, with file an
 
 
 
-[forestui-<dashboard  10:session-try-a-quick-spike-on-caching  11:pr-45-retry-uploads-with-backoff*C-b ← forestui │ "<host>" <clock>
+[forestui-<k-mode-for-the-dashboard  10:session-caching-spike  11:pr-45-retry-uploads-with-backoff*C-b ← forestui │ "<host>" <clock>

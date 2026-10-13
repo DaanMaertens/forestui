@@ -13,6 +13,11 @@ pub const FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/feature.md");
 /// nothing else, so by default Claude gets exactly what the user wrote.
 pub const SESSION_TEMPLATE: &str = include_str!("../assets/prompts/session.md");
 
+/// The built-in `session-name` template: the name suggestion's instruction,
+/// asking for a few-word kebab-case name for the session prompt and nothing
+/// else.
+pub const SESSION_NAME_TEMPLATE: &str = include_str!("../assets/prompts/session-name.md");
+
 /// The built-in `pr-review-others` template: review someone else's PR and
 /// report, changing nothing.
 pub const PR_REVIEW_OTHERS_TEMPLATE: &str = include_str!("../assets/prompts/pr-review-others.md");
@@ -28,16 +33,19 @@ pub enum Template {
     Issue,
     Feature,
     Session,
+    /// Not a first prompt: what the name suggestion sends to Claude.
+    SessionName,
     PrReviewOthers,
     PrReviewOwn,
 }
 
 impl Template {
     /// Every template, in the order the Settings picker lists them.
-    pub const ALL: [Template; 5] = [
+    pub const ALL: [Template; 6] = [
         Template::Issue,
         Template::Feature,
         Template::Session,
+        Template::SessionName,
         Template::PrReviewOthers,
         Template::PrReviewOwn,
     ];
@@ -48,6 +56,7 @@ impl Template {
             Template::Issue => "issue.md",
             Template::Feature => "feature.md",
             Template::Session => "session.md",
+            Template::SessionName => "session-name.md",
             Template::PrReviewOthers => "pr-review-others.md",
             Template::PrReviewOwn => "pr-review-own.md",
         }
@@ -59,6 +68,7 @@ impl Template {
             Template::Issue => "Issue",
             Template::Feature => "Feature",
             Template::Session => "Session",
+            Template::SessionName => "Session name suggestion",
             Template::PrReviewOthers => "Review someone else's PR",
             Template::PrReviewOwn => "Review my own PR",
         }
@@ -69,6 +79,7 @@ impl Template {
             Template::Issue => ISSUE_TEMPLATE,
             Template::Feature => FEATURE_TEMPLATE,
             Template::Session => SESSION_TEMPLATE,
+            Template::SessionName => SESSION_NAME_TEMPLATE,
             Template::PrReviewOthers => PR_REVIEW_OTHERS_TEMPLATE,
             Template::PrReviewOwn => PR_REVIEW_OWN_TEMPLATE,
         }

@@ -45,12 +45,14 @@ PASS UC-101    switched-to-claude-window                      expected=yes      
 PASS UC-101    nothing-created                                expected=4                            actual=4
 PASS UC-101    worktree-selected                              expected=yes                          actual=yes
 PASS UC-103    session-listed                                 expected=yes                          actual=yes
+PASS UC-103    first-words-while-suggesting                   expected=yes                          actual=yes
+PASS UC-103    suggestion-stopped-spinning                    expected=no                           actual=no
 PASS UC-103    titled-as-session                              expected=yes                          actual=yes
 PASS UC-103    prompt-carries-the-prompt                      expected=yes                          actual=yes
 PASS UC-103    prompt-reads-no-issue                          expected=no                           actual=no
 PASS UC-103    prompt-asks-for-no-plan                        expected=no                           actual=no
 PASS UC-103    worktree-created                               expected=yes                          actual=yes
-PASS UC-103    branch-checked-out                             expected=session/try-a-quick-spike-on-caching actual=session/try-a-quick-spike-on-caching
+PASS UC-103    branch-checked-out                             expected=session/caching-spike        actual=session/caching-spike
 PASS UC-103    work-item-linked                               expected={'kind': 'free_text', 'description': 'Try a quick spike on caching'} actual={'kind': 'free_text', 'description': 'Try a quick spike on caching'}
 PASS UC-103    clash-offers-three-choices                     expected=yes                          actual=yes
 PASS UC-103    clash-names-the-copy                           expected=yes                          actual=yes

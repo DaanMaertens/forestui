@@ -17,10 +17,10 @@
                               │   Start Work: Session                                                        │
                               │                                                                              │
                               │  in beta                                                                     │
-                              │  A worktree named 'session-try-a-quick-spike-on-caching' already exists.     │
+                              │  A worktree named 'session-caching-spike' already exists.                    │
                               │                                                                              │
-                              │  Open it, create session-try-a-quick-spike-on-caching-2 instead,             │
-                              │  or go back and edit the prompt.                                             │
+                              │  Open it, create session-caching-spike-2 instead,                            │
+                              │  or go back and edit the name.                                               │
                               │               ┌───────────────┐ ┌─────────────┐ ┌───────────┐                │
                               │               │ Open existing │ │ Create copy │ │ Edit name │                │
                               │               └───────────────┘ └─────────────┘ └───────────┘                │

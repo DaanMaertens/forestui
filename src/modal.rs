@@ -72,9 +72,13 @@ pub enum ModalEffect {
     /// open the confirm screen for it on top of the picker.
     ConfirmPullRequest(Box<WorkItem>),
     /// Start work was given a session prompt: open the confirm screen for
-    /// it — asking first if its names are taken, unless this is the answer
-    /// to that question (`copy`), which takes the next free suffix instead.
-    ConfirmSession { prompt: String, copy: bool },
+    /// it.
+    ConfirmSession { prompt: String },
+    /// Launch on a session's confirm screen. Its names were typed or
+    /// suggested rather than derived from a work item, so they may be
+    /// taken: the App checks them against the repository first and asks the
+    /// clash question if they are.
+    LaunchSession,
     /// The clash question's "open existing": go to that worktree.
     OpenWorktree(Uuid),
     /// Open the confirm screen's prompt in an editor; the text comes back as
@@ -386,7 +390,7 @@ impl Modal {
     /// moved, so the caller knows the frame needs repainting.
     pub fn tick(&mut self) -> bool {
         if let Modal::StartWorkConfirm(m) = self
-            && m.is_fetching
+            && (m.is_fetching || m.name_request.is_some())
         {
             m.spinner_index = (m.spinner_index + 1) % SPINNER.len();
             return true;
@@ -785,8 +789,8 @@ pub enum StartWorkStep {
 pub struct Clash {
     pub worktree_id: Uuid,
     pub worktree_name: String,
-    /// The worktree name a copy would take, so the dialog can say what it makes.
-    pub copy_name: String,
+    /// The names a copy would take, so the dialog can say what it makes.
+    pub copy: WorktreeNames,
 }
 
 /// Start work's steps before the confirm screen: choose a work mode, then a
@@ -820,6 +824,9 @@ pub struct StartWorkModal {
     pub prompt: TextInput,
     /// Set on the clash step.
     pub clash: Option<Clash>,
+    /// The confirm screen whose Launch the clash step is asking about, put
+    /// back as it was left for "Create copy" and "Edit name".
+    parked: Option<Box<StartWorkConfirmModal>>,
     /// The `worktree` mode's form, once its branches have loaded. Kept
     /// across Back, like the session prompt.
     pub worktree: Option<Box<WorktreeForm>>,
@@ -892,6 +899,7 @@ impl StartWorkModal {
             picker: None,
             prompt: TextInput::new("").with_placeholder("What should Claude do?"),
             clash: None,
+            parked: None,
             worktree: None,
             linked: repo
                 .worktrees
@@ -951,9 +959,13 @@ impl StartWorkModal {
         self.fill_picker();
     }
 
-    /// Ask what to do about a taken slug.
-    pub fn ask_clash(&mut self, clash: Clash) {
+    /// Ask what to do about the taken names `confirm` was launched with.
+    /// Launching accepted those names, so a suggestion still on its way
+    /// must not change them behind the question.
+    pub fn ask_clash(&mut self, clash: Clash, mut confirm: Box<StartWorkConfirmModal>) {
+        confirm.name_request = None;
         self.clash = Some(clash);
+        self.parked = Some(confirm);
         self.go_to(StartWorkStep::Clash);
         self.focus = Self::FOCUS_OPEN;
     }
@@ -1353,10 +1365,7 @@ impl StartWorkModal {
                         if work::session_names(&self.start_work, &prompt).is_none() {
                             return ModalOutcome::None;
                         }
-                        return ModalOutcome::Effect(ModalEffect::ConfirmSession {
-                            prompt,
-                            copy: false,
-                        });
+                        return ModalOutcome::Effect(ModalEffect::ConfirmSession { prompt });
                     }
                 }
                 StartWorkStep::Clash | StartWorkStep::Worktree => {}
@@ -1383,23 +1392,35 @@ impl StartWorkModal {
             {
                 self.toggle_scope()
             }
-            (Self::FOCUS_BACK, KeyCode::Enter) | (Self::FOCUS_EDIT, KeyCode::Enter) => {
+            (Self::FOCUS_BACK, KeyCode::Enter) => {
                 self.go_back();
                 ModalOutcome::None
             }
+            (Self::FOCUS_EDIT, KeyCode::Enter) => self.resume_confirm(false),
             (Self::FOCUS_CANCEL, KeyCode::Enter) => ModalOutcome::Close,
             (Self::FOCUS_OPEN, KeyCode::Enter) => match &self.clash {
                 Some(clash) => ModalOutcome::Effect(ModalEffect::OpenWorktree(clash.worktree_id)),
                 None => ModalOutcome::None,
             },
-            (Self::FOCUS_COPY, KeyCode::Enter) => {
-                ModalOutcome::Effect(ModalEffect::ConfirmSession {
-                    prompt: self.typed_prompt(),
-                    copy: true,
-                })
-            }
+            (Self::FOCUS_COPY, KeyCode::Enter) => self.resume_confirm(true),
             _ => ModalOutcome::None,
         }
+    }
+
+    /// Answer the clash question by putting the confirm screen back up, on
+    /// its name field: under the copy's names for "Create copy", as it was
+    /// left for "Edit name". Leaving it again comes back to the prompt.
+    fn resume_confirm(&mut self, copy: bool) -> ModalOutcome {
+        let (Some(clash), Some(mut confirm)) = (self.clash.take(), self.parked.take()) else {
+            self.go_back();
+            return ModalOutcome::None;
+        };
+        if copy {
+            confirm.rename(&clash.copy);
+        }
+        confirm.focus = StartWorkConfirmModal::FOCUS_NAME;
+        self.go_to(StartWorkStep::Prompt);
+        ModalOutcome::Push(Box::new(Modal::StartWorkConfirm(confirm)))
     }
 
     /// One step back: the clash question back to the session prompt it was
@@ -1413,6 +1434,7 @@ impl StartWorkModal {
             StartWorkStep::Clash => StartWorkStep::Prompt,
         };
         self.clash = None;
+        self.parked = None;
         self.go_to(previous);
     }
 }
@@ -1448,6 +1470,13 @@ pub struct StartWorkConfirmModal {
     pub is_editing: bool,
     pub is_fetching: bool,
     pub spinner_index: usize,
+    /// The name suggestion this screen is waiting on, if any; its spinner
+    /// turns until the answer — or a launch — arrives.
+    pub name_request: Option<Uuid>,
+    /// Whether the user has changed either name field. Once they have, the
+    /// names are theirs and a suggestion never replaces them — even if the
+    /// edit was typed back to what it was.
+    names_edited: bool,
     /// One of the `FOCUS_*` constants; see [`StartWorkConfirmModal`].
     pub focus: usize,
 }
@@ -1532,7 +1561,38 @@ impl StartWorkConfirmModal {
             is_editing: false,
             is_fetching: false,
             spinner_index: 0,
+            name_request: None,
+            names_edited: false,
             focus: Self::FOCUS_NAME,
+        }
+    }
+
+    /// The names as the fields hold them now: what Launch would create.
+    pub fn names(&self) -> WorktreeNames {
+        WorktreeNames {
+            worktree: self.name.value().to_string(),
+            branch: self.branch.value().to_string(),
+        }
+    }
+
+    pub fn rename(&mut self, names: &WorktreeNames) {
+        self.name.set_value(names.worktree.clone());
+        self.branch.set_value(names.branch.clone());
+    }
+
+    /// Take the answer to name suggestion `request`, if it is the one this
+    /// screen is waiting on. The suggested `names` replace both fields only
+    /// while neither has been edited: a name the user typed is never
+    /// overwritten.
+    pub fn suggestion_arrived(&mut self, request: Uuid, names: Option<WorktreeNames>) {
+        if self.name_request != Some(request) {
+            return;
+        }
+        self.name_request = None;
+        if let Some(names) = names
+            && !self.names_edited
+        {
+            self.rename(&names);
         }
     }
 
@@ -1643,10 +1703,18 @@ impl StartWorkConfirmModal {
             Self::FOCUS_BASE => Some(&mut self.base_branch),
             _ => None,
         };
-        if let Some(input) = editable
-            && edit_input(input, key)
-        {
-            return ModalOutcome::None;
+        if let Some(input) = editable {
+            let before = input.value().to_string();
+            if edit_input(input, key) {
+                // Cursor moves are not edits; a changed value is.
+                let now = match self.focus {
+                    Self::FOCUS_NAME => self.name.value(),
+                    Self::FOCUS_BRANCH => self.branch.value(),
+                    _ => before.as_str(),
+                };
+                self.names_edited |= now != before;
+                return ModalOutcome::None;
+            }
         }
 
         if self.focus == Self::FOCUS_BASE
@@ -1694,22 +1762,31 @@ impl StartWorkConfirmModal {
                 if !self.can_launch() {
                     return ModalOutcome::None;
                 }
-                // A review branches from nothing: `gh pr checkout` fetches
-                // the PR's head itself.
-                let base = self.base_branch.value().to_string();
-                let review = self.is_review();
-                ModalOutcome::Submit(ModalResult::WorktreeForWorkItem {
-                    repo_id: self.repo_id,
-                    link: self.item.link(),
-                    name: self.name.value().to_string(),
-                    branch: self.branch.value().to_string(),
-                    pull_first: self.pull_first && !review,
-                    base_branch: (!base.is_empty() && !review).then_some(base),
-                    first_prompt: self.prompt(),
-                    yolo: self.yolo,
-                })
+                if matches!(self.item, WorkItem::Session { .. }) {
+                    return ModalOutcome::Effect(ModalEffect::LaunchSession);
+                }
+                ModalOutcome::Submit(self.launch())
             }
             _ => ModalOutcome::None,
+        }
+    }
+
+    /// What Launch creates, as the screen stands.
+    pub fn launch(&self) -> ModalResult {
+        // A review branches from nothing: `gh pr checkout` fetches the PR's
+        // head itself.
+        let base = self.base_branch.value().to_string();
+        let review = self.is_review();
+        let names = self.names();
+        ModalResult::WorktreeForWorkItem {
+            repo_id: self.repo_id,
+            link: self.item.link(),
+            name: names.worktree,
+            branch: names.branch,
+            pull_first: self.pull_first && !review,
+            base_branch: (!base.is_empty() && !review).then_some(base),
+            first_prompt: self.prompt(),
+            yolo: self.yolo,
         }
     }
 }

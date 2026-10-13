@@ -322,6 +322,14 @@ work in three steps:
    open one for this pick. The `session` mode has no list: you type a
    **session prompt** instead, for a Claude session that is not about an
    issue or a PR. It stays local and never creates a GitHub issue.
+   The confirm screen opens straight away with names made from the prompt's
+   first words, while a headless Claude (`claude -p`, Haiku by default)
+   reads the whole prompt in the background and suggests a better name. The
+   suggestion replaces both names when it arrives, unless you have edited
+   either one already; a failed or slow call just leaves the first-words
+   names. You can launch at any time. If the names on screen are taken when
+   you launch, forestui asks whether to open the existing worktree, create a
+   copy, or edit the name.
 3. **Confirm** the worktree name, branch, base branch (with **Pull repo
    before creating**) and the filled-in prompt. **Edit prompt** opens the
    prompt in `$EDITOR` for this launch only, and **YOLO** skips permission
@@ -369,7 +377,9 @@ Each prompt comes from a Markdown template, with `{number}`, `{title}`,
 alone, so by default Claude gets exactly what you typed. Issue and PR prompts
 tell Claude to read the item with `gh` instead, so it sees the current text
 and comments. The templates are `issue.md`, `feature.md`, `session.md`,
-`pr-review-others.md` and `pr-review-own.md`. Each one that has no file yet
+`session-name.md`, `pr-review-others.md` and `pr-review-own.md`.
+`session-name.md` is not a first prompt: it is the instruction the name
+suggestion sends, with the session prompt as `{body}`. Each one that has no file yet
 uses the built-in default. Settings → **Edit Prompt Templates...** lists them;
 picking one opens it in your editor under `~/.config/forestui/prompts/`,
 writing the default first.
@@ -448,7 +458,13 @@ Settings are stored in `~/.config/forestui/settings.json`:
       "name_pattern": "session-{slug}",
       "branch_pattern": "{slug}"
     },
-    "pr_review": { "name_pattern": "pr-{number}-{slug}" }
+    "pr_review": { "name_pattern": "pr-{number}-{slug}" },
+    "session_naming": {
+      "enabled": true,
+      "model": "haiku",
+      "timeout_secs": 20,
+      "allowed_tools": []
+    }
   }
 }
 ```
@@ -476,6 +492,11 @@ Press `S` in the app to open the settings modal.
   default `branch_pattern`, and a `branch_pattern` that fills to nothing
   falls back to the worktree name. A `pr-review` worktree checks out the
   PR's own branch, so it has neither a prefix nor a `branch_pattern`.
+- `session_naming` — the name suggestion for sessions (see below):
+  `enabled`, the `model` it runs (an alias such as `haiku` or a full model
+  name), `timeout_secs` before the first-words names are kept, and
+  `allowed_tools`, the Claude Code tools it may use (none by default, so it
+  reads only your prompt).
 
 Every key is optional; a missing one keeps the default shown above.
 

@@ -11,12 +11,12 @@
                               │  Try a quick spike on caching                                                │
                               │  Worktree Name                                                               │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │
-                              │  │session-try-a-quick-spike-on-caching                                    │  │
+                              │  │session-caching-spike                                                   │  │
                               │  └────────────────────────────────────────────────────────────────────────┘  │
-                              │  Path: <ROOT>/forest/beta/session-try-a-quick-spike-on-cachi  │
+                              │  Path: <ROOT>/forest/beta/session-caching-spike               │
                               │  Branch Name                                                                 │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │
-                              │  │session/try-a-quick-spike-on-caching                                    │  │
+                              │  │session/caching-spike                                                   │  │
                               │  └────────────────────────────────────────────────────────────────────────┘  │
                               │  Base Branch                                                                 │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │

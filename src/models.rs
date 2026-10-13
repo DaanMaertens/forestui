@@ -501,6 +501,21 @@ pub struct PrReviewNaming {
     pub name_pattern: String,
 }
 
+/// The name suggestion: a headless Claude that reads a session prompt and
+/// proposes the worktree and branch name for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SessionNaming {
+    /// Off means no call is made: a session keeps its first-words names.
+    pub enabled: bool,
+    /// Claude's `--model`, an alias or a full model name.
+    pub model: String,
+    /// How long the call may run before the first-words names are final.
+    pub timeout_secs: u64,
+    /// The built-in tools the call may use. None by default, so it can read
+    /// only the prompt it is given.
+    pub allowed_tools: Vec<String>,
+}
+
 /// Start work's global settings. Every field is defaulted to the behaviour
 /// that shipped before it was a setting, so a file without them changes
 /// nothing.
@@ -524,6 +539,7 @@ pub struct StartWorkSettings {
     pub feature: Naming,
     pub session: Naming,
     pub pr_review: PrReviewNaming,
+    pub session_naming: SessionNaming,
 }
 
 impl Default for StartWorkSettings {
@@ -538,6 +554,12 @@ impl Default for StartWorkSettings {
             session: Naming::new("session/", "session-{slug}", "{slug}"),
             pr_review: PrReviewNaming {
                 name_pattern: "pr-{number}-{slug}".into(),
+            },
+            session_naming: SessionNaming {
+                enabled: true,
+                model: "haiku".into(),
+                timeout_secs: 20,
+                allowed_tools: Vec::new(),
             },
         }
     }
@@ -570,6 +592,7 @@ impl StartWorkSettings {
                     .clone()
                     .unwrap_or_else(|| self.pr_review.name_pattern.clone()),
             },
+            session_naming: self.session_naming.overlaid(&partial.session_naming),
         }
     }
 }
@@ -585,6 +608,7 @@ pub struct PartialStartWork {
     pub feature: PartialNaming,
     pub session: PartialNaming,
     pub pr_review: PartialPrReviewNaming,
+    pub session_naming: PartialSessionNaming,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -599,6 +623,29 @@ pub struct PartialNaming {
 #[serde(default)]
 pub struct PartialPrReviewNaming {
     pub name_pattern: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct PartialSessionNaming {
+    pub enabled: Option<bool>,
+    pub model: Option<String>,
+    pub timeout_secs: Option<u64>,
+    pub allowed_tools: Option<Vec<String>>,
+}
+
+impl SessionNaming {
+    fn overlaid(&self, partial: &PartialSessionNaming) -> Self {
+        Self {
+            enabled: partial.enabled.unwrap_or(self.enabled),
+            model: partial.model.clone().unwrap_or_else(|| self.model.clone()),
+            timeout_secs: partial.timeout_secs.unwrap_or(self.timeout_secs),
+            allowed_tools: partial
+                .allowed_tools
+                .clone()
+                .unwrap_or_else(|| self.allowed_tools.clone()),
+        }
+    }
 }
 
 impl From<PartialStartWork> for StartWorkSettings {
