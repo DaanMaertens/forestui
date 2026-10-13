@@ -246,6 +246,19 @@ pub fn finished_badge() -> Style {
     Style::default().fg(active().success)
 }
 
+/// What a live Claude session is doing, on its card's badge and its
+/// worktree's sidebar row. Needs you borrows the warning amber — it is the
+/// one that asks for attention; idle is the calm green of something done.
+pub fn session_state(state: crate::services::live::SessionState) -> Style {
+    use crate::services::live::SessionState;
+    let theme = active();
+    Style::default().fg(match state {
+        SessionState::NeedsYou => theme.warning,
+        SessionState::Busy => theme.accent,
+        SessionState::Idle => theme.success,
+    })
+}
+
 pub fn destructive() -> Style {
     Style::default().fg(active().destructive)
 }

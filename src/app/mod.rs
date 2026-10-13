@@ -39,6 +39,11 @@ pub const WORKTREE_SCAN_INTERVAL: Duration = Duration::from_secs(30);
 /// and affordable because an unchanged transcript is never re-parsed. The
 /// per-card refresh does *not* run on this timer — see `App::on_tick`.
 pub const SESSION_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+/// How often the live sessions' states are re-read. A session that starts
+/// waiting on the user should say so about as soon as it does; the read is a
+/// handful of small files and no subprocess, so a second is affordable where
+/// the full live scan (tmux, `ps`) keeps the slower cadence above.
+pub const STATE_READ_INTERVAL: Duration = Duration::from_secs(1);
 pub const SESSION_LIMIT: usize = 5;
 pub const ISSUE_LIMIT: usize = 10;
 /// Lines the detail pane moves per wheel notch, matching Textual's
@@ -83,12 +88,15 @@ pub enum SidebarRow {
         name: String,
         /// The branch, when it says something the name does not. A worktree
         /// created here is `<branch_prefix><name>`, so printing that beside the
-        /// name is pure repetition — and in a 35-column sidebar the repetition
+        /// name is pure repetition — and in a 40-column sidebar the repetition
         /// is what gets truncated, leaving every row ending in `[feat/doc-impro`.
         branch: Option<String>,
         is_last: bool,
         /// Its work item is done; see [`finished`].
         finished: bool,
+        /// The live Claude sessions in its windows, rolled up; see
+        /// [`crate::services::live::activity`].
+        activity: Option<crate::services::live::Activity>,
     },
     ArchivedHeader,
     ArchivedWorktree {
@@ -173,6 +181,10 @@ pub struct App {
     pub live_sessions: std::collections::HashMap<String, crate::services::live::LiveSession>,
     /// One live scan at a time — it shells out to tmux once per sweep.
     live_scan_in_flight: bool,
+    /// When the last state read started; see [`STATE_READ_INTERVAL`].
+    last_state_read: Instant,
+    /// One state read at a time, so a slow disk cannot stack them up.
+    state_read_in_flight: bool,
     /// Quit was requested while removals were in flight; honoured when the
     /// last one folds. A second request quits immediately.
     pub quit_pending: bool,
@@ -301,6 +313,8 @@ impl App {
             sessions_refreshing: std::collections::HashSet::new(),
             live_sessions: std::collections::HashMap::new(),
             live_scan_in_flight: false,
+            last_state_read: Instant::now(),
+            state_read_in_flight: false,
             quit_pending: false,
             hits: Vec::new(),
             hovered: None,
@@ -481,6 +495,36 @@ impl App {
                 .await
                 .unwrap_or_default();
             tx.send(AppEvent::LiveSessions { sessions });
+        });
+    }
+
+    /// Re-read what each live session is doing, off the loop. Only the
+    /// sessions the last live scan found: which sessions are live is that
+    /// scan's question, and this read does not answer it.
+    fn read_session_states(&mut self) {
+        if self.state_read_in_flight || self.live_sessions.is_empty() {
+            return;
+        }
+        self.state_read_in_flight = true;
+        let ids: Vec<String> = self.live_sessions.keys().cloned().collect();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let found = tokio::task::spawn_blocking({
+                let ids = ids.clone();
+                move || crate::services::live::read_states(&ids)
+            })
+            .await
+            .unwrap_or_default();
+            // Every asked id gets an answer, `None` included: a state that
+            // vanished from the file is unknown now, not still what it was.
+            let states = ids
+                .into_iter()
+                .map(|id| {
+                    let state = found.get(&id).copied();
+                    (id, state)
+                })
+                .collect();
+            tx.send(AppEvent::SessionStates { states });
         });
     }
 
@@ -711,6 +755,10 @@ impl App {
                     ),
                     is_last: index == last_index,
                     finished: self.finished.contains(worktree.id),
+                    activity: crate::services::live::activity(
+                        self.live_sessions.values(),
+                        std::path::Path::new(&worktree.path),
+                    ),
                 });
             }
         }
@@ -1029,6 +1077,13 @@ impl App {
             self.redraw = true;
         }
 
+        if self.last_state_read.elapsed() >= STATE_READ_INTERVAL && !self.live_sessions.is_empty() {
+            self.last_state_read = Instant::now();
+            // No repaint here either: the fold claims one only when a state
+            // on screen actually changed.
+            self.read_session_states();
+        }
+
         if self.last_worktree_scan.elapsed() >= WORKTREE_SCAN_INTERVAL {
             self.last_worktree_scan = Instant::now();
             // No repaint here: a sweep that changes nothing stays invisible,
@@ -1090,6 +1145,7 @@ impl App {
                     | AppEvent::WorktreesFinished { .. }
                     | AppEvent::Sessions { .. }
                     | AppEvent::LiveSessions { .. }
+                    | AppEvent::SessionStates { .. }
             )
         {
             self.redraw = true;
@@ -1169,12 +1225,34 @@ impl App {
                 // and usually finds exactly the map it replaced.
                 if fresh != self.live_sessions {
                     self.live_sessions = fresh;
+                    // The worktree rows roll the sessions up.
+                    self.rebuild_rows();
                     self.redraw = true;
                 }
                 if let Some(jump) = self.pending_jump.as_mut() {
                     jump.live = true;
                 }
                 self.finish_jump();
+            }
+            AppEvent::SessionStates { states } => {
+                self.state_read_in_flight = false;
+                // Only sessions still in the live map: a read that started
+                // before a scan dropped a session must not bring it back.
+                let mut changed = false;
+                for (id, state) in states {
+                    if let Some(session) = self.live_sessions.get_mut(&id)
+                        && session.state != state
+                    {
+                        session.state = state;
+                        changed = true;
+                    }
+                }
+                // Once a second, and almost always nothing moved — so the
+                // repaint is earned by a change, never by the read itself.
+                if changed {
+                    self.rebuild_rows();
+                    self.redraw = true;
+                }
             }
             AppEvent::SessionDeleted {
                 path,

@@ -162,3 +162,36 @@ fn the_hook_script_is_installed_executable() {
         assert_eq!(mode & 0o111, 0o111, "{rel}: owner/group/other execute");
     }
 }
+
+/// Every script `hooks.json` registers has to be shipped and executable —
+/// a hook pointing at a file the install never wrote fails silently inside
+/// Claude, which reads exactly like the feature not working.
+#[test]
+fn every_registered_hook_script_is_shipped_and_executable() {
+    let hooks: serde_json::Value =
+        serde_json::from_str(include_str!("../../../assets/claude-plugin/hooks.json")).unwrap();
+    let mut scripts: Vec<String> = Vec::new();
+    for groups in hooks["hooks"].as_object().unwrap().values() {
+        for group in groups.as_array().unwrap() {
+            for hook in group["hooks"].as_array().unwrap() {
+                let command = hook["command"].as_str().unwrap();
+                let script = command
+                    .strip_prefix("${CLAUDE_PLUGIN_ROOT}/")
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .unwrap_or_else(|| panic!("unexpected hook command {command:?}"));
+                scripts.push(script.to_string());
+            }
+        }
+    }
+    assert!(scripts.iter().any(|s| s == "hooks/state.sh"));
+    for script in scripts {
+        assert!(
+            asset_names().contains(&script.as_str()),
+            "{script} is not shipped"
+        );
+        assert!(
+            EXECUTABLES.contains(&script.as_str()),
+            "{script} is not executable"
+        );
+    }
+}

@@ -240,19 +240,29 @@ fn row_line(row: &SidebarRow) -> Line<'static> {
             branch,
             is_last,
             finished,
+            activity,
             ..
         } => {
             let connector = if *is_last { "└─" } else { "├─" };
-            // The badge leads the name: a long name is clipped at the divider,
-            // and a trailing ✓ would be the first thing to go.
-            let (name_style, branch_style) = if *finished {
-                (theme::finished(), theme::finished())
-            } else {
-                (theme::primary(), theme::accent())
+            // The badges lead the name: a long name is clipped at the
+            // divider, and a trailing ✓ or count would be the first to go.
+            // A finished worktree keeps its dimmed name whatever runs in it —
+            // the count still says, in colour, that something does.
+            let state_style = activity.map(|activity| theme::session_state(activity.state));
+            let (name_style, branch_style) = match (*finished, state_style) {
+                (true, _) => (theme::finished(), theme::finished()),
+                (false, Some(style)) => (style, theme::accent()),
+                (false, None) => (theme::primary(), theme::accent()),
             };
             let mut spans = vec![Span::styled(format!("{connector} "), theme::primary())];
             if *finished {
                 spans.push(Span::styled("✓ ", theme::finished_badge()));
+            }
+            // One session is said by the colour alone; a count from two.
+            if let (Some(activity), Some(style)) = (activity, state_style)
+                && activity.count >= 2
+            {
+                spans.push(Span::styled(format!("{{{}}} ", activity.count), style));
             }
             spans.push(Span::styled(name.clone(), name_style));
             if let Some(branch) = branch {

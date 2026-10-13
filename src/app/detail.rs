@@ -513,6 +513,13 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
                     title_line.push(("● live elsewhere".to_string(), theme::accent()));
                 }
             }
+            // What it is doing, when the plugin has said. No state — a
+            // plugin older than the state hooks — leaves the badge as it was
+            // rather than guessing one.
+            if let Some(state) = live.state {
+                title_line.push((" · ".to_string(), theme::accent()));
+                title_line.push((state.label().to_string(), theme::session_state(state)));
+            }
         }
         left.push(title_line);
         // The name is what you scan the list for, so it gets the whitespace —

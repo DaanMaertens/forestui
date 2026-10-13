@@ -19,6 +19,7 @@ mod prune;
 mod repaint;
 mod repository_settings;
 mod session_mode;
+mod session_states;
 mod sessions;
 mod start_work;
 mod start_work_scope;
@@ -60,6 +61,8 @@ fn a_live_window(session_id: &str) -> crate::services::live::LiveSession {
             window_id: "@7".into(),
             window_name: "claude:demo:wt".into(),
         },
+        state: None,
+        cwd: None,
     }
 }
 
@@ -67,6 +70,8 @@ fn a_live_elsewhere(session_id: &str, pid: u32) -> crate::services::live::LiveSe
     crate::services::live::LiveSession {
         session_id: session_id.into(),
         place: crate::services::live::LivePlace::Elsewhere { pid },
+        state: None,
+        cwd: None,
     }
 }
 

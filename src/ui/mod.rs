@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-pub const SIDEBAR_WIDTH: u16 = 35;
+pub const SIDEBAR_WIDTH: u16 = 40;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();

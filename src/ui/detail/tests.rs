@@ -263,6 +263,8 @@ async fn session_cards_show_liveness_pins_and_spend() {
                 window_id: "@9".into(),
                 window_name: "claude:demo:wt".into(),
             },
+            state: None,
+            cwd: None,
         },
     );
     let screen = render(&mut app);
@@ -329,6 +331,76 @@ async fn session_cards_show_liveness_pins_and_spend() {
         app.drawn_items.get(del).map(|(_, enabled)| *enabled),
         Some(true)
     );
+}
+
+/// The live badge says what the session is doing, the word in its state's
+/// colour, after the place — and a session with no known state keeps the
+/// badge it always had.
+#[tokio::test]
+async fn the_live_badge_carries_the_session_state() {
+    use crate::services::live::{LivePlace, LiveSession, SessionState};
+    let _theme = crate::theme::test_lock();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = test_app(&dir);
+    with_worktree(&mut app);
+    app.sessions = Some(vec![a_session()]);
+
+    let places = [
+        (
+            LivePlace::Window {
+                window_id: "@9".into(),
+                window_name: "Refactor the detail pane".into(),
+            },
+            "● live",
+        ),
+        (
+            LivePlace::Window {
+                window_id: "@9".into(),
+                window_name: "claude:demo:wt".into(),
+            },
+            "● live in claude:demo:wt",
+        ),
+        (LivePlace::Elsewhere { pid: 7 }, "● live elsewhere"),
+    ];
+    for (place, badge) in places {
+        for state in [
+            SessionState::Busy,
+            SessionState::NeedsYou,
+            SessionState::Idle,
+        ] {
+            app.live_sessions.insert(
+                "abc".into(),
+                LiveSession {
+                    session_id: "abc".into(),
+                    place: place.clone(),
+                    state: Some(state),
+                    cwd: None,
+                },
+            );
+            let buffer = render_buffer(&mut app, 100, TALL);
+            let screen = buffer_text(&buffer);
+            let expected = format!("{badge} · {}", state.label());
+            assert!(screen.contains(&expected), "{expected:?}:\n{screen}");
+            let (x, y) = find_cell(&buffer, &format!("· {}", state.label()));
+            assert_eq!(
+                buffer[(x + 2, y)].fg,
+                crate::theme::session_state(state).fg.unwrap(),
+                "{state:?} is not in its colour"
+            );
+        }
+
+        app.live_sessions.get_mut("abc").unwrap().state = None;
+        let screen = render(&mut app);
+        let line = screen
+            .lines()
+            .find(|line| line.contains("● live"))
+            .expect("a badge");
+        assert!(line.contains(badge), "{line}");
+        assert!(
+            !line.contains(&format!("{badge} ·")),
+            "an unknown state adds nothing: {line}"
+        );
+    }
 }
 
 /// Turns routinely carry emoji, which occupy two columns each. Clipped by
