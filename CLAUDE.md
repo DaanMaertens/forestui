@@ -264,6 +264,15 @@ fast switching between editor, app, and Claude windows.
 The re-exec uses `std::env::current_exe()`, so a `cargo run` build re-launches
 itself rather than whatever `forestui` happens to be on `PATH`.
 
+A quit (`q`, Ctrl-C, or a crash report once Enter is pressed) detaches the
+terminal that quit, so it lands back in the shell forestui started from while
+the Claude windows keep running for the next start to attach to. Only from a
+forest session (`cli::is_forest_session`: the base session or a `<base>-<pid>`
+grouped one) — forestui started inside a session the user made leaves that
+terminal attached. tmux does not say which client sent a key, so the most
+recently active client in the forest is the one detached. A panic does not
+detach.
+
 ### The Claude integration: names follow tabs, liveness follows sessions
 
 A tmux window forestui opened and the Claude session running in it carry the

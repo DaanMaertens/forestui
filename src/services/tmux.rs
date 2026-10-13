@@ -160,6 +160,56 @@ fn most_active_in_group(clients: &str, group: &str, own: &str) -> String {
     best
 }
 
+/// Detach the terminal that quit forestui, so it lands back in the shell
+/// forestui was started from while the Claude windows keep running.
+///
+/// Only from a forest session (`is_forest` says which those are): forestui started
+/// inside a session the user made leaves that terminal where it is. tmux does
+/// not say which client sent a key, but the key that quit made its client the
+/// most recently active one, so that is the one detached — other terminals on
+/// the same forest stay attached. Every failure is silent: a quit that could
+/// not detach is still a clean quit.
+pub fn detach_quitting_client(is_forest: impl Fn(&str) -> bool) {
+    if !is_inside_tmux() {
+        return;
+    }
+    let Ok(pane) = std::env::var("TMUX_PANE") else {
+        return;
+    };
+    let Some(own) = tmux(&["display-message", "-p", "-t", &pane, "#{session_name}"]) else {
+        return;
+    };
+    if !is_forest(own.trim()) {
+        return;
+    }
+    let clients = tmux(&[
+        "list-clients",
+        "-F",
+        "#{client_activity}\t#{client_name}\t#{session_name}",
+    ])
+    .unwrap_or_default();
+    if let Some(client) = client_to_detach(&clients, &is_forest) {
+        let _ = tmux(&["detach-client", "-t", &client]);
+    }
+}
+
+/// Of the clients attached to a forest session, the name of the most
+/// recently active one. Lines are `activity<TAB>client<TAB>session`; tabs,
+/// because a session name may hold spaces. Pure, for testing.
+fn client_to_detach(clients: &str, is_forest: impl Fn(&str) -> bool) -> Option<String> {
+    clients
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let activity = parts.next()?.trim().parse::<i64>().ok()?;
+            let client = parts.next()?;
+            let session = parts.next()?;
+            is_forest(session).then_some((activity, client))
+        })
+        .max_by_key(|(activity, _)| *activity)
+        .map(|(_, client)| client.to_string())
+}
+
 /// The tmux server this process runs on, as [`server_of`] spells it.
 pub fn current_server() -> Option<String> {
     let env = std::env::var("TMUX").ok()?;

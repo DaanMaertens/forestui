@@ -140,3 +140,25 @@ fn prune_parses_with_and_without_a_forest() {
     assert_eq!(args.command, None);
     assert_eq!(args.forest_path.as_deref(), Some("/tmp/work"));
 }
+
+/// A quit detaches only from the sessions `ensure_tmux` makes: the base
+/// session and the `<base>-<pid>` session it groups with it per terminal.
+#[test]
+fn forest_sessions_are_the_base_and_its_grouped_sessions() {
+    assert!(is_forest_session("forestui-work", "forestui-work"));
+    assert!(is_forest_session(
+        &grouped_session_name("forestui-work", 48213),
+        "forestui-work"
+    ));
+}
+
+/// A session the user made keeps its terminal attached, even one whose name
+/// merely starts with the forest's.
+#[test]
+fn other_sessions_are_not_forest_sessions() {
+    assert!(!is_forest_session("main", "forestui-work"));
+    assert!(!is_forest_session("forestui-work-", "forestui-work"));
+    assert!(!is_forest_session("forestui-work-notes", "forestui-work"));
+    assert!(!is_forest_session("forestui-workshop", "forestui-work"));
+    assert!(!is_forest_session("forestui-other", "forestui-work"));
+}

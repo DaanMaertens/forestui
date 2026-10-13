@@ -55,7 +55,15 @@ fn main() -> anyhow::Result<()> {
     if let Err(error) = &result {
         report_crash(error);
     }
-    result
+    // A quit (or a crash the user has read) hands the terminal back to the
+    // shell forestui started from; the forest session and its Claude windows
+    // keep running for the next start to attach to. A panic unwinds past
+    // this, so it never detaches.
+    if result.as_ref().is_ok_and(|quit| *quit) || result.is_err() {
+        let forest = cli::session_name(args.forest_path.as_deref());
+        services::tmux::detach_quitting_client(|session| cli::is_forest_session(session, &forest));
+    }
+    result.map(|_quit| ())
 }
 
 /// `--claude-plugin status|install|uninstall`.
@@ -170,7 +178,9 @@ fn run_prune(forest_path: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run(self_update: bool, modes: terminal::InputModes) -> anyhow::Result<()> {
+/// Runs the app until it stops; `Ok(true)` when it stopped because the user
+/// quit, rather than its event channel closing.
+async fn run(self_update: bool, modes: terminal::InputModes) -> anyhow::Result<bool> {
     let (tx, mut rx) = event::start();
     let mut app = App::new(tx, cli::VERSION.to_string());
     app.self_update = self_update;
@@ -212,7 +222,7 @@ async fn run(self_update: bool, modes: terminal::InputModes) -> anyhow::Result<(
     app.release_tmux_options();
     drop(mode_guard);
     ratatui::restore();
-    outcome
+    outcome.map(|()| app.should_quit)
 }
 
 /// Mirror the Textual build's crash handling: write a log, print it, and pause

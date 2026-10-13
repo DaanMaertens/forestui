@@ -130,6 +130,25 @@ pub fn session_name(forest_path: Option<&str>) -> String {
     format!("forestui-{}", crate::util::slugify(&folder))
 }
 
+/// Is `name` one of the sessions `ensure_tmux` makes for the forest whose
+/// base session is `forest`: the base itself, or the `<forest>-<pid>` session
+/// grouped with it for each further terminal ([`grouped_session_name`]).
+pub fn is_forest_session(name: &str, forest: &str) -> bool {
+    match name.strip_prefix(forest) {
+        Some("") => true,
+        Some(rest) => rest
+            .strip_prefix('-')
+            .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit())),
+        None => false,
+    }
+}
+
+/// The session `ensure_tmux` groups with the forest's base session for each
+/// further terminal, so each navigates its windows independently.
+fn grouped_session_name(forest: &str, pid: u32) -> String {
+    format!("{forest}-{pid}")
+}
+
 /// Rebuild this invocation as a command line tmux can run.
 ///
 /// Uses the real executable path rather than the bare name `forestui`, so a
@@ -224,7 +243,7 @@ pub fn ensure_tmux(args: &Args) -> anyhow::Result<()> {
 
     // A grouped session per terminal: each client navigates windows
     // independently while sharing the same window list.
-    let grouped = format!("{session}-{}", std::process::id());
+    let grouped = grouped_session_name(&session, std::process::id());
     let grouped_ok = tmux_output(&["new-session", "-d", "-s", &grouped, "-t", &target])
         .map(|o| o.status.success())
         .unwrap_or(false);
