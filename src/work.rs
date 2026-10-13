@@ -190,26 +190,31 @@ pub fn issue_names(
     title: &str,
 ) -> WorktreeNames {
     let naming = kind.naming(settings);
-    numbered_names(&naming.branch_prefix, &naming.name_pattern, number, title)
+    let worktree = numbered_name(&naming.name_pattern, number, title);
+    let branch = fill_pattern(&naming.branch_pattern, Some(number), &title_slug(title));
+    WorktreeNames {
+        branch: prefixed_branch(naming, branch, &worktree),
+        worktree,
+    }
 }
 
 /// Name the worktree for a PR to review, by the `pr-review` naming. It
 /// checks out the PR's own branch, so only the worktree name is used.
 pub fn pull_request_names(settings: &StartWorkSettings, number: i64, title: &str) -> WorktreeNames {
-    numbered_names("", &settings.pr_review.name_pattern, number, title)
+    let worktree = numbered_name(&settings.pr_review.name_pattern, number, title);
+    WorktreeNames {
+        branch: worktree.clone(),
+        worktree,
+    }
 }
 
-fn numbered_names(branch_prefix: &str, pattern: &str, number: i64, title: &str) -> WorktreeNames {
+fn numbered_name(pattern: &str, number: i64, title: &str) -> String {
     let filled = fill_pattern(pattern, Some(number), &title_slug(title));
     // A pattern that fills to nothing would name every item alike.
-    let worktree = if filled.is_empty() {
+    if filled.is_empty() {
         number.to_string()
     } else {
         filled
-    };
-    WorktreeNames {
-        branch: format!("{branch_prefix}{worktree}"),
-        worktree,
     }
 }
 
@@ -248,7 +253,7 @@ pub fn title_slug(title: &str) -> String {
 const SESSION_WORDS: usize = 6;
 
 /// Name the worktree and branch for a session, by the `session` naming —
-/// `session-<slug>` on `session/` by default — from the prompt's first
+/// `session-<slug>` on `session/<slug>` by default — from the prompt's first
 /// words. `None` when they hold nothing a name can be made of, or the
 /// pattern fills to nothing: a bare prefix would be shared by every such
 /// prompt. A pattern without `{slug}` names them all alike too; the clash
@@ -264,10 +269,19 @@ pub fn session_names(settings: &StartWorkSettings, prompt: &str) -> Option<Workt
     if worktree.is_empty() {
         return None;
     }
+    let branch = fill_pattern(&naming.branch_pattern, None, &slug);
     Some(WorktreeNames {
-        branch: format!("{}{worktree}", naming.branch_prefix),
+        branch: prefixed_branch(naming, branch, &worktree),
         worktree,
     })
+}
+
+/// The filled branch pattern under the mode's prefix — or the worktree name,
+/// when the pattern filled to nothing: a bare prefix would be every item's
+/// branch.
+fn prefixed_branch(naming: &Naming, filled: String, worktree: &str) -> String {
+    let name = if filled.is_empty() { worktree } else { &filled };
+    format!("{}{name}", naming.branch_prefix)
 }
 
 /// `names` with `-<n>` added to both, for the first `n` from 2 that `taken`

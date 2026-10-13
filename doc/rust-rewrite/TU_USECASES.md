@@ -1665,7 +1665,7 @@ open issue — `#77 Dark mode for the dashboard`, the one labelled
 feature label decides only how #77 starts: the confirm screen is titled
 `Start Work: Feature #77`, names the worktree
 `feat-77-dark-mode-for-the-dashboard` on
-`feat/feat-77-dark-mode-for-the-dashboard`, and its prompt asks Claude to write
+`feat/77-dark-mode-for-the-dashboard`, and its prompt asks Claude to write
 a plan and change no code until the plan is approved. Launch creates the
 worktree on that branch and records `{"kind": "issue", "number": 77}` as its
 `work_item`.
@@ -1701,7 +1701,7 @@ three times.
 `Worktree: session-try-a-quick-spike-on-caching`. The confirm screen is titled
 `Start Work: Session`, names the worktree
 `session-try-a-quick-spike-on-caching` on
-`session/session-try-a-quick-spike-on-caching`, and its prompt is the typed
+`session/try-a-quick-spike-on-caching`, and its prompt is the typed
 prompt alone: no `gh issue view`, no plan-first rule. Launch creates the
 worktree on that branch and records
 `{"kind": "free_text", "description": "Try a quick spike on caching"}` as its

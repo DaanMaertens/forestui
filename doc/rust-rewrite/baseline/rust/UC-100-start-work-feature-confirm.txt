@@ -11,7 +11,7 @@
                               │  Path: <ROOT>/forest/beta/feat-77-dark-mode-for-the-dashboar  │
                               │  Branch Name                                                                 │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │
-                              │  │feat/feat-77-dark-mode-for-the-dashboard                                │  │
+                              │  │feat/77-dark-mode-for-the-dashboard                                     │  │
                               │  └────────────────────────────────────────────────────────────────────────┘  │
                               │  Base Branch                                                                 │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │
@@ -28,7 +28,7 @@
                               │   current text and every comment.                                            │
                               │                                                                              │
                               │   You are in the `feat-77-dark-mode-for-the-dashboard` worktree of beta, on  │
-                              │   the branch `feat/feat-77-dark-mode-for-the-dashboard`.                     │
+                              │   the branch `feat/77-dark-mode-for-the-dashboard`.                          │
                               │                                                                              │
                               │   Explore the code it touches and write a plan: what you will change,        │
                               │   where, and how you will test it. Do not change any code until I have       │

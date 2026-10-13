@@ -68,10 +68,7 @@ async fn a_session_confirms_with_its_own_names_and_prompt() {
 
     let confirm = confirm_screen(&app);
     assert_eq!(confirm.name.value(), "session-why-is-the-sidebar-so-slow");
-    assert_eq!(
-        confirm.branch.value(),
-        "session/session-why-is-the-sidebar-so-slow"
-    );
+    assert_eq!(confirm.branch.value(), "session/why-is-the-sidebar-so-slow");
     assert_eq!(confirm.prompt(), "Why is the sidebar so slow today?\n");
     let screen = rendered(&mut app);
     assert!(screen.contains("Start Work: Session"), "{screen}");
@@ -109,7 +106,7 @@ async fn the_session_naming_comes_from_the_settings() {
 
     let pending = app.pending_start.as_ref().expect("waiting on branches");
     assert_eq!(pending.names.worktree, "s-dark-mode");
-    assert_eq!(pending.names.branch, "spike/s-dark-mode");
+    assert_eq!(pending.names.branch, "spike/dark-mode");
 }
 
 /// A global `session.md` replaces the built-in `{body}`, with the other
@@ -130,7 +127,7 @@ async fn a_global_session_template_fills_the_first_prompt() {
     assert_eq!(
         confirm.prompt(),
         format!(
-            "Dark mode\n\nYou are in session-dark-mode of {}, on session/session-dark-mode.",
+            "Dark mode\n\nYou are in session-dark-mode of {}, on session/dark-mode.",
             confirm.repo_name
         )
     );
@@ -261,7 +258,7 @@ async fn create_copy_confirms_under_the_next_free_suffix() {
 
     let confirm = confirm_screen(&app);
     assert_eq!(confirm.name.value(), "session-dark-mode-2");
-    assert_eq!(confirm.branch.value(), "session/session-dark-mode-2");
+    assert_eq!(confirm.branch.value(), "session/dark-mode-2");
     assert_eq!(confirm.item, session("Dark mode"));
 }
 

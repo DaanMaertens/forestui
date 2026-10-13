@@ -16,7 +16,7 @@
                               │  Path: <ROOT>/forest/beta/session-try-a-quick-spike-on-cachi  │
                               │  Branch Name                                                                 │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │
-                              │  │session/session-try-a-quick-spike-on-caching                            │  │
+                              │  │session/try-a-quick-spike-on-caching                                    │  │
                               │  └────────────────────────────────────────────────────────────────────────┘  │
                               │  Base Branch                                                                 │
                               │  ┌────────────────────────────────────────────────────────────────────────┐  │

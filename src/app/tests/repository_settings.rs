@@ -170,7 +170,7 @@ async fn a_repositorys_feature_labels_decide_how_its_issues_start() {
         labelled_issue(8, "Export", &["enhancement"]),
     ];
     for (query, branch) in [
-        ("dark", "feat/feat-7-dark-mode"),
+        ("dark", "feat/7-dark-mode"),
         ("export", "fix/issue-8-export"),
     ] {
         let (_dir, mut app, path) = app_with_issues(issues.clone());
@@ -248,7 +248,7 @@ async fn a_repository_overrides_the_session_naming_and_template() {
 
     let confirm = confirm_screen(&app);
     assert_eq!(confirm.name.value(), "session-dark-mode");
-    assert_eq!(confirm.branch.value(), "spike/session-dark-mode");
+    assert_eq!(confirm.branch.value(), "spike/dark-mode");
     assert_eq!(confirm.prompt(), "In session-dark-mode: Dark mode");
 }
 

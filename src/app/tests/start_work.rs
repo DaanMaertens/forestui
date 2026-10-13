@@ -182,6 +182,7 @@ async fn the_confirm_screen_uses_the_configured_naming() {
     settings.start_work.issue = crate::models::Naming {
         branch_prefix: "bug/".into(),
         name_pattern: "{number}-{slug}".into(),
+        branch_pattern: "{number}-{slug}".into(),
     };
     let (_dir, mut app, _) = app_with_settings_and_issues(
         settings,
@@ -220,7 +221,7 @@ async fn a_feature_confirms_with_feat_names_and_the_feature_prompt() {
         }
     ));
     assert_eq!(confirm.name.value(), "feat-7-dark-mode");
-    assert_eq!(confirm.branch.value(), "feat/feat-7-dark-mode");
+    assert_eq!(confirm.branch.value(), "feat/7-dark-mode");
     let prompt = confirm.prompt();
     assert!(prompt.contains("feature from GitHub issue #7"), "{prompt}");
     assert!(prompt.contains("approved the plan"), "{prompt}");
@@ -269,10 +270,7 @@ async fn a_feature_label_wins_over_a_bug_label() {
         &["bug", "enhancement"],
     )]);
     confirm_nth_issue(&mut app, 0);
-    assert_eq!(
-        confirm_screen(&app).branch.value(),
-        "feat/feat-3-faster-startup"
-    );
+    assert_eq!(confirm_screen(&app).branch.value(), "feat/3-faster-startup");
 }
 
 /// The confirm screen only ever opens over Start work: closed while the

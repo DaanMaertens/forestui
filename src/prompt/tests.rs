@@ -116,7 +116,7 @@ fn the_session_template_is_the_prompt_alone() {
         number: None,
         title: "Why is the sidebar slow?",
         body: Some("Why is the sidebar slow?"),
-        branch: "session/session-why-is-the-sidebar-slow",
+        branch: "session/why-is-the-sidebar-slow",
         worktree: "session-why-is-the-sidebar-slow",
         repo: "forestui",
     };
@@ -133,13 +133,13 @@ fn a_session_override_fills_the_other_placeholders() {
         number: None,
         title: "Spike",
         body: Some("Spike"),
-        branch: "session/session-spike",
+        branch: "session/spike",
         worktree: "session-spike",
         repo: "forestui",
     };
     assert_eq!(
         fill("{body} ({worktree} of {repo}, on {branch})", &session),
-        "Spike (session-spike of forestui, on session/session-spike)"
+        "Spike (session-spike of forestui, on session/spike)"
     );
 }
 

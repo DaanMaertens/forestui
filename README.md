@@ -313,7 +313,7 @@ work in three steps:
 1. **Pick a work mode**: `issue`, `session`, `pr-review` or `worktree`.
    `issue` lists every open issue. One carrying a feature label
    (`enhancement` by default) starts as a feature, with the `feature`
-   naming (`feat/feat-<n>-<slug>`) and the plan-first `feature.md` prompt;
+   naming (`feat-<n>-<slug>` on `feat/<n>-<slug>`) and the plan-first `feature.md` prompt;
    every other issue starts with the `issue` naming and `issue.md`. The
    confirm screen says which: `Feature #7` or `Issue #7`.
 2. **Pick a work item** from a fuzzy-searchable list. By default it holds
@@ -433,9 +433,21 @@ Settings are stored in `~/.config/forestui/settings.json`:
     "scope": "mine",
     "feature_labels": ["enhancement"],
     "bug_labels": ["bug"],
-    "issue": { "branch_prefix": "fix/", "name_pattern": "issue-{number}-{slug}" },
-    "feature": { "branch_prefix": "feat/", "name_pattern": "feat-{number}-{slug}" },
-    "session": { "branch_prefix": "session/", "name_pattern": "session-{slug}" },
+    "issue": {
+      "branch_prefix": "fix/",
+      "name_pattern": "issue-{number}-{slug}",
+      "branch_pattern": "issue-{number}-{slug}"
+    },
+    "feature": {
+      "branch_prefix": "feat/",
+      "name_pattern": "feat-{number}-{slug}",
+      "branch_pattern": "{number}-{slug}"
+    },
+    "session": {
+      "branch_prefix": "session/",
+      "name_pattern": "session-{slug}",
+      "branch_pattern": "{slug}"
+    },
     "pr_review": { "name_pattern": "pr-{number}-{slug}" }
   }
 }
@@ -457,8 +469,13 @@ Press `S` in the app to open the settings modal.
 - Per kind of work (`issue`, `feature`, `session`, `pr_review`), the
   worktree is named by `name_pattern` with `{number}` and `{slug}` (from the
   title, or a session prompt's first six words) filled in, and the branch is
-  `branch_prefix` followed by that name. A `pr-review`
-  worktree checks out the PR's own branch, so it has no prefix.
+  `branch_prefix` followed by `branch_pattern`, filled the same way. The
+  worktree name carries the kind for the sidebar; the branch leaves it to the
+  prefix, so a feature is `feat-7-dark-mode` on `feat/7-dark-mode` rather
+  than `feat/feat-7-…`. Setting only `name_pattern` leaves the branch on the
+  default `branch_pattern`, and a `branch_pattern` that fills to nothing
+  falls back to the worktree name. A `pr-review` worktree checks out the
+  PR's own branch, so it has neither a prefix nor a `branch_pattern`.
 
 Every key is optional; a missing one keeps the default shown above.
 
