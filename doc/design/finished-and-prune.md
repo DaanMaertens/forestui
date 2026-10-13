@@ -1,7 +1,7 @@
 # Finished worktrees and prune
 
 **Finished worktrees ride on the worktree scans** (the background `git worktree
-list` reconcile in `CLAUDE.md`). Each scan also kicks a check (throttled per
+list` reconcile in `event-loop.md`). Each scan also kicks a check (throttled per
 repository, `app/finished.rs`) that asks `gh` for each linked issue's or PR's
 state and git whether a session's branch is merged into the remote default
 branch; `work::is_finished` is the rule. The marks are derived and never saved.
