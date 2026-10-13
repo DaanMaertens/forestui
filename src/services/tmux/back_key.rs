@@ -35,8 +35,8 @@ const HOME_MARK: &str = "@forestui_home";
 const KEY_MARK: &str = "@forestui_back_key";
 /// The full `bind-key` line the key had before, or empty when it was unbound.
 const SAVED_BINDING: &str = "@forestui_back_key_saved";
-const SAVED_STATUS: &str = "@forestui_status_right_saved";
-const SAVED_STATUS_LENGTH: &str = "@forestui_status_right_length_saved";
+const SAVED_STATUS_RIGHT: &str = "@forestui_status_right_saved";
+const SAVED_STATUS_RIGHT_LENGTH: &str = "@forestui_status_right_length_saved";
 
 /// True in a Claude window forestui opened, while the viewer's session holds
 /// a forestui window to go back to. Shared by the binding and the hint, so the
@@ -166,23 +166,65 @@ pub fn decide(key: &str, current: Option<&Binding>, accepted: Option<&str>) -> D
 /// The `bind-key` line for the back key on `key`, falling back to
 /// `previous` in every window that is not a Claude window forestui opened.
 pub fn bind_line(key: &str, previous: Option<&Binding>) -> String {
-    let repeat = if previous.is_some_and(|p| p.repeat) {
-        "-r "
-    } else {
-        ""
-    };
     // `switch-client -T root` ends a repeating key's repeat: otherwise an
     // arrow pressed just after landing on forestui runs the binding again
     // instead of reaching forestui.
-    let mut line = format!(
-        "bind-key {repeat}-T prefix {} if-shell -F \"{CONDITION}\" \
-         {{ run-shell -C \"{GO_HOME}\" ; switch-client -T root }}",
-        quote_key(key)
+    let mut command = format!(
+        "if-shell -F \"{CONDITION}\" \
+         {{ run-shell -C \"{GO_HOME}\" ; switch-client -T root }}"
     );
     if let Some(previous) = previous {
-        line.push_str(&format!(" {{ {} }}", previous.command));
+        command.push_str(&format!(" {{ {} }}", in_braces(&previous.command)));
     }
-    line
+    Binding {
+        repeat: previous.is_some_and(|p| p.repeat),
+        key_token: quote_key(key),
+        command,
+    }
+    .line()
+}
+
+/// A command as `list-keys` prints it, rewritten to sit inside `{ … }`.
+///
+/// `list-keys` separates a binding's commands with `\;`, but inside braces
+/// tmux separates them with a bare `;` and refuses `\;` — so a binding of
+/// two commands made the whole back key fail to bind. Only separators are
+/// rewritten: a `\;` inside quotes or inside a nested block is left alone.
+fn in_braces(command: &str) -> String {
+    let mut out = String::with_capacity(command.len());
+    let mut chars = command.chars().peekable();
+    let (mut single, mut double, mut depth) = (false, false, 0usize);
+    let mut at_word_start = true;
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            '\\' if double => {
+                out.push(c);
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+                at_word_start = false;
+                continue;
+            }
+            '{' if !single && !double => depth += 1,
+            '}' if !single && !double => depth = depth.saturating_sub(1),
+            '\\' if !single && depth == 0 && at_word_start && chars.peek() == Some(&';') => {
+                let _ = chars.next();
+                if chars.peek().is_none_or(|n| n.is_whitespace()) {
+                    out.push(';');
+                } else {
+                    out.push_str("\\;");
+                }
+                at_word_start = false;
+                continue;
+            }
+            _ => {}
+        }
+        out.push(c);
+        at_word_start = c.is_whitespace();
+    }
+    out
 }
 
 /// Quote a key name for tmux's parser.
@@ -320,15 +362,61 @@ pub enum Claim {
     /// The key is the user's own; the command it runs, for the offer to show
     /// and, if they say "use it anyway", to remember.
     Conflict(String),
-    /// Not inside tmux, or tmux would not answer.
+    /// tmux refused the binding.
+    Refused,
+    /// Off, not inside tmux, or tmux would not answer.
     Unavailable,
+}
+
+/// One change to the back key at a time. Applying runs off the UI thread,
+/// and two Settings saves in quick succession must not interleave their
+/// reads and writes of the same options.
+static APPLYING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Make tmux match the setting: bind `key` for this forestui's window, or —
+/// for `None`, or a key that is the user's own — stop using it. Blocking: a
+/// dozen short tmux calls.
+pub fn apply(key: Option<&str>, accepted: Option<&str>) -> Claim {
+    let _guard = APPLYING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let window = super::current_window();
+    let (Some(key), Some(window)) = (key, window.as_deref()) else {
+        release(window.as_deref());
+        return Claim::Unavailable;
+    };
+    let claim = claim(key, accepted, window);
+    if matches!(claim, Claim::Conflict(_) | Claim::Refused) {
+        // Not ours to keep while the question is open: a key bound for an
+        // earlier setting goes back unless another forestui still uses it.
+        release(Some(window));
+    }
+    claim
+}
+
+/// Stop using the back key on the way out.
+pub fn release_on_exit() {
+    let _guard = APPLYING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    release(super::current_window().as_deref());
 }
 
 /// Bind the back key on `key` for the forestui running in `own_window`,
 /// unless that would take a binding the user made (and did not accept).
-pub fn claim(key: &str, accepted: Option<&str>, own_window: &str) -> Claim {
+fn claim(key: &str, accepted: Option<&str>, own_window: &str) -> Claim {
     if !is_inside_tmux() {
         return Claim::Unavailable;
+    }
+    let Some(listing) = tmux(&["list-keys", "-T", "prefix"]) else {
+        return Claim::Unavailable;
+    };
+    let current = parse_binding(&listing, key);
+    let decision = decide(key, current.as_ref(), accepted);
+    if decision == Decision::Conflict {
+        // Asked before anything moves: the key bound now may be another
+        // forestui's, and only an answer may take it from them.
+        return Claim::Conflict(current.map(|c| c.command).unwrap_or_default());
     }
     // Another key from an earlier setting, here or in another forestui: the
     // server has one back key, so it goes back first.
@@ -337,28 +425,18 @@ pub fn claim(key: &str, accepted: Option<&str>, own_window: &str) -> Claim {
     {
         restore_binding();
     }
-    let Some(listing) = tmux(&["list-keys", "-T", "prefix"]) else {
-        return Claim::Unavailable;
-    };
-    let current = parse_binding(&listing, key);
-    match decide(key, current.as_ref(), accepted) {
-        Decision::Keep => {}
-        Decision::Conflict => {
-            return Claim::Conflict(current.map(|c| c.command).unwrap_or_default());
+    if decision == Decision::Bind {
+        let saved = current.as_ref().map(Binding::line).unwrap_or_default();
+        if tmux_with_input(
+            &["source-file", "-"],
+            &format!("{}\n", bind_line(key, current.as_ref())),
+        )
+        .is_none()
+        {
+            return Claim::Refused;
         }
-        Decision::Bind => {
-            let saved = current.as_ref().map(Binding::line).unwrap_or_default();
-            if tmux_with_input(
-                &["source-file", "-"],
-                &format!("{}\n", bind_line(key, current.as_ref())),
-            )
-            .is_none()
-            {
-                return Claim::Unavailable;
-            }
-            set_global(KEY_MARK, key);
-            set_global(SAVED_BINDING, &saved);
-        }
+        set_global(KEY_MARK, key);
+        set_global(SAVED_BINDING, &saved);
     }
     let _ = sweep_homes(Some(own_window));
     let pid = std::process::id().to_string();
@@ -370,9 +448,9 @@ pub fn claim(key: &str, accepted: Option<&str>, own_window: &str) -> Claim {
 /// Stop using the back key from `own_window` (when there is one), and hand
 /// the binding and `status-right` back once no live forestui needs them.
 ///
-/// Also what heals a killed run: its window took its mark with it, so the
+/// Also what heals a killed run: its mark names a pid that is gone, so the
 /// next forestui finds nobody and restores what the dead one left bound.
-pub fn release(own_window: Option<&str>) {
+fn release(own_window: Option<&str>) {
     if !is_inside_tmux() {
         return;
     }
@@ -431,41 +509,41 @@ fn install_hint(key: &str) {
     let Some(current) = global("status-right") else {
         return;
     };
-    let previous = match global(SAVED_STATUS) {
+    let previous = match global(SAVED_STATUS_RIGHT) {
         // Ours already, maybe for another key: rebuild from the original.
         Some(saved) if is_hinted(&current) => saved,
         // Never hinted, or the user replaced ours since: theirs is the one
         // to keep and to put back.
         _ => {
-            set_global(SAVED_STATUS, &current);
+            set_global(SAVED_STATUS_RIGHT, &current);
             current
         }
     };
     set_global("status-right", &hinted_status(&previous, key));
-    if global(SAVED_STATUS_LENGTH).is_none()
+    if global(SAVED_STATUS_RIGHT_LENGTH).is_none()
         && let Some(length) = global("status-right-length")
         && let Ok(length) = length.parse::<u32>()
     {
-        set_global(SAVED_STATUS_LENGTH, &length.to_string());
+        set_global(SAVED_STATUS_RIGHT_LENGTH, &length.to_string());
         set_global("status-right-length", &(length + HINT_ROOM).to_string());
     }
 }
 
 fn restore_hint() {
-    if let Some(saved) = global(SAVED_STATUS)
+    if let Some(saved) = global(SAVED_STATUS_RIGHT)
         && global("status-right").is_some_and(|current| is_hinted(&current))
     {
         set_global("status-right", &saved);
     }
-    if let Some(saved) = global(SAVED_STATUS_LENGTH)
+    if let Some(saved) = global(SAVED_STATUS_RIGHT_LENGTH)
         && let Ok(saved_length) = saved.parse::<u32>()
         && global("status-right-length")
             .is_some_and(|current| current == (saved_length + HINT_ROOM).to_string())
     {
         set_global("status-right-length", &saved);
     }
-    unset_global(SAVED_STATUS);
-    unset_global(SAVED_STATUS_LENGTH);
+    unset_global(SAVED_STATUS_RIGHT);
+    unset_global(SAVED_STATUS_RIGHT_LENGTH);
 }
 
 /// A global option's value, or `None` when it is unset — tmux answers an

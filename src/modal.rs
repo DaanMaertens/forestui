@@ -276,12 +276,10 @@ impl Modal {
         // so without this `Ctrl+D` deleted a custom button and `Ctrl+Y`
         // answered a confirmation. Only the combinations a focused text field
         // claims get through — see `widgets::is_plain_press`.
-        // The back key picker is the exception: there, `Ctrl+A` is an answer.
-        let picking = matches!(self, Modal::BackKey(m) if m.step == BackKeyStep::Pick);
         if matches!(key.code, KeyCode::Char(_))
             && !is_plain_press(key)
             && !text_input_claims(key)
-            && !picking
+            && !self.takes_any_key()
         {
             return ModalOutcome::None;
         }
@@ -300,6 +298,12 @@ impl Modal {
             Modal::RenameSession(m) => m.handle_key(key),
             Modal::BackKey(m) => m.handle_key(key),
         }
+    }
+
+    /// Whether every key is an answer here, `Ctrl` combinations included —
+    /// the back key picker, where `Ctrl+A` is a key like any other.
+    fn takes_any_key(&self) -> bool {
+        matches!(self, Modal::BackKey(m) if m.step == BackKeyStep::Pick)
     }
 
     /// Deliver a nested modal's result to its parent.

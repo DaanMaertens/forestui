@@ -13,14 +13,20 @@ fn offer_on_top(app: &App) -> Option<&BackKeyModal> {
 #[test]
 fn a_conflict_opens_the_offer() {
     let (_dir, mut app) = app_with_fixture();
-    app.on_back_key_claim(Claim::Conflict("previous-window".into()));
+    app.on_back_key_claim(
+        Some("Left".into()),
+        Claim::Conflict("previous-window".into()),
+    );
     let offer = offer_on_top(&app).expect("offer shown");
     assert_eq!(offer.key, "Left");
     assert_eq!(offer.binding, "previous-window");
 
     // Asked twice — a Settings save racing the startup check — it is still
     // one question.
-    app.on_back_key_claim(Claim::Conflict("previous-window".into()));
+    app.on_back_key_claim(
+        Some("Left".into()),
+        Claim::Conflict("previous-window".into()),
+    );
     let offers = app
         .modals
         .iter()
@@ -32,8 +38,8 @@ fn a_conflict_opens_the_offer() {
 #[test]
 fn a_bound_key_asks_nothing() {
     let (_dir, mut app) = app_with_fixture();
-    app.on_back_key_claim(Claim::Bound);
-    app.on_back_key_claim(Claim::Unavailable);
+    app.on_back_key_claim(Some("Left".into()), Claim::Bound);
+    app.on_back_key_claim(Some("Left".into()), Claim::Unavailable);
     assert!(app.modals.is_empty());
 }
 
@@ -59,8 +65,8 @@ fn answer(app: &mut App, answer: BackKeyAnswer) {
     assert!(offer_on_top(app).is_none(), "answered");
 }
 
-#[test]
-fn each_answer_lands_in_the_settings() {
+#[tokio::test]
+async fn each_answer_lands_in_the_settings() {
     let (_dir, mut app) = app_with_fixture();
     answer(
         &mut app,
@@ -82,6 +88,28 @@ fn each_answer_lands_in_the_settings() {
     answer(&mut app, BackKeyAnswer::Off);
     assert_eq!(app.settings.back_key, None);
     // Off never asks again: there is no key to conflict.
-    app.on_back_key_claim(Claim::Conflict("previous-window".into()));
+    app.on_back_key_claim(None, Claim::Conflict("previous-window".into()));
     assert!(!app.modals.iter().any(|m| matches!(m, Modal::BackKey(_))));
+}
+
+/// A claim made for a setting that has since changed is stale: the newer
+/// setting's own claim is on its way and decides.
+#[test]
+fn a_claim_for_an_older_setting_is_ignored() {
+    let (_dir, mut app) = app_with_fixture();
+    app.on_back_key_claim(Some("b".into()), Claim::Conflict("last-window".into()));
+    assert!(offer_on_top(&app).is_none());
+}
+
+#[test]
+fn a_refused_binding_is_reported() {
+    let (_dir, mut app) = app_with_fixture();
+    app.on_back_key_claim(Some("Left".into()), Claim::Refused);
+    assert!(app.modals.is_empty());
+    assert!(
+        app.notifications
+            .iter()
+            .any(|n| n.text.contains("refused the back key")),
+        "no warning"
+    );
 }

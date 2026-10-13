@@ -62,6 +62,11 @@ pub struct DetailMeta {
 pub enum AppEvent {
     /// A raw terminal event (key, resize, focus, mouse).
     Term(Event),
+    /// tmux was made to match the back key setting `key`.
+    BackKeyApplied {
+        key: Option<String>,
+        claim: crate::services::tmux::back_key::Claim,
+    },
     /// Periodic tick, used for spinner animation and notification expiry.
     Tick,
     /// `gh auth status` finished.

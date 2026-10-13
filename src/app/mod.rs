@@ -21,6 +21,7 @@ pub use mouse::{Direction, Hit, HitTarget, ModalClick, ScrollbarGeom};
 use crate::event::{AppEvent, DetailMeta, EventTx, Severity};
 use crate::modal::{Modal, StartWorkModal};
 use crate::models::{ClaudeSession, Scope, Settings};
+use crate::services::tmux::back_key;
 use crate::services::{claude_session, git, github, settings as settings_service, tmux};
 use crate::state::AppState;
 use crate::ui::widgets::TextInput;
@@ -379,36 +380,44 @@ impl App {
         }
         // Whether or not this run bound the back key: releasing with nobody
         // else left also restores what a killed run left bound.
-        tmux::back_key::release(tmux::current_window().as_deref());
+        back_key::release_on_exit();
     }
 
     /// Bind, move or release the back key to match the settings — at
-    /// startup, and whenever they change.
+    /// startup, and whenever they change. A dozen tmux calls, so off the loop;
+    /// the verdict comes back as [`AppEvent::BackKeyApplied`].
     pub(crate) fn apply_back_key(&mut self) {
-        let window = tmux::current_window();
-        let claim = match (&self.settings.back_key, &window) {
-            (Some(key), Some(window)) => {
-                tmux::back_key::claim(key, self.settings.back_key_accepted.as_deref(), window)
-            }
-            _ => {
-                tmux::back_key::release(window.as_deref());
-                return;
-            }
-        };
-        if let tmux::back_key::Claim::Conflict(_) = &claim {
-            // Not ours to keep while the question is open: a key bound for
-            // an earlier setting goes back, so only the answer binds.
-            tmux::back_key::release(window.as_deref());
-        }
-        self.on_back_key_claim(claim);
+        let key = self.settings.back_key.clone();
+        let accepted = self.settings.back_key_accepted.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let applying = key.clone();
+            let claim = tokio::task::spawn_blocking(move || {
+                back_key::apply(applying.as_deref(), accepted.as_deref())
+            })
+            .await
+            .unwrap_or(back_key::Claim::Unavailable);
+            tx.send(AppEvent::BackKeyApplied { key, claim });
+        });
     }
 
     /// Ask about a key the user bound themselves, once at a time.
-    pub(crate) fn on_back_key_claim(&mut self, claim: tmux::back_key::Claim) {
-        let tmux::back_key::Claim::Conflict(binding) = claim else {
+    ///
+    /// `key` is the setting the claim was made for: one that has changed
+    /// since is answered by its own claim, still on its way.
+    pub(crate) fn on_back_key_claim(&mut self, key: Option<String>, claim: back_key::Claim) {
+        if key != self.settings.back_key {
             return;
+        }
+        let binding = match claim {
+            back_key::Claim::Conflict(binding) => binding,
+            back_key::Claim::Refused => {
+                self.notify("tmux refused the back key binding", Severity::Warning);
+                return;
+            }
+            back_key::Claim::Bound | back_key::Claim::Unavailable => return,
         };
-        let Some(key) = self.settings.back_key.clone() else {
+        let Some(key) = key else {
             return;
         };
         self.modals.retain(|m| !matches!(m, Modal::BackKey(_)));
@@ -1193,6 +1202,7 @@ impl App {
         }
         match event {
             AppEvent::Term(term_event) => self.handle_term_event(term_event),
+            AppEvent::BackKeyApplied { key, claim } => self.on_back_key_claim(key, claim),
             AppEvent::Tick => self.on_tick(),
             AppEvent::GhStatus(status, username) => {
                 self.gh_status = status.display(username.as_deref());

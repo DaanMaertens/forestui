@@ -233,3 +233,29 @@ fn homes_split_live_marks_from_stale_ones() {
 fn this_process_is_alive() {
     assert!(process_alive(std::process::id()));
 }
+
+/// `list-keys` prints a binding of several commands with `\;` between
+/// them, which tmux refuses inside `{ … }`: the whole bind failed.
+#[test]
+fn a_binding_of_several_commands_keeps_working_as_the_fallback() {
+    let listing = "bind-key    -T prefix Left    set-option -g @a 1 \\; set-option -g @b 2\n";
+    let line = bind_line("Left", Some(&binding(listing, "Left")));
+    assert!(
+        line.ends_with(" { set-option -g @a 1 ; set-option -g @b 2 }"),
+        "{line}"
+    );
+}
+
+/// Only separators change: a `\;` that is part of an argument, or inside a
+/// nested block, means what it meant.
+#[test]
+fn quoted_and_nested_semicolons_are_left_alone() {
+    assert_eq!(in_braces(r#"send-keys "a \; b""#), r#"send-keys "a \; b""#);
+    assert_eq!(in_braces(r"send-keys 'x \; y'"), r"send-keys 'x \; y'");
+    assert_eq!(in_braces(r"send-keys a\;"), r"send-keys a\;");
+    assert_eq!(
+        in_braces("if -F 1 { a ; b } \\; c"),
+        "if -F 1 { a ; b } ; c"
+    );
+    assert_eq!(in_braces("select-pane -L"), "select-pane -L");
+}
