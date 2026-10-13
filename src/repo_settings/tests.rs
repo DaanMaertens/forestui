@@ -59,11 +59,23 @@ fn half_of_a_modes_naming_keeps_the_global_other_half() {
     base.issue = Naming {
         branch_prefix: "bug/".into(),
         name_pattern: "bug-{number}".into(),
+        branch_pattern: "bug-{number}".into(),
     };
     let overrides = overrides_from(r#"{"start_work": {"issue": {"branch_prefix": "fix/"}}}"#);
     let merged = effective(&base, &overrides);
     assert_eq!(merged.issue.branch_prefix, "fix/");
     assert_eq!(merged.issue.name_pattern, "bug-{number}");
+}
+
+/// A repository can rename its branches without touching its worktree names.
+#[test]
+fn a_repository_can_set_only_the_branch_pattern() {
+    let overrides =
+        overrides_from(r#"{"start_work": {"feature": {"branch_pattern": "f{number}"}}}"#);
+    let merged = effective(&global(), &overrides);
+    assert_eq!(merged.feature.branch_pattern, "f{number}");
+    assert_eq!(merged.feature.branch_prefix, "feat/");
+    assert_eq!(merged.feature.name_pattern, "feat-{number}-{slug}");
 }
 
 #[test]

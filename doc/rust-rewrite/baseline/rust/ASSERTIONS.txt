@@ -38,7 +38,7 @@ PASS UC-100    no-free-text-entry                             expected=no       
 PASS UC-100    titled-as-a-feature                            expected=yes                          actual=yes
 PASS UC-100    prompt-asks-for-a-plan                         expected=yes                          actual=yes
 PASS UC-100    worktree-created                               expected=yes                          actual=yes
-PASS UC-100    branch-checked-out                             expected=feat/feat-77-dark-mode-for-the-dashboard actual=feat/feat-77-dark-mode-for-the-dashboard
+PASS UC-100    branch-checked-out                             expected=feat/77-dark-mode-for-the-dashboard actual=feat/77-dark-mode-for-the-dashboard
 PASS UC-100    work-item-linked                               expected={'kind': 'issue', 'number': 77} actual={'kind': 'issue', 'number': 77}
 PASS UC-101    linked-item-marked                             expected=yes                          actual=yes
 PASS UC-101    switched-to-claude-window                      expected=yes                          actual=yes
@@ -50,7 +50,7 @@ PASS UC-103    prompt-carries-the-prompt                      expected=yes      
 PASS UC-103    prompt-reads-no-issue                          expected=no                           actual=no
 PASS UC-103    prompt-asks-for-no-plan                        expected=no                           actual=no
 PASS UC-103    worktree-created                               expected=yes                          actual=yes
-PASS UC-103    branch-checked-out                             expected=session/session-try-a-quick-spike-on-caching actual=session/session-try-a-quick-spike-on-caching
+PASS UC-103    branch-checked-out                             expected=session/try-a-quick-spike-on-caching actual=session/try-a-quick-spike-on-caching
 PASS UC-103    work-item-linked                               expected={'kind': 'free_text', 'description': 'Try a quick spike on caching'} actual={'kind': 'free_text', 'description': 'Try a quick spike on caching'}
 PASS UC-103    clash-offers-three-choices                     expected=yes                          actual=yes
 PASS UC-103    clash-names-the-copy                           expected=yes                          actual=yes

@@ -22,11 +22,12 @@ fn an_issue_is_named_issue_number_slug_on_a_fix_branch() {
 
 #[test]
 fn a_feature_issue_is_named_feat_on_a_feat_branch() {
+    // The prefix already says `feat`, so the branch does not say it twice.
     assert_eq!(
         issue_names(&defaults(), IssueKind::Feature, 7, "Dark mode"),
         WorktreeNames {
             worktree: "feat-7-dark-mode".into(),
-            branch: "feat/feat-7-dark-mode".into(),
+            branch: "feat/7-dark-mode".into(),
         }
     );
 }
@@ -196,7 +197,7 @@ fn a_session_is_named_from_its_first_words() {
         ),
         Some(WorktreeNames {
             worktree: "session-try-a-dark-theme-for-the".into(),
-            branch: "session/session-try-a-dark-theme-for-the".into(),
+            branch: "session/try-a-dark-theme-for-the".into(),
         })
     );
     assert_eq!(
@@ -225,11 +226,11 @@ fn a_copy_takes_the_first_free_suffix_from_two() {
     let names = session_names(&defaults(), "Dark mode").unwrap();
     let copy = first_free_copy(&names, |_| false);
     assert_eq!(copy.worktree, "session-dark-mode-2");
-    assert_eq!(copy.branch, "session/session-dark-mode-2");
+    assert_eq!(copy.branch, "session/dark-mode-2");
 
     let copy = first_free_copy(&names, |n| n.worktree == "session-dark-mode-2");
     assert_eq!(copy.worktree, "session-dark-mode-3");
-    assert_eq!(copy.branch, "session/session-dark-mode-3");
+    assert_eq!(copy.branch, "session/dark-mode-3");
 }
 
 fn worktree(name: &str, branch: &str) -> crate::models::Worktree {
@@ -242,11 +243,8 @@ fn worktree(name: &str, branch: &str) -> crate::models::Worktree {
 fn names_clash_on_the_worktree_name_or_the_branch() {
     let names = session_names(&defaults(), "Dark mode").unwrap();
     let by_name = [worktree("session-dark-mode", "elsewhere")];
-    let by_branch = [worktree("renamed", "session/session-dark-mode")];
-    let neither = [worktree(
-        "session-dark-mode-2",
-        "session/session-dark-mode-2",
-    )];
+    let by_branch = [worktree("renamed", "session/dark-mode")];
+    let neither = [worktree("session-dark-mode-2", "session/dark-mode-2")];
     assert_eq!(
         clash(&names, &by_name).map(|w| w.name.as_str()),
         Some("session-dark-mode")
@@ -329,13 +327,15 @@ fn the_pr_review_list_holds_the_pull_requests() {
     );
 }
 
-/// The configured prefix and pattern name the worktree and branch, per kind.
+/// The configured prefix and patterns name the worktree and branch, per kind.
+/// A mode that sets only its name pattern keeps the default branch pattern.
 #[test]
 fn naming_follows_the_configured_prefix_and_pattern() {
     let mut settings = defaults();
     settings.issue = Naming {
         branch_prefix: "bug/".into(),
         name_pattern: "{number}_{slug}".into(),
+        branch_pattern: "{slug}".into(),
     };
     settings.feature.name_pattern = "feature-{slug}-{number}".into();
     settings.pr_review.name_pattern = "review-{number}".into();
@@ -343,14 +343,14 @@ fn naming_follows_the_configured_prefix_and_pattern() {
         issue_names(&settings, IssueKind::Issue, 42, "Fix login bug"),
         WorktreeNames {
             worktree: "42_fix-login-bug".into(),
-            branch: "bug/42_fix-login-bug".into(),
+            branch: "bug/fix-login-bug".into(),
         }
     );
     assert_eq!(
         issue_names(&settings, IssueKind::Feature, 7, "Dark mode"),
         WorktreeNames {
             worktree: "feature-dark-mode-7".into(),
-            branch: "feat/feature-dark-mode-7".into(),
+            branch: "feat/7-dark-mode".into(),
         }
     );
     assert_eq!(
@@ -366,12 +366,13 @@ fn a_session_follows_its_own_naming() {
     settings.session = Naming {
         branch_prefix: "spike/".into(),
         name_pattern: "try-{slug}".into(),
+        branch_pattern: "spike-{slug}".into(),
     };
     assert_eq!(
         session_names(&settings, "Dark mode"),
         Some(WorktreeNames {
             worktree: "try-dark-mode".into(),
-            branch: "spike/try-dark-mode".into(),
+            branch: "spike/spike-dark-mode".into(),
         })
     );
     settings.session.name_pattern = "idea-{number}-{slug}".into();
@@ -396,6 +397,24 @@ fn a_pattern_fills_to_a_clean_name() {
     assert_eq!(
         issue_names(&settings, IssueKind::Issue, 5, "Title").worktree,
         "5"
+    );
+}
+
+/// A branch pattern that fills to nothing falls back to the worktree name
+/// under the prefix, never a bare prefix that every item would share.
+#[test]
+fn a_branch_pattern_that_fills_to_nothing_takes_the_worktree_name() {
+    let mut settings = defaults();
+    settings.feature.branch_pattern = "???".into();
+    assert_eq!(
+        issue_names(&settings, IssueKind::Feature, 7, "Dark mode").branch,
+        "feat/feat-7-dark-mode"
+    );
+    // A session has no number, so `{number}` alone fills to nothing.
+    settings.session.branch_pattern = "{number}".into();
+    assert_eq!(
+        session_names(&settings, "Dark mode").map(|n| n.branch),
+        Some("session/session-dark-mode".into())
     );
 }
 

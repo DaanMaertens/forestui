@@ -251,3 +251,29 @@ fn a_chosen_back_key_and_its_accepted_binding_survive_a_round_trip() {
     assert_eq!(back.back_key.as_deref(), Some("b"));
     assert_eq!(back.back_key_accepted.as_deref(), Some("previous-window"));
 }
+
+/// A file from before `branch_pattern` names branches without the kind the
+/// prefix already says, except an issue's: `fix/` does not say `issue`.
+#[test]
+fn settings_without_branch_patterns_load_the_defaults() {
+    let settings: Settings = serde_json::from_str("{}").unwrap();
+    assert_eq!(
+        settings.start_work.issue.branch_pattern,
+        "issue-{number}-{slug}"
+    );
+    assert_eq!(
+        settings.start_work.feature.branch_pattern,
+        "{number}-{slug}"
+    );
+    assert_eq!(settings.start_work.session.branch_pattern, "{slug}");
+}
+
+#[test]
+fn a_branch_pattern_survives_a_round_trip() {
+    let settings: Settings =
+        serde_json::from_str(r#"{"start_work":{"session":{"branch_pattern":"s-{slug}"}}}"#)
+            .unwrap();
+    let back: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+    assert_eq!(back.start_work.session.branch_pattern, "s-{slug}");
+    assert_eq!(back.start_work.session.name_pattern, "session-{slug}");
+}

@@ -857,7 +857,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-100 start-work-feature-launched
   wt="$ROOT/forest/beta/feat-77-dark-mode-for-the-dashboard"
   assert UC-100 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
-  assert UC-100 branch-checked-out "feat/feat-77-dark-mode-for-the-dashboard" \
+  assert UC-100 branch-checked-out "feat/77-dark-mode-for-the-dashboard" \
     "$(git -C "$wt" branch --show-current 2>/dev/null)"
   assert UC-100 work-item-linked "{'kind': 'issue', 'number': 77}" \
     "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('feat-77')][0]")"
@@ -921,7 +921,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-103 session-launched
   wt="$ROOT/forest/beta/session-try-a-quick-spike-on-caching"
   assert UC-103 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
-  assert UC-103 branch-checked-out "session/session-try-a-quick-spike-on-caching" \
+  assert UC-103 branch-checked-out "session/try-a-quick-spike-on-caching" \
     "$(git -C "$wt" branch --show-current 2>/dev/null)"
   assert UC-103 work-item-linked \
     "{'kind': 'free_text', 'description': 'Try a quick spike on caching'}" \
