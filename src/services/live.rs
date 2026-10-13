@@ -12,7 +12,8 @@
 //!
 //! A session found by stamp wins (it is switchable); a heartbeat fills in the
 //! rest, resolving its recorded pane back to a window when that pane lives on
-//! forestui's own tmux session, and falling back to "elsewhere" otherwise.
+//! forestui's own tmux server — switchable on forestui's own session,
+//! movable from another — and falling back to "elsewhere" otherwise.
 
 use crate::services::tmux;
 use std::collections::{HashMap, HashSet};
@@ -27,7 +28,17 @@ pub enum LivePlace {
         window_id: String,
         window_name: String,
     },
-    /// Running somewhere forestui cannot jump to: another tmux session, or no
+    /// A window in another tmux session on forestui's own server. Not a
+    /// keypress away, but `move-window` can bring it over, Claude and all.
+    OtherSession {
+        window_id: String,
+        window_name: String,
+        /// The other session's name, for the dialog and the badge.
+        tmux_session: String,
+        /// Whether it is that session's only window, which moving closes.
+        last_window: bool,
+    },
+    /// Running somewhere forestui cannot reach: another tmux server, or no
     /// tmux at all. The pid is shown so the user can find it.
     Elsewhere { pid: u32 },
 }
@@ -254,6 +265,12 @@ pub fn merge(
                     Some(pane) if pane.tmux_session == home.session => LivePlace::Window {
                         window_id: pane.window_id,
                         window_name: pane.window_name,
+                    },
+                    Some(pane) => LivePlace::OtherSession {
+                        window_id: pane.window_id,
+                        window_name: pane.window_name,
+                        tmux_session: pane.session_name,
+                        last_window: pane.session_windows <= 1,
                     },
                     _ => LivePlace::Elsewhere { pid: beat.pid },
                 }

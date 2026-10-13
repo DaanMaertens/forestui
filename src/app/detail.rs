@@ -507,7 +507,18 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
                     };
                     title_line.push((format!("● live{place}"), theme::accent()));
                 }
-                // A heartbeat with no reachable window: another tmux session,
+                // A window the guard can bring over, so the badge says from
+                // where.
+                crate::services::live::LivePlace::OtherSession { tmux_session, .. } => {
+                    title_line.push((
+                        format!(
+                            "● live in tmux session {}",
+                            crate::util::truncate(tmux_session, 20)
+                        ),
+                        theme::accent(),
+                    ));
+                }
+                // A heartbeat with no reachable window: another tmux server,
                 // or no tmux at all. Live, but not somewhere to jump to.
                 crate::services::live::LivePlace::Elsewhere { .. } => {
                     title_line.push(("● live elsewhere".to_string(), theme::accent()));

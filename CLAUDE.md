@@ -313,8 +313,11 @@ window instead.
   carrying the claude process id — validated against `ps` before it is
   believed, swept when stale. `services/live.rs` merges heartbeats with the
   window stamps: a heartbeat whose recorded pane sits on forestui's own tmux
-  session is switchable like a stamped window, anything else shows as
-  "live elsewhere" and resuming it is an eyes-open confirm. The heartbeat
+  session is switchable like a stamped window; one in another tmux session
+  on the same server is offered to be *brought here* (`move-window`, Claude
+  keeps running; the window is stamped with `@claude_session_id` but not a
+  birth name, so title sync and the back key still leave it alone); anything
+  else shows as "live elsewhere" and resuming it is an eyes-open confirm. The heartbeat
   records its pane's tmux *server* too (`$TMUX` minus the session index):
   pane ids are only unique per server, so a pane is resolved only when it was
   written on forestui's own server, and one with no server recorded is

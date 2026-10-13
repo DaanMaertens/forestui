@@ -491,6 +491,12 @@ impl App {
                 window_id,
                 window_name,
             } => self.switch_to_window(&window_id, &window_name),
+            ConfirmAction::BringWindow {
+                window_id,
+                window_name,
+                session_id,
+                ..
+            } => self.bring_window(&window_id, &window_name, &session_id),
             ConfirmAction::ForceResume {
                 path,
                 session_id,
@@ -683,6 +689,25 @@ impl App {
         }
     }
 
+    /// Move a session's window over from another tmux session and switch to
+    /// it. The window is stamped with the session it holds so the live scan
+    /// finds it by stamp from now on, like a window forestui opened — but
+    /// not with a birth name: forestui did not open it, so title sync and
+    /// the back key leave it alone, as they do any hand-made window.
+    fn bring_window(&mut self, window_id: &str, window_name: &str, session_id: &str) {
+        if tmux::move_window_here(window_id) {
+            tmux::stamp_session_id(window_id, session_id);
+            self.switch_to_window(window_id, window_name);
+        } else {
+            // Closed or moved since the scan; the next sweep shows where.
+            self.notify(
+                format!("Could not bring window {window_name} here"),
+                Severity::Warning,
+            );
+        }
+        self.scan_live_sessions();
+    }
+
     /// Start work on a picked issue: the confirm screen once the branches
     /// load, or — one work item, one worktree — a jump to the worktree it was
     /// already started in. Checked against the state now, not the marker the
@@ -844,7 +869,7 @@ impl App {
             return;
         }
         let mut window: Option<(chrono::DateTime<chrono::Utc>, String, String)> = None;
-        let mut elsewhere: Option<u32> = None;
+        let mut elsewhere: Option<String> = None;
         for session in self.sessions.iter().flatten() {
             match self.live_sessions.get(&session.id).map(|live| &live.place) {
                 Some(LivePlace::Window {
@@ -863,18 +888,25 @@ impl App {
                     }
                 }
                 Some(LivePlace::Elsewhere { pid }) => {
-                    elsewhere.get_or_insert(*pid);
+                    elsewhere.get_or_insert(format!(
+                        "Its Claude session is running outside this tmux session (pid {pid})"
+                    ));
+                }
+                // Bringing a window over is the guard's offer, made from the
+                // session card; a jump only points at it.
+                Some(LivePlace::OtherSession { tmux_session, .. }) => {
+                    elsewhere.get_or_insert(format!(
+                        "Its Claude session is running in tmux session '{tmux_session}' \
+                         — resume it from its card to bring it here"
+                    ));
                 }
                 None => {}
             }
         }
         if let Some((_, window_id, window_name)) = window {
             self.switch_to_window(&window_id, &window_name);
-        } else if let Some(pid) = elsewhere {
-            self.notify(
-                format!("Its Claude session is running outside this tmux session (pid {pid})"),
-                Severity::Information,
-            );
+        } else if let Some(notice) = elsewhere {
+            self.notify(notice, Severity::Information);
         }
     }
 
@@ -1040,6 +1072,34 @@ impl App {
                     },
                 )));
             }
+            crate::services::live::LivePlace::OtherSession {
+                window_id,
+                window_name,
+                tmux_session,
+                last_window,
+            } => {
+                let closes = if *last_window {
+                    format!(
+                        "\nIt is that session's only window, so tmux session '{tmux_session}' will close."
+                    )
+                } else {
+                    String::new()
+                };
+                let action = ConfirmAction::BringWindow {
+                    window_id: window_id.clone(),
+                    window_name: window_name.clone(),
+                    session_id: session.id.clone(),
+                    closes_session: *last_window,
+                };
+                self.modals.push(Modal::Confirm(ConfirmModal::new(
+                    "Session In Another tmux Session",
+                    format!(
+                        "This session is running in window '{window_name}' of tmux session \
+                         '{tmux_session}'.\nMove that window here and switch to it?{closes}"
+                    ),
+                    action,
+                )));
+            }
             crate::services::live::LivePlace::Elsewhere { pid } => {
                 let seed = self.session_window_name(index);
                 self.modals.push(Modal::Confirm(ConfirmModal::new(
@@ -1163,10 +1223,17 @@ impl App {
                 );
                 return;
             }
-            Some(crate::services::live::LivePlace::Window {
-                window_id,
-                window_name,
-            }) => Some((window_id.clone(), window_name.clone())),
+            Some(
+                crate::services::live::LivePlace::Window {
+                    window_id,
+                    window_name,
+                }
+                | crate::services::live::LivePlace::OtherSession {
+                    window_id,
+                    window_name,
+                    ..
+                },
+            ) => Some((window_id.clone(), window_name.clone())),
             None => None,
         };
         // The dialog opens on the name the card shows, cursor at the end —
@@ -1209,6 +1276,11 @@ impl App {
                 crate::services::live::LivePlace::Window { window_name, .. } => {
                     format!("open in window '{window_name}'")
                 }
+                crate::services::live::LivePlace::OtherSession {
+                    window_name,
+                    tmux_session,
+                    ..
+                } => format!("open in window '{window_name}' of tmux session '{tmux_session}'"),
                 crate::services::live::LivePlace::Elsewhere { pid } => {
                     format!("running elsewhere (pid {pid})")
                 }

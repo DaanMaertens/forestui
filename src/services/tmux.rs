@@ -180,10 +180,15 @@ pub fn select_window(window_id: &str) -> bool {
 /// This is how a heartbeat's recorded `TMUX_PANE` resolves back to something
 /// forestui can offer to switch to — but only when the pane's session is
 /// forestui's own, which is why the session rides along for the caller to
-/// compare.
+/// compare. A pane in another session of the same server is a window that
+/// can be brought over, and its session's name and size say from where.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneWindow {
     pub tmux_session: String,
+    pub session_name: String,
+    /// How many windows that session has — moving its last one away closes
+    /// the session.
+    pub session_windows: usize,
     pub window_id: String,
     pub window_name: String,
 }
@@ -194,15 +199,48 @@ pub fn pane_window(pane: &str) -> Option<PaneWindow> {
         "-p",
         "-t",
         pane,
-        "#{session_id}\t#{window_id}\t#{window_name}",
+        "#{session_id}\t#{session_windows}\t#{window_id}\t#{session_name}\t#{window_name}",
     ])?;
+    parse_pane_window(&out)
+}
+
+/// Pure form of [`pane_window`], for testing. The two names are free text
+/// and come last; a tab in a session name would shift the window name's
+/// start, which the window name absorbs rather than losing the line.
+fn parse_pane_window(out: &str) -> Option<PaneWindow> {
     let line = out.trim_end_matches('\n');
-    let mut parts = line.splitn(3, '\t');
+    let mut parts = line.splitn(5, '\t');
+    let tmux_session = parts.next()?.to_string();
+    let session_windows = parts.next()?.parse().ok()?;
+    let window_id = parts.next()?.to_string();
     Some(PaneWindow {
-        tmux_session: parts.next()?.to_string(),
-        window_id: parts.next()?.to_string(),
+        tmux_session,
+        session_windows,
+        window_id,
+        session_name: parts.next()?.to_string(),
         window_name: parts.next()?.to_string(),
     })
+}
+
+/// Move a window from another tmux session on this server into forestui's,
+/// for the duplicate-open guard's "bring it here". `move-window` keeps the
+/// window's processes and its id, so the Claude running in it carries on
+/// untouched; it only changes which session lists it. `-d` leaves the
+/// selection alone — the caller switches once the move has landed.
+pub fn move_window_here(window_id: &str) -> bool {
+    let Some(session) = current_session() else {
+        return false;
+    };
+    // A bare `$0:` target means "the next free index in session $0".
+    tmux(&[
+        "move-window",
+        "-d",
+        "-s",
+        window_id,
+        "-t",
+        &format!("{session}:"),
+    ])
+    .is_some()
 }
 
 /// What `ensure_focus_events` found, and therefore what exit has to undo.

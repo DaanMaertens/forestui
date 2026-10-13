@@ -103,11 +103,13 @@ into a hand-made window, or a terminal with no tmux at all.
 Every session card shows what forestui knows about the conversation: the
 branch it last saw, its token totals with an estimated cost, and — when the
 session is running — a live badge: the window's name when it sits in a tmux
-window forestui can jump to, or "live elsewhere" when the plugin's heartbeat
-finds it running in some other terminal entirely.
+window forestui can jump to, "live in tmux session <name>" when it runs in a
+window of another session on the same tmux server, or "live elsewhere" when
+the plugin's heartbeat finds it running in some other terminal entirely.
 Resuming a session that is already open offers to
 switch to its window instead of starting a second Claude on the same
-transcript. Cards also carry `Rename` (a live session renames through its tmux
+transcript — or, from another tmux session, to move that window into
+forestui's session, Claude still running in it. Cards also carry `Rename` (a live session renames through its tmux
 window, a stopped one through its transcript), `Pin` (pinned sessions stay at
 the top of the list however old they get; reorder them with `K`/`J` while the
 cursor is on a pinned card), and `Del` (permanent, confirmed, and refused

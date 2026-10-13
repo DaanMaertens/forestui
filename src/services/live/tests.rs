@@ -371,10 +371,21 @@ fn window(sid: &str, running: bool) -> tmux::ClaudeWindow {
     }
 }
 
+fn pane_in(session_id: &str, session: &str, window_id: &str, window: &str) -> tmux::PaneWindow {
+    tmux::PaneWindow {
+        tmux_session: session_id.into(),
+        session_name: session.into(),
+        session_windows: 3,
+        window_id: window_id.into(),
+        window_name: window.into(),
+    }
+}
+
 /// The merge's whole contract: exited windows stay out (that session is
 /// free), stamps outrank heartbeats for the same session, a heartbeat
-/// pane on our own tmux session resolves to a switchable window, and
-/// everything else is elsewhere.
+/// pane on our own tmux session resolves to a switchable window, one on
+/// another session of our server to a window that can be brought over,
+/// and everything else is elsewhere.
 #[test]
 fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
     let windows = vec![window("in-window", true), window("exited", false)];
@@ -385,15 +396,10 @@ fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
         beat("no-tmux", 40, ""),      // no pane at all
     ];
     let resolve = |pane: &str| match pane {
-        "%2" => Some(tmux::PaneWindow {
-            tmux_session: "$0".into(),
-            window_id: "@7".into(),
-            window_name: "hand-made".into(),
-        }),
+        "%2" => Some(pane_in("$0", "forest", "@7", "hand-made")),
         "%3" => Some(tmux::PaneWindow {
-            tmux_session: "$9".into(),
-            window_id: "@8".into(),
-            window_name: "foreign".into(),
+            session_windows: 1,
+            ..pane_in("$9", "work", "@8", "foreign")
         }),
         _ => None,
     };
@@ -414,10 +420,16 @@ fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
         by_id["our-pane"],
         LivePlace::Window { window_id, window_name } if window_id == "@7" && window_name == "hand-made"
     ));
-    assert!(matches!(
+    // Our server, another tmux session: a window forestui can bring over.
+    assert_eq!(
         by_id["other-pane"],
-        LivePlace::Elsewhere { pid: 30 }
-    ));
+        &LivePlace::OtherSession {
+            window_id: "@8".into(),
+            window_name: "foreign".into(),
+            tmux_session: "work".into(),
+            last_window: true,
+        }
+    );
     assert!(matches!(by_id["no-tmux"], LivePlace::Elsewhere { pid: 40 }));
 
     // Outside tmux entirely, every heartbeat is elsewhere.
@@ -446,11 +458,7 @@ fn a_pane_resolves_only_on_our_own_tmux_server() {
         home(),
         |pane: &str| {
             looked_up.borrow_mut().push(pane.to_string());
-            Some(tmux::PaneWindow {
-                tmux_session: "$0".into(),
-                window_id: "@1".into(),
-                window_name: "forestui".into(),
-            })
+            Some(pane_in("$0", "forest", "@1", "forestui"))
         },
     );
     let by_id: std::collections::HashMap<&str, &LivePlace> = merged

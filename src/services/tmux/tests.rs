@@ -845,3 +845,21 @@ fn only_a_clean_exit_closes_the_shell() {
         }
     }
 }
+
+/// A heartbeat's pane resolves to its session, that session's size and the
+/// window — the names last, so free text cannot misalign the numbers.
+#[test]
+fn a_pane_resolves_to_its_window_and_session() {
+    assert_eq!(
+        parse_pane_window("$3\t1\t@12\twork\tclaude: a\tb\n"),
+        Some(PaneWindow {
+            tmux_session: "$3".into(),
+            session_name: "work".into(),
+            session_windows: 1,
+            window_id: "@12".into(),
+            window_name: "claude: a\tb".into(),
+        })
+    );
+    assert_eq!(parse_pane_window(""), None);
+    assert_eq!(parse_pane_window("$3\tmany\t@12\twork\tx"), None);
+}

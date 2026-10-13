@@ -178,6 +178,68 @@ async fn resuming_an_open_session_offers_its_window_instead() {
     assert!(app.modals.is_empty(), "a free session must not guard");
 }
 
+/// A session in a window of another tmux session on our server is offered
+/// to be brought here: the window moves over, keeping its Claude, so there
+/// is no second Claude to warn about. The dialog says which session loses
+/// the window — and when it is that session's last, that it will close.
+#[tokio::test]
+async fn resuming_a_session_in_another_tmux_session_offers_to_bring_it_here() {
+    let (_dir, mut app) = app_with_fixture();
+    let path = app.state.selected_path().expect("a selection");
+    app.sessions = Some(vec![a_session("one")]);
+    app.handle_event(AppEvent::LiveSessions {
+        sessions: vec![a_live_in_other_session("one", false)],
+    });
+
+    assert!(app.guard_open_session(0, &path, false, None));
+    let Some(crate::modal::Modal::Confirm(confirm)) = app.modals.last() else {
+        panic!("the guard did not open a dialog: {:?}", app.modals.last());
+    };
+    assert!(
+        confirm.message.contains("'hand-made'"),
+        "{}",
+        confirm.message
+    );
+    assert!(confirm.message.contains("'work'"), "{}", confirm.message);
+    assert!(!confirm.message.contains("close"), "{}", confirm.message);
+    match &confirm.action {
+        crate::modal::ConfirmAction::BringWindow {
+            window_id,
+            window_name,
+            session_id,
+            closes_session,
+        } => {
+            assert_eq!(window_id, "@12");
+            assert_eq!(window_name, "hand-made");
+            assert_eq!(session_id, "one");
+            assert!(!closes_session);
+        }
+        other => panic!("expected BringWindow, got {other:?}"),
+    }
+    assert_eq!(confirm.action.confirm_label(), "Bring here");
+    assert!(
+        !confirm.action.is_destructive(),
+        "moving a window loses nothing"
+    );
+
+    // Its session's only window: moving it closes that tmux session, which
+    // the dialog says, and which earns the red.
+    app.modals.clear();
+    app.handle_event(AppEvent::LiveSessions {
+        sessions: vec![a_live_in_other_session("one", true)],
+    });
+    assert!(app.guard_open_session(0, &path, false, None));
+    let Some(crate::modal::Modal::Confirm(confirm)) = app.modals.last() else {
+        panic!("no dialog");
+    };
+    assert!(
+        confirm.message.contains("tmux session 'work' will close"),
+        "{}",
+        confirm.message
+    );
+    assert!(confirm.action.is_destructive());
+}
+
 /// Deleting a session asks first and really deletes after — and refuses
 /// outright while a window holds the transcript open.
 #[tokio::test]

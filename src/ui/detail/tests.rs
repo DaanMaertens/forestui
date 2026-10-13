@@ -360,6 +360,15 @@ async fn the_live_badge_carries_the_session_state() {
             },
             "● live in claude:demo:wt",
         ),
+        (
+            LivePlace::OtherSession {
+                window_id: "@9".into(),
+                window_name: "hand-made".into(),
+                tmux_session: "work".into(),
+                last_window: false,
+            },
+            "● live in tmux session work",
+        ),
         (LivePlace::Elsewhere { pid: 7 }, "● live elsewhere"),
     ];
     for (place, badge) in places {
