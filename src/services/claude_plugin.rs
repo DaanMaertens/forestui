@@ -1,7 +1,7 @@
 //! Installing the Claude Code plugin that names a session after its tmux window.
 //!
 //! The plugin is a directory forestui owns end to end: a manifest, a hooks
-//! declaration and one shell script. Claude Code discovers plugin directories
+//! declaration and the shell scripts it runs. Claude Code discovers plugin directories
 //! under `<config>/skills/` on its own, so installing writes nothing into the
 //! user's `settings.json` and cannot disturb hooks they configured themselves —
 //! plugin hooks and settings hooks both run.
@@ -34,14 +34,22 @@ const ASSETS: &[(&str, &str)] = &[
         "hooks/heartbeat.sh",
         include_str!("../../assets/claude-plugin/heartbeat.sh"),
     ),
+    (
+        "hooks/state.sh",
+        include_str!("../../assets/claude-plugin/state.sh"),
+    ),
 ];
 
 /// The files that have to be executable — Claude runs them as commands.
-const EXECUTABLES: &[&str] = &["hooks/tmux-title.sh", "hooks/heartbeat.sh"];
+const EXECUTABLES: &[&str] = &[
+    "hooks/tmux-title.sh",
+    "hooks/heartbeat.sh",
+    "hooks/state.sh",
+];
 
 /// Bumped whenever a shipped file changes, so an install by an older forestui
 /// is recognised as old rather than reported as the user having edited it.
-const SHIPPED_VERSION: &str = "5";
+const SHIPPED_VERSION: &str = "6";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
@@ -80,8 +88,8 @@ impl Status {
 /// `NotInstalled` is a choice the user never made and `Drifted` is their own
 /// edit — neither is forestui's to warn about. Outdated is different: the
 /// user opted in, and a newer build ships hooks their install lacks (the
-/// liveness heartbeat arrived in version 4), so silence would look like the
-/// feature not working.
+/// liveness heartbeat arrived in version 4, session states in 6), so
+/// silence would look like the feature not working.
 pub fn upgrade_notice(status: &Status) -> Option<String> {
     match status {
         Status::Outdated { installed } => Some(format!(

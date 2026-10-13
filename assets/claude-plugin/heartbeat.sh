@@ -9,7 +9,8 @@
 # than silently overwritten.
 #
 # One file per session under ~/.config/forestui/live/, written on SessionStart
-# and refreshed on UserPromptSubmit (which also covers a plugin installed
+# and refreshed on UserPromptSubmit (each also records the session's state,
+# which state.sh keeps up to date in between) (which also covers a plugin installed
 # mid-session), removed on SessionEnd. The file records the *claude* process
 # id — found by walking up from this hook, which runs under a shell claude
 # spawned and threw away — so forestui can tell a live session from a
@@ -67,10 +68,27 @@ mkdir -p "$dir" 2>/dev/null || exit 0
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 pane="${TMUX_PANE:-}"
 
+# What the session is doing (see state.sh for the other events). A prompt
+# makes it busy. A session that starts, resumes or is cleared sits at its
+# prompt; one that restarts for compaction is mid-turn, so whatever the file
+# said before still stands.
+case "$event" in
+  UserPromptSubmit) state=busy ;;
+  *)
+    state=idle
+    if [ "$(printf '%s' "$input" | jq -r '.source // empty' 2>/dev/null)" = "compact" ]; then
+      state=$(jq -r '.state // empty' "$dir/$sid.json" 2>/dev/null)
+      case "$state" in idle | busy | needs_you) ;; *) state="" ;; esac
+    fi
+    ;;
+esac
+state_field=""
+[ -n "$state" ] && state_field=",\"state\":\"$state\""
+
 # Written whole then renamed, so forestui never reads half a file.
 tmp="$dir/.$sid.$$.tmp"
-printf '{"session_id":"%s","pid":%s,"tmux_pane":"%s","cwd":%s}\n' \
-  "$sid" "$found" "$pane" "$(printf '%s' "$cwd" | jq -R .)" \
+printf '{"session_id":"%s","pid":%s,"tmux_pane":"%s","cwd":%s%s}\n' \
+  "$sid" "$found" "$pane" "$(printf '%s' "$cwd" | jq -R .)" "$state_field" \
   > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; exit 0; }
 mv -f "$tmp" "$dir/$sid.json" 2>/dev/null || rm -f "$tmp" 2>/dev/null
 

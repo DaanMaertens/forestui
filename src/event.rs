@@ -88,6 +88,11 @@ pub enum AppEvent {
     LiveSessions {
         sessions: Vec<crate::services::live::LiveSession>,
     },
+    /// The once-a-second state read finished: what each live session it
+    /// asked about is doing, `None` where its heartbeat carries no state.
+    SessionStates {
+        states: std::collections::HashMap<String, Option<crate::services::live::SessionState>>,
+    },
     /// A transcript deletion finished. Folded on the main loop so the list,
     /// the pin state and the toast all change together.
     SessionDeleted {

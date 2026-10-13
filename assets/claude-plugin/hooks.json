@@ -12,8 +12,20 @@
         { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.sh UserPromptSubmit" }
       ] }
     ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/state.sh PreToolUse" } ] }
+    ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/state.sh PostToolUse" } ] }
+    ],
+    "Notification": [
+      { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/state.sh Notification" } ] }
+    ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/tmux-title.sh Stop" } ] }
+      { "hooks": [
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/tmux-title.sh Stop" },
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/state.sh Stop" }
+      ] }
     ],
     "SessionEnd": [
       { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.sh SessionEnd" } ] }

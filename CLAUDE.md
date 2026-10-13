@@ -317,6 +317,26 @@ window instead.
   "live elsewhere" and resuming it is an eyes-open confirm. The hook also
   re-stamps `@claude_session_id` on its window, healing a stale stamp left by
   an earlier launch.
+- **Session state** — *busy*, *needs you* or *idle* — rides in the same
+  heartbeat file as an optional `state` field. `heartbeat.sh` writes it with
+  the file (busy on `UserPromptSubmit`; idle on `SessionStart`, except a
+  compaction restart, which keeps whatever it was), and `state.sh` updates it
+  in place in between: `Notification` for a permission prompt or question
+  and `PreToolUse` of `AskUserQuestion` → needs you, any tool use *after*
+  needs you → busy (the user answered), `Stop` and the `idle_prompt`
+  notification → idle. Only those two scripts write the file, never on the
+  same event, so their whole-file writes cannot race. The tool-use hooks fire
+  on every tool call, so their common path writes nothing. Esc fires no
+  `Stop`, so an interrupted session reads busy until `idle_prompt` (~60 s)
+  corrects it — accepted, not worked around. A heartbeat with no `state`
+  (an older plugin) is *unknown* and shows as it always did; it is never a
+  guessed state. The App re-reads just the states of the sessions the last
+  live scan found once a second (`STATE_READ_INTERVAL`, files only, no tmux or
+  `ps`) and repaints only when one changed. A session card's badge reads
+  `● live · busy`; a worktree's sidebar row takes the colour of the most
+  urgent state among sessions in forestui's *own* windows (needs you > busy >
+  idle) and leads with `{N}` from two of them — a finished worktree keeps its
+  finished name colour, the count still wears the state's.
 - **`@claude_birth_name`**, a tmux window option stamped when the window is
   created, answers one question: did forestui open this window? A window the
   user made by hand carries none and is left alone, as is a bare `claude` in a

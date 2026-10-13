@@ -15,7 +15,7 @@
 //! forestui's own tmux session, and falling back to "elsewhere" otherwise.
 
 use crate::services::tmux;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Where a live session can be reached.
@@ -32,11 +32,91 @@ pub enum LivePlace {
     Elsewhere { pid: u32 },
 }
 
+/// What a live session is doing, as the plugin's hooks last recorded it.
+///
+/// Declared least urgent first: the derived order *is* the urgency rule, so a
+/// worktree with several sessions shows the maximum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SessionState {
+    /// Waiting for the next prompt — a turn ended, or Claude says so after a
+    /// minute of no input.
+    Idle,
+    /// Working on a turn.
+    Busy,
+    /// Blocked on the user: a permission prompt or a question.
+    NeedsYou,
+}
+
+impl SessionState {
+    /// The heartbeat's spelling. Anything else is unknown, never a guess.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "idle" => Some(Self::Idle),
+            "busy" => Some(Self::Busy),
+            "needs_you" => Some(Self::NeedsYou),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Busy => "busy",
+            Self::NeedsYou => "needs you",
+        }
+    }
+}
+
 /// One live Claude session and where it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveSession {
     pub session_id: String,
     pub place: LivePlace,
+    /// From the session's heartbeat; `None` without one, or from a plugin
+    /// older than the state hooks.
+    pub state: Option<SessionState>,
+    /// The directory the session runs in, from its heartbeat — what ties a
+    /// session to a worktree's sidebar row.
+    pub cwd: Option<String>,
+}
+
+/// What a worktree's sidebar row shows of the sessions running in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Activity {
+    /// The most urgent state among them.
+    pub state: SessionState,
+    /// How many there are; the row prints a count only from two.
+    pub sessions: usize,
+}
+
+/// Roll the sessions running under `worktree` up into one row's worth.
+///
+/// Only sessions in windows of forestui's own tmux session count — the row
+/// is about what a keypress away needs you, and a session elsewhere is not —
+/// and only those with a known state, since an unknown one has nothing to
+/// show. `None` when nothing counts, so the row looks as it always did.
+pub fn activity<'a>(
+    sessions: impl IntoIterator<Item = &'a LiveSession>,
+    worktree: &Path,
+) -> Option<Activity> {
+    let states: Vec<SessionState> = sessions
+        .into_iter()
+        .filter(|session| matches!(session.place, LivePlace::Window { .. }))
+        .filter(|session| {
+            // A session started in a subdirectory still belongs to the
+            // worktree; `Path::starts_with` compares whole components, so
+            // `wt-two` is not inside `wt`.
+            session
+                .cwd
+                .as_deref()
+                .is_some_and(|cwd| Path::new(cwd).starts_with(worktree))
+        })
+        .filter_map(|session| session.state)
+        .collect();
+    Some(Activity {
+        state: states.iter().copied().max()?,
+        sessions: states.len(),
+    })
 }
 
 /// A session's heartbeat, as `heartbeat.sh` writes it from inside the session.
@@ -48,6 +128,21 @@ pub struct Heartbeat {
     pub tmux_pane: String,
     #[serde(default)]
     pub cwd: String,
+    /// Written by `state.sh` and on `UserPromptSubmit`. Read leniently: a
+    /// heartbeat that fails to parse is swept as stale, so a state this
+    /// build does not know must not cost the session its liveness.
+    #[serde(default, deserialize_with = "lenient_state")]
+    pub state: Option<SessionState>,
+}
+
+fn lenient_state<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<SessionState>, D::Error> {
+    let raw: Option<serde_json::Value> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(raw
+        .as_ref()
+        .and_then(serde_json::Value::as_str)
+        .and_then(SessionState::parse))
 }
 
 /// Where the plugin writes heartbeats. Must match `heartbeat.sh` verbatim.
@@ -79,17 +174,29 @@ pub fn merge(
 ) -> Vec<LiveSession> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<LiveSession> = Vec::new();
+    // A stamped window outranks its heartbeat for the place, but only the
+    // heartbeat knows what the session is doing and where it runs.
+    let detail: HashMap<String, (Option<SessionState>, Option<String>)> = beats
+        .iter()
+        .map(|beat| {
+            let cwd = (!beat.cwd.is_empty()).then(|| beat.cwd.clone());
+            (beat.session_id.clone(), (beat.state, cwd))
+        })
+        .collect();
 
     // Stamped windows where Claude is the pane's foreground process. A window
     // whose Claude exited deliberately stays out: that session is free again.
     for window in windows {
         if window.running && seen.insert(window.session_id.clone()) {
+            let (state, cwd) = detail.get(&window.session_id).cloned().unwrap_or_default();
             out.push(LiveSession {
                 session_id: window.session_id,
                 place: LivePlace::Window {
                     window_id: window.window_id,
                     window_name: window.window_name,
                 },
+                state,
+                cwd,
             });
         }
     }
@@ -113,6 +220,8 @@ pub fn merge(
         out.push(LiveSession {
             session_id: beat.session_id,
             place,
+            state: beat.state,
+            cwd: (!beat.cwd.is_empty()).then_some(beat.cwd),
         });
     }
     out
@@ -132,6 +241,28 @@ pub fn heartbeat_alive(session_id: &str) -> bool {
     read_heartbeats()
         .iter()
         .any(|beat| beat.session_id == session_id)
+}
+
+/// What each of these sessions is doing, read straight from their heartbeat
+/// files. No `ps`, no tmux: this runs once a second, and the full scan has
+/// already decided which sessions are live — this only refreshes the state
+/// of the ones it found. A session absent from the answer has no state.
+pub fn read_states(ids: &[String]) -> HashMap<String, SessionState> {
+    read_states_in(&live_dir(), ids)
+}
+
+/// Directory-scoped form of [`read_states`], for testing.
+pub fn read_states_in(dir: &Path, ids: &[String]) -> HashMap<String, SessionState> {
+    ids.iter()
+        // The id names a file; one that could step outside the directory is
+        // not a session id, whatever produced it.
+        .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .filter_map(|id| {
+            let raw = std::fs::read_to_string(dir.join(format!("{id}.json"))).ok()?;
+            let beat: Heartbeat = serde_json::from_str(&raw).ok()?;
+            Some((id.clone(), beat.state?))
+        })
+        .collect()
 }
 
 /// Every heartbeat whose process is still a running claude. Stale files —

@@ -54,51 +54,61 @@ fn a_missing_live_dir_reads_as_no_heartbeats() {
     assert!(read_heartbeats_in(Path::new("/nowhere/forestui-live"), |_| HashSet::new()).is_empty());
 }
 
-/// Run the shipped `heartbeat.sh` for real, with `ps` and `tmux` faked on
-/// PATH: the pid walk needs an ancestor that claims to be claude, and a
-/// test must never speak to a real tmux server. This pins the script's
-/// whole observable contract — the file it writes, the sweep on
-/// SessionEnd, the id sanitisation, and the window-stamp healing call.
+/// The plugin's hook scripts installed into a throwaway `HOME`, with `ps`
+/// and `tmux` faked on PATH: the pid walk needs an ancestor that claims to
+/// be claude, and a test must never speak to a real tmux server.
 #[cfg(unix)]
-#[test]
-fn the_heartbeat_script_writes_sweeps_and_heals() {
-    use crate::test_support::write_executable;
-    if std::process::Command::new("jq")
-        .arg("--version")
-        .output()
-        .is_err()
-    {
-        eprintln!("jq not installed; skipping the script test");
-        return;
+struct Hooks {
+    home: tempfile::TempDir,
+}
+
+#[cfg(unix)]
+impl Hooks {
+    /// `None` when jq is missing — the scripts do nothing without it, so
+    /// there is nothing to test.
+    fn install() -> Option<Self> {
+        use crate::test_support::write_executable;
+        if std::process::Command::new("jq")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("jq not installed; skipping the script test");
+            return None;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        write_executable(
+            &bin.join("heartbeat.sh"),
+            include_str!("../../../assets/claude-plugin/heartbeat.sh"),
+        );
+        write_executable(
+            &bin.join("state.sh"),
+            include_str!("../../../assets/claude-plugin/state.sh"),
+        );
+        // A fake ps: every ancestry query answers pid 4242, whose command is
+        // claude — so the walk terminates on the first hop.
+        write_executable(
+            &bin.join("ps"),
+            "#!/bin/sh\ncase \"$*\" in *ppid*) echo 4242;; *comm*) echo claude;; esac\n",
+        );
+        // A fake tmux that records its argv instead of reaching any server.
+        write_executable(
+            &bin.join("tmux"),
+            &format!(
+                "#!/bin/sh\necho \"$@\" >> {}\n",
+                home.path().join("tmux.log").display()
+            ),
+        );
+        Some(Self { home })
     }
 
-    let home = tempfile::tempdir().unwrap();
-    let bin = home.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let script = bin.join("heartbeat.sh");
-    write_executable(
-        &script,
-        include_str!("../../../assets/claude-plugin/heartbeat.sh"),
-    );
-    // A fake ps: every ancestry query answers pid 4242, whose command is
-    // claude — so the walk terminates on the first hop.
-    write_executable(
-        &bin.join("ps"),
-        "#!/bin/sh\ncase \"$*\" in *ppid*) echo 4242;; *comm*) echo claude;; esac\n",
-    );
-    // A fake tmux that records its argv instead of reaching any server.
-    write_executable(
-        &bin.join("tmux"),
-        &format!(
-            "#!/bin/sh\necho \"$@\" >> {}\n",
-            home.path().join("tmux.log").display()
-        ),
-    );
-
-    let run = |event: &str, input: &str, pane: Option<&str>| {
-        let mut cmd = std::process::Command::new(&script);
+    fn run(&self, script: &str, event: &str, input: &str, pane: Option<&str>) {
+        let bin = self.home.path().join("bin");
+        let mut cmd = std::process::Command::new(bin.join(script));
         cmd.arg(event)
-            .env("HOME", home.path())
+            .env("HOME", self.home.path())
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null());
@@ -115,9 +125,31 @@ fn the_heartbeat_script_writes_sweeps_and_heals() {
             .write_all(input.as_bytes())
             .unwrap();
         assert!(child.wait().unwrap().success());
-    };
+    }
 
-    let live = home.path().join(".config/forestui/live");
+    fn live(&self) -> PathBuf {
+        self.home.path().join(".config/forestui/live")
+    }
+
+    fn beat(&self, sid: &str) -> Option<Heartbeat> {
+        let raw = std::fs::read_to_string(self.live().join(format!("{sid}.json"))).ok()?;
+        Some(serde_json::from_str(&raw).expect("valid JSON"))
+    }
+}
+
+/// Run the shipped `heartbeat.sh` for real. This pins the script's whole
+/// observable contract — the file it writes, the sweep on SessionEnd, the
+/// id sanitisation, and the window-stamp healing call.
+#[cfg(unix)]
+#[test]
+fn the_heartbeat_script_writes_sweeps_and_heals() {
+    let Some(hooks) = Hooks::install() else {
+        return;
+    };
+    let run = |event: &str, input: &str, pane: Option<&str>| {
+        hooks.run("heartbeat.sh", event, input, pane);
+    };
+    let live = hooks.live();
 
     // SessionStart writes the heartbeat, with the walked-to claude pid.
     run(
@@ -125,8 +157,7 @@ fn the_heartbeat_script_writes_sweeps_and_heals() {
         r#"{"session_id":"beat-1","cwd":"/w/x"}"#,
         None,
     );
-    let written = std::fs::read_to_string(live.join("beat-1.json")).expect("a heartbeat");
-    let parsed: Heartbeat = serde_json::from_str(&written).expect("valid JSON");
+    let parsed = hooks.beat("beat-1").expect("a heartbeat");
     assert_eq!(parsed.session_id, "beat-1");
     assert_eq!(parsed.pid, 4242);
     assert_eq!(parsed.cwd, "/w/x");
@@ -138,7 +169,7 @@ fn the_heartbeat_script_writes_sweeps_and_heals() {
         r#"{"session_id":"beat-1","cwd":"/w/x"}"#,
         Some("%9"),
     );
-    let stamped = std::fs::read_to_string(home.path().join("tmux.log")).unwrap_or_default();
+    let stamped = std::fs::read_to_string(hooks.home.path().join("tmux.log")).unwrap_or_default();
     assert!(
         stamped.contains("set-option -w -t %9 @claude_session_id beat-1"),
         "no healing call: {stamped:?}"
@@ -151,8 +182,8 @@ fn the_heartbeat_script_writes_sweeps_and_heals() {
         None,
     );
     assert!(
-        !home.path().join("escape.json").exists()
-            && !home.path().join(".config/escape.json").exists(),
+        !hooks.home.path().join("escape.json").exists()
+            && !hooks.home.path().join(".config/escape.json").exists(),
         "a traversal id escaped the live dir"
     );
 
@@ -161,12 +192,154 @@ fn the_heartbeat_script_writes_sweeps_and_heals() {
     assert!(!live.join("beat-1.json").exists(), "SessionEnd must sweep");
 }
 
+/// Hook payloads drive the state, through both scripts: the heartbeat
+/// writes it on SessionStart and UserPromptSubmit, `state.sh` on
+/// everything in between. The payloads are the shapes Claude Code sends.
+#[cfg(unix)]
+#[test]
+fn hook_payloads_drive_the_session_state() {
+    let Some(hooks) = Hooks::install() else {
+        return;
+    };
+    let state = |event: &str, input: &str| {
+        hooks.run("state.sh", event, input, None);
+        hooks.beat("s-1").and_then(|beat| beat.state)
+    };
+    let beat = |event: &str, input: &str| {
+        hooks.run("heartbeat.sh", event, input, None);
+        hooks.beat("s-1").and_then(|beat| beat.state)
+    };
+    use SessionState::*;
+
+    // Before any heartbeat there is no file to carry a state, and state.sh
+    // does not invent one: it cannot validate a pid.
+    assert_eq!(state("Stop", r#"{"session_id":"s-1"}"#), None);
+    assert!(!hooks.live().join("s-1.json").exists());
+
+    // A fresh or resumed session sits at its prompt.
+    assert_eq!(
+        beat(
+            "SessionStart",
+            r#"{"session_id":"s-1","cwd":"/w","source":"startup"}"#
+        ),
+        Some(Idle)
+    );
+    assert_eq!(
+        beat("UserPromptSubmit", r#"{"session_id":"s-1","cwd":"/w"}"#),
+        Some(Busy)
+    );
+    // Tool use while busy changes nothing.
+    assert_eq!(
+        state(
+            "PostToolUse",
+            r#"{"session_id":"s-1","tool_name":"Bash","tool_input":{},"tool_response":{}}"#
+        ),
+        Some(Busy)
+    );
+    // A permission prompt needs you; the tool running after it is answered
+    // means Claude carried on.
+    assert_eq!(
+        state(
+            "Notification",
+            r#"{"session_id":"s-1","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}"#
+        ),
+        Some(NeedsYou)
+    );
+    assert_eq!(
+        state("PostToolUse", r#"{"session_id":"s-1","tool_name":"Bash"}"#),
+        Some(Busy)
+    );
+    // A denied tool never runs, so its PostToolUse never comes; the next
+    // tool Claude reaches for says it carried on all the same.
+    state(
+        "Notification",
+        r#"{"session_id":"s-1","notification_type":"permission_prompt"}"#,
+    );
+    assert_eq!(
+        state("PreToolUse", r#"{"session_id":"s-1","tool_name":"Read"}"#),
+        Some(Busy)
+    );
+    // A question to the user needs you too, until it is answered.
+    assert_eq!(
+        state(
+            "PreToolUse",
+            r#"{"session_id":"s-1","tool_name":"AskUserQuestion"}"#
+        ),
+        Some(NeedsYou)
+    );
+    assert_eq!(
+        state(
+            "PostToolUse",
+            r#"{"session_id":"s-1","tool_name":"AskUserQuestion"}"#
+        ),
+        Some(Busy)
+    );
+    // A notification this does not know leaves the state alone.
+    assert_eq!(
+        state(
+            "Notification",
+            r#"{"session_id":"s-1","notification_type":"auth_success","message":"ok"}"#
+        ),
+        Some(Busy)
+    );
+    // The turn ends.
+    assert_eq!(state("Stop", r#"{"session_id":"s-1"}"#), Some(Idle));
+    // Tool use after a stop (a background task finishing) does not wake it.
+    assert_eq!(
+        state("PostToolUse", r#"{"session_id":"s-1","tool_name":"Bash"}"#),
+        Some(Idle)
+    );
+    // Esc skips Stop; the idle prompt a minute later corrects busy to idle.
+    beat("UserPromptSubmit", r#"{"session_id":"s-1","cwd":"/w"}"#);
+    assert_eq!(
+        state(
+            "Notification",
+            r#"{"session_id":"s-1","notification_type":"idle_prompt","message":"Claude is waiting for your input"}"#
+        ),
+        Some(Idle)
+    );
+    // A Claude too old to send notification_type is read by its message.
+    assert_eq!(
+        state(
+            "Notification",
+            r#"{"session_id":"s-1","message":"Claude needs your permission to use Edit"}"#
+        ),
+        Some(NeedsYou)
+    );
+    assert_eq!(
+        state(
+            "Notification",
+            r#"{"session_id":"s-1","message":"Claude is waiting for your input"}"#
+        ),
+        Some(Idle)
+    );
+    // Compaction restarts the session mid-turn: whatever it was doing, it
+    // still is. The heartbeat keeps the state rather than resetting it.
+    beat("UserPromptSubmit", r#"{"session_id":"s-1","cwd":"/w"}"#);
+    assert_eq!(
+        beat(
+            "SessionStart",
+            r#"{"session_id":"s-1","cwd":"/w","source":"compact"}"#
+        ),
+        Some(Busy)
+    );
+    // The heartbeat survives every state write intact.
+    let kept = hooks.beat("s-1").unwrap();
+    assert_eq!((kept.pid, kept.cwd.as_str()), (4242, "/w"));
+
+    // A hostile id is stripped to the characters an id can hold, so it
+    // cannot reach a file outside the live directory.
+    hooks.run("state.sh", "Stop", r#"{"session_id":"../s-1"}"#, None);
+    assert!(!hooks.home.path().join(".config/forestui/s-1.json").exists());
+}
+
 fn beat(sid: &str, pid: u32, pane: &str) -> Heartbeat {
     Heartbeat {
         session_id: sid.into(),
         pid,
         tmux_pane: pane.into(),
         cwd: String::new(),
+        state: None,
     }
 }
 
@@ -231,4 +404,140 @@ fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
     // Outside tmux entirely, every heartbeat is elsewhere.
     let merged = merge(Vec::new(), vec![beat("x", 5, "%2")], None, |_| None);
     assert!(matches!(merged[0].place, LivePlace::Elsewhere { pid: 5 }));
+}
+
+/// The states a heartbeat can carry, most urgent last — the sidebar row
+/// picks the maximum, so the order is the urgency rule.
+#[test]
+fn session_states_parse_and_rank_by_urgency() {
+    assert_eq!(SessionState::parse("busy"), Some(SessionState::Busy));
+    assert_eq!(
+        SessionState::parse("needs_you"),
+        Some(SessionState::NeedsYou)
+    );
+    assert_eq!(SessionState::parse("idle"), Some(SessionState::Idle));
+    assert_eq!(SessionState::parse("thinking"), None);
+    assert!(SessionState::NeedsYou > SessionState::Busy);
+    assert!(SessionState::Busy > SessionState::Idle);
+    assert_eq!(SessionState::NeedsYou.label(), "needs you");
+}
+
+/// A heartbeat from a plugin older than the state hooks has no `state`, and
+/// one from a newer plugin may carry a state this build does not know.
+/// Neither may fail the parse — an unparseable heartbeat is swept as stale.
+#[test]
+fn a_heartbeat_without_a_known_state_still_loads() {
+    let old: Heartbeat =
+        serde_json::from_str(r#"{"session_id":"a","pid":1,"tmux_pane":"","cwd":"/x"}"#).unwrap();
+    assert_eq!(old.state, None);
+    let future: Heartbeat =
+        serde_json::from_str(r#"{"session_id":"a","pid":1,"state":"compacting"}"#).unwrap();
+    assert_eq!(future.state, None);
+    let busy: Heartbeat =
+        serde_json::from_str(r#"{"session_id":"a","pid":1,"state":"busy"}"#).unwrap();
+    assert_eq!(busy.state, Some(SessionState::Busy));
+}
+
+/// A stamped window wins the session's place, but its heartbeat still says
+/// what the session is doing and where it runs.
+#[test]
+fn the_merge_carries_state_and_cwd_from_the_heartbeat() {
+    let mut stamped = beat("in-window", 10, "%1");
+    stamped.state = Some(SessionState::NeedsYou);
+    stamped.cwd = "/w/feature".into();
+    let merged = merge(
+        vec![window("in-window", true), window("no-beat", true)],
+        vec![stamped],
+        Some("$0".into()),
+        |_| None,
+    );
+    let by_id: std::collections::HashMap<&str, &LiveSession> =
+        merged.iter().map(|s| (s.session_id.as_str(), s)).collect();
+    assert_eq!(by_id["in-window"].state, Some(SessionState::NeedsYou));
+    assert_eq!(by_id["in-window"].cwd.as_deref(), Some("/w/feature"));
+    assert_eq!(by_id["no-beat"].state, None, "no heartbeat, no guess");
+    assert_eq!(by_id["no-beat"].cwd, None);
+}
+
+/// The once-a-second read: only the named sessions, only their state, no
+/// `ps` — and an id that would name a path outside the directory is never
+/// opened.
+#[test]
+fn reading_states_reads_only_the_named_heartbeats() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("a.json"),
+        r#"{"session_id":"a","pid":1,"state":"busy"}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("b.json"), r#"{"session_id":"b","pid":2}"#).unwrap();
+    std::fs::write(
+        dir.path().join("c.json"),
+        r#"{"session_id":"c","pid":3,"state":"idle"}"#,
+    )
+    .unwrap();
+    let ids = ["a", "b", "gone", "../c"].map(String::from);
+    let states = read_states_in(dir.path(), &ids);
+    assert_eq!(states.get("a"), Some(&SessionState::Busy));
+    assert!(!states.contains_key("b"), "no state field, no state");
+    assert!(!states.contains_key("gone"));
+    assert!(!states.contains_key("../c"));
+    assert!(!states.contains_key("c"), "not asked for");
+}
+
+fn live_in(sid: &str, cwd: &str, state: Option<SessionState>, ours: bool) -> LiveSession {
+    LiveSession {
+        session_id: sid.into(),
+        place: if ours {
+            LivePlace::Window {
+                window_id: "@1".into(),
+                window_name: sid.into(),
+            }
+        } else {
+            LivePlace::Elsewhere { pid: 1 }
+        },
+        state,
+        cwd: Some(cwd.into()),
+    }
+}
+
+/// A worktree row's roll-up: only sessions in forestui's own windows, in
+/// that worktree, with a known state count — and the most urgent wins.
+#[test]
+fn a_worktree_rolls_up_the_most_urgent_state_of_its_own_windows() {
+    use SessionState::*;
+    let sessions = [
+        live_in("a", "/f/repo/wt", Some(Idle), true),
+        live_in("b", "/f/repo/wt/src", Some(NeedsYou), true),
+        live_in("c", "/f/repo/wt", Some(Busy), true),
+        // Elsewhere: another tmux session, not counted.
+        live_in("d", "/f/repo/wt", Some(NeedsYou), false),
+        // A sibling whose name merely starts with ours.
+        live_in("e", "/f/repo/wt-two", Some(NeedsYou), true),
+        // No state known: not counted.
+        live_in("f", "/f/repo/wt", None, true),
+    ];
+    let activity = activity(sessions.iter(), Path::new("/f/repo/wt"));
+    assert_eq!(
+        activity,
+        Some(Activity {
+            state: NeedsYou,
+            sessions: 3
+        })
+    );
+
+    let only_elsewhere = [live_in("d", "/f/repo/wt", Some(Busy), false)];
+    assert_eq!(activity_of(&only_elsewhere, "/f/repo/wt"), None);
+    let one = [live_in("a", "/f/repo/wt", Some(Busy), true)];
+    assert_eq!(
+        activity_of(&one, "/f/repo/wt"),
+        Some(Activity {
+            state: Busy,
+            sessions: 1
+        })
+    );
+}
+
+fn activity_of(sessions: &[LiveSession], path: &str) -> Option<Activity> {
+    activity(sessions.iter(), Path::new(path))
 }
