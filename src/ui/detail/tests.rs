@@ -364,7 +364,7 @@ async fn the_live_badge_carries_the_session_state() {
             LivePlace::OtherSession {
                 window_id: "@9".into(),
                 window_name: "hand-made".into(),
-                tmux_session: "work".into(),
+                session_name: "work".into(),
                 last_window: false,
             },
             "● live in tmux session work",

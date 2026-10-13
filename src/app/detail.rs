@@ -509,11 +509,11 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
                 }
                 // A window the guard can bring over, so the badge says from
                 // where.
-                crate::services::live::LivePlace::OtherSession { tmux_session, .. } => {
+                crate::services::live::LivePlace::OtherSession { session_name, .. } => {
                     title_line.push((
                         format!(
                             "● live in tmux session {}",
-                            crate::util::truncate(tmux_session, 20)
+                            crate::util::truncate(session_name, 20)
                         ),
                         theme::accent(),
                     ));

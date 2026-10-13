@@ -166,7 +166,7 @@ pub enum ConfirmAction {
         closes_session: bool,
     },
     /// The guard's last shape: the session is running somewhere forestui
-    /// cannot reach (another tmux session, or no tmux at all — found via
+    /// cannot reach (another tmux server, or no tmux at all — found via
     /// the plugin's heartbeat). Confirming resumes here anyway, eyes open:
     /// two Claudes on one transcript diverge.
     ForceResume {

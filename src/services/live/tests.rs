@@ -335,14 +335,15 @@ fn hook_payloads_drive_the_session_state() {
     assert!(!hooks.home.path().join(".config/forestui/s-1.json").exists());
 }
 
-/// Where these tests' forestui runs: server `S` (socket and pid, as
-/// `$TMUX` spells them), tmux session `$0`.
+/// Where these tests' forestui runs: a server (socket and pid, as `$TMUX`
+/// spells them) and tmux session `$0`.
 const OUR_SERVER: &str = "/tmp/tmux-1000/default,77";
 
 fn home() -> Option<Home> {
     Some(Home {
         server: OUR_SERVER.into(),
         session: "$0".into(),
+        group: String::new(),
     })
 }
 
@@ -375,6 +376,7 @@ fn pane_in(session_id: &str, session: &str, window_id: &str, window: &str) -> tm
     tmux::PaneWindow {
         tmux_session: session_id.into(),
         session_name: session.into(),
+        session_group: String::new(),
         session_windows: 3,
         window_id: window_id.into(),
         window_name: window.into(),
@@ -426,7 +428,7 @@ fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
         &LivePlace::OtherSession {
             window_id: "@8".into(),
             window_name: "foreign".into(),
-            tmux_session: "work".into(),
+            session_name: "work".into(),
             last_window: true,
         }
     );
@@ -476,16 +478,28 @@ fn a_pane_resolves_only_on_our_own_tmux_server() {
     );
 }
 
-/// `$TMUX` is `<socket>,<server pid>,<session index>`; the server is the
-/// first two, which is what the heartbeat records too.
+/// Sessions in one group share their windows, and tmux names whichever
+/// member it likes as a pane's session. A pane in forestui's own group is
+/// therefore ours — switchable, never offered to be moved to where it
+/// already is.
 #[test]
-fn the_server_is_the_socket_and_pid_of_tmux_env() {
-    assert_eq!(
-        server_of("/tmp/tmux-1000/default,77,3"),
-        Some("/tmp/tmux-1000/default,77")
+fn a_pane_in_our_session_group_is_ours() {
+    let mut home = home().unwrap();
+    home.group = "forest".into();
+    let peer = |pane: &str| {
+        Some(tmux::PaneWindow {
+            session_group: if pane == "%1" { "forest" } else { "" }.into(),
+            ..pane_in("$4", "forest-1", "@3", "claude")
+        })
+    };
+    let merged = merge(
+        Vec::new(),
+        vec![beat("grouped", 10, "%1"), beat("ungrouped", 20, "%2")],
+        Some(home),
+        peer,
     );
-    assert_eq!(server_of(""), None);
-    assert_eq!(server_of("no-commas"), None);
+    assert!(matches!(merged[0].place, LivePlace::Window { .. }));
+    assert!(matches!(merged[1].place, LivePlace::OtherSession { .. }));
 }
 
 /// The states a heartbeat can carry, most urgent last — the sidebar row

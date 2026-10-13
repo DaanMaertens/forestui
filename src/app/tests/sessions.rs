@@ -240,6 +240,29 @@ async fn resuming_a_session_in_another_tmux_session_offers_to_bring_it_here() {
     assert!(confirm.action.is_destructive());
 }
 
+/// Renaming renames the session's window, and a window in another tmux
+/// session is the user's arrangement there: renaming it is refused, like
+/// any session forestui cannot reach, until it is brought here.
+#[tokio::test]
+async fn renaming_a_session_in_another_tmux_session_is_refused() {
+    let (_dir, mut app) = app_with_fixture();
+    app.sessions = Some(vec![a_session("one")]);
+    app.live_sessions
+        .insert("one".into(), a_live_in_other_session("one", false));
+    app.run_action(Action::RenameSession(0));
+    assert!(app.modals.is_empty(), "no rename dialog");
+    assert!(
+        app.notifications
+            .iter()
+            .any(|n| n.text.contains("tmux session 'work'")),
+        "{:?}",
+        app.notifications
+            .iter()
+            .map(|n| &n.text)
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Deleting a session asks first and really deletes after — and refuses
 /// outright while a window holds the transcript open.
 #[tokio::test]

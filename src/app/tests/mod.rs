@@ -76,7 +76,7 @@ fn a_live_in_other_session(
         place: crate::services::live::LivePlace::OtherSession {
             window_id: "@12".into(),
             window_name: "hand-made".into(),
-            tmux_session: "work".into(),
+            session_name: "work".into(),
             last_window,
         },
         state: None,

@@ -690,16 +690,21 @@ impl App {
     }
 
     /// Move a session's window over from another tmux session and switch to
-    /// it. The window is stamped with the session it holds so the live scan
-    /// finds it by stamp from now on, like a window forestui opened — but
-    /// not with a birth name: forestui did not open it, so title sync and
-    /// the back key leave it alone, as they do any hand-made window.
+    /// it. The dialog was built from a scan, so the window is checked again
+    /// first: it must still hold that session, by the `@claude_session_id`
+    /// stamp the plugin's heartbeat put on it — the same stamp that lets the
+    /// live scan find it here afterwards, like a window forestui opened. It
+    /// gets no birth name: forestui did not open it, so title sync and the
+    /// back key leave it alone, as they do any hand-made window.
     fn bring_window(&mut self, window_id: &str, window_name: &str, session_id: &str) {
-        if tmux::move_window_here(window_id) {
-            tmux::stamp_session_id(window_id, session_id);
-            self.switch_to_window(window_id, window_name);
+        // Either way the badge is now out of date: it moved here, or it was
+        // closed, moved or reused since the scan.
+        if tmux::window_session_id(window_id).as_deref() == Some(session_id)
+            && tmux::move_window_here(window_id)
+            && tmux::select_window(window_id)
+        {
+            self.notify(format!("Brought {window_name} here"), Severity::Information);
         } else {
-            // Closed or moved since the scan; the next sweep shows where.
             self.notify(
                 format!("Could not bring window {window_name} here"),
                 Severity::Warning,
@@ -894,9 +899,9 @@ impl App {
                 }
                 // Bringing a window over is the guard's offer, made from the
                 // session card; a jump only points at it.
-                Some(LivePlace::OtherSession { tmux_session, .. }) => {
+                Some(LivePlace::OtherSession { session_name, .. }) => {
                     elsewhere.get_or_insert(format!(
-                        "Its Claude session is running in tmux session '{tmux_session}' \
+                        "Its Claude session is running in tmux session '{session_name}' \
                          — resume it from its card to bring it here"
                     ));
                 }
@@ -1075,12 +1080,12 @@ impl App {
             crate::services::live::LivePlace::OtherSession {
                 window_id,
                 window_name,
-                tmux_session,
+                session_name,
                 last_window,
             } => {
                 let closes = if *last_window {
                     format!(
-                        "\nIt is that session's only window, so tmux session '{tmux_session}' will close."
+                        "\nIt is that session's only window, so tmux session '{session_name}' will close."
                     )
                 } else {
                     String::new()
@@ -1095,7 +1100,7 @@ impl App {
                     "Session In Another tmux Session",
                     format!(
                         "This session is running in window '{window_name}' of tmux session \
-                         '{tmux_session}'.\nMove that window here and switch to it?{closes}"
+                         '{session_name}'.\nMove that window here and switch to it?{closes}"
                     ),
                     action,
                 )));
@@ -1214,7 +1219,9 @@ impl App {
         let id = session.id.clone();
         // A session running somewhere unreachable can be renamed by neither
         // mechanism: no window to rename, and its Claude is mid-write on the
-        // transcript an append would race.
+        // transcript an append would race. One in another tmux session has a
+        // window, but renaming it would rearrange that session behind the
+        // user's back — bringing it here is the asked-first way in.
         let live_window = match self.live_sessions.get(&id).map(|live| &live.place) {
             Some(crate::services::live::LivePlace::Elsewhere { .. }) => {
                 self.notify(
@@ -1223,17 +1230,20 @@ impl App {
                 );
                 return;
             }
-            Some(
-                crate::services::live::LivePlace::Window {
-                    window_id,
-                    window_name,
-                }
-                | crate::services::live::LivePlace::OtherSession {
-                    window_id,
-                    window_name,
-                    ..
-                },
-            ) => Some((window_id.clone(), window_name.clone())),
+            Some(crate::services::live::LivePlace::OtherSession { session_name, .. }) => {
+                self.notify(
+                    format!(
+                        "Session is running in tmux session '{session_name}' — \
+                         rename it there with /rename, or resume it to bring it here"
+                    ),
+                    Severity::Warning,
+                );
+                return;
+            }
+            Some(crate::services::live::LivePlace::Window {
+                window_id,
+                window_name,
+            }) => Some((window_id.clone(), window_name.clone())),
             None => None,
         };
         // The dialog opens on the name the card shows, cursor at the end —
@@ -1278,9 +1288,9 @@ impl App {
                 }
                 crate::services::live::LivePlace::OtherSession {
                     window_name,
-                    tmux_session,
+                    session_name,
                     ..
-                } => format!("open in window '{window_name}' of tmux session '{tmux_session}'"),
+                } => format!("open in window '{window_name}' of tmux session '{session_name}'"),
                 crate::services::live::LivePlace::Elsewhere { pid } => {
                     format!("running elsewhere (pid {pid})")
                 }

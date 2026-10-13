@@ -34,7 +34,7 @@ pub enum LivePlace {
         window_id: String,
         window_name: String,
         /// The other session's name, for the dialog and the badge.
-        tmux_session: String,
+        session_name: String,
         /// Whether it is that session's only window, which moving closes.
         last_window: bool,
     },
@@ -137,7 +137,8 @@ pub struct Heartbeat {
     pub pid: u32,
     #[serde(default)]
     pub tmux_pane: String,
-    /// The tmux server `tmux_pane` belongs to, as [`server_of`] spells it.
+    /// The tmux server `tmux_pane` belongs to, as [`tmux::server_of`] spells
+    /// it.
     /// Pane ids are only unique per server, so a pane means nothing without
     /// it. Empty outside tmux, and in a heartbeat from a plugin older than
     /// version 7 — which is then never resolved to a window.
@@ -183,30 +184,21 @@ pub fn live_dir() -> PathBuf {
 pub struct Home {
     pub server: String,
     pub session: String,
-}
-
-/// A tmux server's identity from a `$TMUX` value, `<socket>,<pid>,<index>`:
-/// the socket path and the server's pid. The socket alone is not enough — a
-/// server restarted on the same socket numbers its panes afresh, so an old
-/// `%3` would name a new, unrelated pane. `heartbeat.sh` strips the same
-/// last field, so the two compare as plain strings.
-pub fn server_of(tmux_env: &str) -> Option<&str> {
-    tmux_env
-        .rsplit_once(',')
-        .map(|(server, _index)| server)
-        .filter(|server| server.contains(','))
+    /// Our session's group, empty when it has none: a pane in any member
+    /// of it is in our windows.
+    pub group: String,
 }
 
 /// The full liveness picture, both sources merged. One `list-windows`, one
 /// directory read, one `ps` — run off the UI loop like every other scan.
 pub fn snapshot() -> Vec<LiveSession> {
-    let home = tmux::current_session().and_then(|session| {
-        let env = std::env::var("TMUX").ok()?;
-        Some(Home {
-            server: server_of(&env)?.to_string(),
+    let home = tmux::current_server()
+        .zip(tmux::current_session())
+        .map(|(server, session)| Home {
+            server,
             session,
-        })
-    });
+            group: tmux::current_session_group().unwrap_or_default(),
+        });
     merge(
         tmux::list_claude_windows(),
         read_heartbeats(),
@@ -252,7 +244,8 @@ pub fn merge(
     }
 
     // Heartbeats cover everything else. A recorded pane that resolves onto
-    // our own tmux session is still switchable; anything else is elsewhere.
+    // our own tmux session is still switchable, one on another session of our
+    // server can be brought over, and anything else is elsewhere.
     // A pane from another server is not even looked up: `resolve` asks *our*
     // server, where the same id can name an unrelated pane.
     // (A suspended Claude — Ctrl-Z — is alive by pid and so counts as live
@@ -262,14 +255,19 @@ pub fn merge(
         let place = match &home {
             Some(home) if !beat.tmux_pane.is_empty() && beat.tmux_server == home.server => {
                 match resolve(&beat.tmux_pane) {
-                    Some(pane) if pane.tmux_session == home.session => LivePlace::Window {
-                        window_id: pane.window_id,
-                        window_name: pane.window_name,
-                    },
+                    Some(pane)
+                        if pane.tmux_session == home.session
+                            || (!home.group.is_empty() && pane.session_group == home.group) =>
+                    {
+                        LivePlace::Window {
+                            window_id: pane.window_id,
+                            window_name: pane.window_name,
+                        }
+                    }
                     Some(pane) => LivePlace::OtherSession {
                         window_id: pane.window_id,
                         window_name: pane.window_name,
-                        tmux_session: pane.session_name,
+                        session_name: pane.session_name,
                         last_window: pane.session_windows <= 1,
                     },
                     _ => LivePlace::Elsewhere { pid: beat.pid },
