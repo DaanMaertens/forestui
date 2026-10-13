@@ -977,10 +977,10 @@ fn start_work_clash(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits:
     column.gap();
     column.text(
         frame,
-        format!("Open it, create {} instead,", clash.copy_name),
+        format!("Open it, create {} instead,", clash.copy.worktree),
         theme::muted(),
     );
-    column.text(frame, "or go back and edit the prompt.", theme::muted());
+    column.text(frame, "or go back and edit the name.", theme::muted());
     column.controls(
         frame,
         hits,
@@ -1091,7 +1091,15 @@ fn start_work_confirm(
         column.text(frame, format!(" {}", review.description()), theme::muted());
     }
 
-    column.line(frame, widgets::section("Worktree Name"));
+    // On the header rather than a row of its own, so the screen keeps its
+    // height when the suggestion lands.
+    let header = if modal.name_request.is_some() {
+        let spinner = SPINNER[modal.spinner_index % SPINNER.len()];
+        format!("Worktree Name  {spinner} suggesting a name…")
+    } else {
+        "Worktree Name".to_string()
+    };
+    column.line(frame, widgets::section(&header));
     column.input(
         frame,
         hits,

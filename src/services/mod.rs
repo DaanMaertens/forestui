@@ -6,5 +6,6 @@ pub mod claude_session;
 pub mod git;
 pub mod github;
 pub mod live;
+pub mod name_suggestion;
 pub mod settings;
 pub mod tmux;

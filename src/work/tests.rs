@@ -665,3 +665,79 @@ fn the_issue_filter_applies_before_blocked_hiding() {
     let entries = issue_entries(&issues, IssueFilter::Bugs, &settings, true, |_| None);
     assert_eq!(entry_numbers(&entries), vec![1, 2]);
 }
+
+/// A name suggestion's reply, named like a session: its first non-empty
+/// line, slugged and capped, through the `session` naming.
+#[test]
+fn a_clean_suggestion_is_named_through_the_session_naming() {
+    assert_eq!(
+        suggested_session_names(&defaults(), "sidebar-scroll-perf\n"),
+        Some(WorktreeNames {
+            worktree: "session-sidebar-scroll-perf".into(),
+            branch: "session/session-sidebar-scroll-perf".into(),
+        })
+    );
+    let settings = StartWorkSettings {
+        session: Naming {
+            branch_prefix: "spike/".into(),
+            name_pattern: "s-{slug}".into(),
+        },
+        ..defaults()
+    };
+    assert_eq!(
+        suggested_session_names(&settings, "dark-mode"),
+        Some(WorktreeNames {
+            worktree: "s-dark-mode".into(),
+            branch: "spike/s-dark-mode".into(),
+        })
+    );
+}
+
+/// Quotes, backticks, punctuation and capitals are cleaned off: a model
+/// asked for a bare name does not always give one.
+#[test]
+fn a_suggestion_is_cleaned_to_directory_safe_characters() {
+    for reply in [
+        "\"sidebar-scroll-perf\"",
+        "`sidebar-scroll-perf`",
+        "Sidebar Scroll Perf.",
+        "  **sidebar_scroll/perf**  ",
+    ] {
+        assert_eq!(
+            suggested_session_names(&defaults(), reply).map(|n| n.worktree),
+            Some("session-sidebar-scroll-perf".into()),
+            "{reply:?}"
+        );
+    }
+}
+
+/// Only the first non-empty line is the name; whatever prose follows it is
+/// not.
+#[test]
+fn a_suggestion_is_its_first_non_empty_line() {
+    let reply = "\n\n  dark-mode-toggle\nThis name says what the session is about.\n";
+    assert_eq!(
+        suggested_session_names(&defaults(), reply).map(|n| n.worktree),
+        Some("session-dark-mode-toggle".into())
+    );
+}
+
+#[test]
+fn a_long_suggestion_is_capped_like_a_title() {
+    let names = suggested_session_names(&defaults(), &"abcdefghij-".repeat(8)).unwrap();
+    assert!(names.worktree.len() <= "session-".len() + 40, "{names:?}");
+    assert!(!names.worktree.ends_with('-'), "{names:?}");
+}
+
+/// A reply with nothing a name can be made of suggests nothing, and the
+/// first-words names stay.
+#[test]
+fn a_suggestion_that_cleans_to_nothing_names_nothing() {
+    for reply in ["", "  \n \n", "\"\"", "!!! ???\nsidebar-perf"] {
+        assert_eq!(
+            suggested_session_names(&defaults(), reply),
+            None,
+            "{reply:?}"
+        );
+    }
+}

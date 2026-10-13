@@ -103,10 +103,21 @@ done
 # Claude knows `--remote-control`. The stub answers it like a current Claude
 # and exits: recording it would put the app's own window first in birth.txt,
 # and sleeping would hold the probe until its timeout.
+#
+# A session's name suggestion is a headless `claude -p`. The stub reads the
+# instruction and answers with one fixed name, after a pause long enough for
+# UC-103 to see the spinner — a real model call would make the frames differ
+# run to run, and cost money.
 cat > "$ROOT/bin/claude" <<STUB
 #!/bin/sh
 if [ "\$1" = "--help" ]; then
   echo "  --remote-control [name]  Start an interactive session with Remote Control enabled"
+  exit 0
+fi
+if [ "\$1" = "-p" ]; then
+  cat > /dev/null
+  sleep 2
+  echo "caching-spike"
   exit 0
 fi
 echo "claude stub \$*"
@@ -892,11 +903,12 @@ fi
 # --- UC-103: Start work for a session ------------------------------------------
 #
 # Rust only, after UC-101. `session` goes from the mode step straight to the
-# prompt; the prompt names the worktree, is the whole first prompt (the
-# `session` template is `{body}`), and is what the worktree's link records,
-# under the free-text feature's wire format. Nothing is asked of GitHub.
-# Starting the same words a second time asks about the taken name instead of
-# matching it.
+# prompt; the prompt's first words name the worktree until the name
+# suggestion (the stub's `caching-spike`) replaces them. The prompt is the
+# whole first prompt (the `session` template is `{body}`), and is what the
+# worktree's link records, under the free-text feature's wire format. Nothing
+# is asked of GitHub. Starting the same words a second time asks, on Launch,
+# about the taken name instead of matching it.
 if [ "$LABEL" = "rust" ]; then
   focus_app
   tu mouse click --name "$SESS" --on-regex '[▼▶] beta' >/dev/null 2>&1
@@ -910,34 +922,40 @@ if [ "$LABEL" = "rust" ]; then
   await "Worktree: session-try-a-quick-spike-on-caching"
   capture UC-103 session-prompt
   press Enter
-  await "Launch"; sleep 0.8
+  await "suggesting a name"
+  assert UC-103 first-words-while-suggesting "yes" \
+    "$(screen_has 'session/session-try-a-quick-spike-on-caching')"
+  await "session/session-caching-spike" 15000; sleep 0.8
   capture UC-103 session-confirm
+  assert UC-103 suggestion-stopped-spinning "no" "$(screen_has 'suggesting a name')"
   assert UC-103 titled-as-session "yes" "$(screen_has 'Start Work: Session')"
   assert UC-103 prompt-carries-the-prompt "yes" "$(screen_has 'Try a quick spike on caching')"
   assert UC-103 prompt-reads-no-issue "no" "$(screen_has 'gh issue view')"
   assert UC-103 prompt-asks-for-no-plan "no" "$(screen_has 'approved the plan')"
   press Enter
-  await "[0-9]:session-try-a-quick" 15000; sleep 2
+  await "[0-9]:session-caching-spike" 15000; sleep 2
   capture UC-103 session-launched
-  wt="$ROOT/forest/beta/session-try-a-quick-spike-on-caching"
+  wt="$ROOT/forest/beta/session-caching-spike"
   assert UC-103 worktree-created "yes" "$([ -d "$wt" ] && echo yes || echo no)"
-  assert UC-103 branch-checked-out "session/session-try-a-quick-spike-on-caching" \
+  assert UC-103 branch-checked-out "session/session-caching-spike" \
     "$(git -C "$wt" branch --show-current 2>/dev/null)"
   assert UC-103 work-item-linked \
     "{'kind': 'free_text', 'description': 'Try a quick spike on caching'}" \
-    "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('session-try')][0]")"
+    "$(cfg "[w.get('work_item') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('session-caching')][0]")"
 
   focus_app
   worktrees_before="$(cfg "sum(len(r['worktrees']) for r in d['repositories'])")"
   press s; await "Work Mode"; sleep 0.8
   press Down Enter; await "Prompt"; sleep 0.8
   type_ "Try a quick spike on caching"; sleep 0.5; press Enter
+  await "session/session-caching-spike" 15000; sleep 0.8
+  press Enter
   await "already exists"; sleep 0.8
   capture UC-103 session-clash
   assert UC-103 clash-offers-three-choices "yes" \
     "$(screen_has 'Open existing.*Create copy.*Edit name')"
   assert UC-103 clash-names-the-copy "yes" \
-    "$(screen_has 'create session-try-a-quick-spike-on-caching-2 instead')"
+    "$(screen_has 'create session-caching-spike-2 instead')"
   # Esc walks back: clash → prompt → modes → closed. One press at a time:
   # ESC bytes sent back to back read as Alt+Escape, and a lost press leaves
   # the flow open under every case after this one.
@@ -1015,7 +1033,7 @@ if [ "$LABEL" = "rust" ]; then
   capture UC-105 finished-marked
   assert UC-105 merged-pr-marked "yes" "$(screen_has '[├└]─ ✓ pr-45')"
   assert UC-105 open-issue-unmarked "no" "$(screen_has '✓ feat-77')"
-  assert UC-105 session-unmarked "no" "$(screen_has '✓ session-try')"
+  assert UC-105 session-unmarked "no" "$(screen_has '✓ session-caching')"
   assert UC-105 mark-not-saved "False" \
     "$(cfg "any('finished' in w for r in d['repositories'] for w in r['worktrees'])")"
 fi

@@ -204,6 +204,7 @@ fn the_file_names_are_the_template_names() {
             "issue.md",
             "feature.md",
             "session.md",
+            "session-name.md",
             "pr-review-others.md",
             "pr-review-own.md"
         ]
@@ -307,4 +308,21 @@ fn ensuring_a_file_prefills_it_from_the_layers_below() {
 
     let path = ensure_file(&repo, Template::Issue, &[global.as_path()]).unwrap();
     assert_eq!(std::fs::read_to_string(path).unwrap(), "global issue");
+}
+
+/// The name suggestion's instruction asks for a short kebab-case name and
+/// nothing else, with the session prompt as its `{body}`.
+#[test]
+fn the_session_name_template_asks_for_a_kebab_case_name_for_the_prompt() {
+    assert_eq!(Template::SessionName.file_name(), "session-name.md");
+    assert!(SESSION_NAME_TEMPLATE.contains("kebab-case"));
+    let filled = fill(
+        SESSION_NAME_TEMPLATE,
+        &TemplateVars {
+            body: Some("Why is the sidebar slow?"),
+            ..TemplateVars::default()
+        },
+    );
+    assert!(filled.contains("Why is the sidebar slow?"), "{filled}");
+    assert!(!filled.contains("{body}"), "{filled}");
 }

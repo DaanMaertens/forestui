@@ -185,6 +185,14 @@ pub enum AppEvent {
         link: crate::models::WorkItemLink,
         result: Result<String, String>,
     },
+    /// The name suggestion a session's confirm screen asked for answered:
+    /// Claude's raw reply, or `None` for a call that failed, timed out or
+    /// could not run. The fold applies it only to the screen that asked, if
+    /// that is still on top.
+    SessionNameSuggested {
+        request: Uuid,
+        reply: Option<String>,
+    },
     /// A `git worktree list` scan finished; the fold reconciles the config
     /// against it (git is the source of truth for which worktrees exist).
     /// `None` means git itself failed — the fold releases the in-flight guard

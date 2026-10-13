@@ -176,3 +176,48 @@ fn start_work_roundtrips() {
     assert!(raw.contains("\"scope\": \"all\""), "{raw}");
     assert_eq!(load_settings_from(&p).start_work, s.start_work);
 }
+
+/// The name suggestion is on by default — Haiku, twenty seconds, no tools —
+/// so a file written before it existed loads with it running.
+#[test]
+fn a_file_without_session_naming_suggests_names_with_haiku() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    std::fs::write(&p, r#"{"start_work": {"scope": "all"}}"#).unwrap();
+    let naming = load_settings_from(&p).start_work.session_naming;
+    assert!(naming.enabled);
+    assert_eq!(naming.model, "haiku");
+    assert_eq!(naming.timeout_secs, 20);
+    assert!(naming.allowed_tools.is_empty());
+}
+
+/// Each key of the naming call is taken on its own; the rest keep their
+/// defaults.
+#[test]
+fn a_partial_session_naming_section_fills_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    std::fs::write(
+        &p,
+        r#"{"start_work": {"session_naming": {"enabled": false, "allowed_tools": ["Read"]}}}"#,
+    )
+    .unwrap();
+    let naming = load_settings_from(&p).start_work.session_naming;
+    assert!(!naming.enabled);
+    assert_eq!(naming.allowed_tools, vec!["Read".to_string()]);
+    assert_eq!(naming.model, "haiku");
+    assert_eq!(naming.timeout_secs, 20);
+}
+
+#[test]
+fn session_naming_roundtrips() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    let mut s = Settings::default();
+    s.start_work.session_naming.model = "sonnet".into();
+    s.start_work.session_naming.timeout_secs = 5;
+    save_settings_to(&p, &s).unwrap();
+    let raw = std::fs::read_to_string(&p).unwrap();
+    assert!(raw.contains("\"session_naming\""), "{raw}");
+    assert_eq!(load_settings_from(&p).start_work, s.start_work);
+}

@@ -1467,6 +1467,19 @@ impl App {
                     }
                 }
             }
+            AppEvent::SessionNameSuggested { request, reply } => {
+                // The screen that asked, still on top: one left, launched or
+                // replaced has nothing for this answer to rename.
+                let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last() else {
+                    return;
+                };
+                let start_work = self.start_work_for(&confirm.repo_path);
+                let names =
+                    reply.and_then(|r| crate::work::suggested_session_names(&start_work, &r));
+                if let Some(Modal::StartWorkConfirm(confirm)) = self.modals.last_mut() {
+                    confirm.suggestion_arrived(request, names);
+                }
+            }
             AppEvent::WorktreesFinished { ticket, verdicts } => {
                 // Only the worktrees the repository has now: one removed
                 // while the check ran, or another repository's, is not

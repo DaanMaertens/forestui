@@ -255,12 +255,25 @@ const SESSION_WORDS: usize = 6;
 /// question is what catches that.
 pub fn session_names(settings: &StartWorkSettings, prompt: &str) -> Option<WorktreeNames> {
     let first_words: Vec<&str> = prompt.split_whitespace().take(SESSION_WORDS).collect();
-    let slug = title_slug(&first_words.join(" "));
+    session_names_for_slug(settings, &title_slug(&first_words.join(" ")))
+}
+
+/// Name the worktree and branch for a session from a name suggestion's
+/// reply: its first non-empty line — whatever prose a model adds after the
+/// name is not the name — slugged and capped like a title, through the
+/// `session` naming. `None` when that line holds nothing a name can be made
+/// of, so the first-words names stay.
+pub fn suggested_session_names(settings: &StartWorkSettings, reply: &str) -> Option<WorktreeNames> {
+    let line = reply.lines().map(str::trim).find(|l| !l.is_empty())?;
+    session_names_for_slug(settings, &title_slug(line))
+}
+
+fn session_names_for_slug(settings: &StartWorkSettings, slug: &str) -> Option<WorktreeNames> {
     if slug.is_empty() {
         return None;
     }
     let naming = &settings.session;
-    let worktree = fill_pattern(&naming.name_pattern, None, &slug);
+    let worktree = fill_pattern(&naming.name_pattern, None, slug);
     if worktree.is_empty() {
         return None;
     }

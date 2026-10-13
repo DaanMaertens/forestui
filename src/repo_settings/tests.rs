@@ -158,3 +158,23 @@ fn a_repository_template_is_prefilled_from_the_global_one() {
         crate::prompt::FEATURE_TEMPLATE
     );
 }
+
+/// A repository can change any one key of the naming call and keep the
+/// global value of the others.
+#[test]
+fn a_repository_can_override_one_key_of_the_naming_call() {
+    let mut base = global();
+    base.session_naming.model = "sonnet".into();
+    base.session_naming.timeout_secs = 30;
+    let overrides = overrides_from(
+        r#"{"start_work": {"session_naming": {"model": "opus", "allowed_tools": ["Read", "Grep"]}}}"#,
+    );
+    let merged = effective(&base, &overrides);
+    assert_eq!(merged.session_naming.model, "opus");
+    assert_eq!(
+        merged.session_naming.allowed_tools,
+        vec!["Read".to_string(), "Grep".to_string()]
+    );
+    assert_eq!(merged.session_naming.timeout_secs, 30);
+    assert!(merged.session_naming.enabled);
+}

@@ -331,3 +331,31 @@ async fn selecting_a_repository_asks_again_only_without_a_key() {
     app.reload_detail();
     assert!(!app.repo_probes.contains(&path));
 }
+
+/// A repository's `session-name.md` and naming-call settings are the ones
+/// its sessions' name suggestion uses, a key at a time.
+#[tokio::test]
+async fn a_repository_overrides_the_name_suggestion() {
+    let repos = ReposDir::new();
+    let prompts = PromptsDir::new();
+    prompts.write(crate::prompt::Template::SessionName, b"global: {body}");
+    repos.write(
+        "settings.json",
+        r#"{"start_work": {"session_naming": {"model": "opus"}}}"#,
+    );
+    repos.write("prompts/session-name.md", "repository: {body}");
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    on_github(&mut app, &path);
+
+    let call = app.session_name_call(&path, "Dark mode").expect("a call");
+    assert_eq!(call.instruction, "repository: Dark mode");
+    assert_eq!(call.naming.model, "opus");
+    assert_eq!(call.naming.timeout_secs, 20);
+
+    repos.write(
+        "settings.json",
+        r#"{"start_work": {"session_naming": {"enabled": false}}}"#,
+    );
+    on_github(&mut app, &path);
+    assert!(app.session_name_call(&path, "Dark mode").is_none());
+}
