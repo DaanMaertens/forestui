@@ -1,44 +1,44 @@
                                                               forestui v<version>
-                                  │
-     gh cli: ok (sweep-user)      │
-──────────────────────────────────│  MAIN REPOSITORY
-▼ alpha                           │  Repository: beta
-└─ wt-a-renamed [feat/wt-a-v2]    │  Branch:     main
-  beta                            │  Commit:     <sha> (<rel>)
-▼ gamma                           │
-└─ gamma-imported [feat/imported] │  ┌────────────┐ ┌────────────────────────┐
-                                  │  │ Start work │ │ ↓ Git Pull (No remote) │
-                                  │  └────────────┘ └────────────────────────┘
-                                  │
-                                  │  ──────────────────────────────────────────────────────────────────────────────────────────────────
-                                  │
-                                  │  LOCATION
-                                  │  ┌────────────────────────────────┐
-                                  │  │ <ROOT>/src/beta │
-                                  │  └────────────────────────────────┘
-                                  │
-                                  │  ──────────────────────────────────────────────────────────────────────────────────────────────────
-                                  │
-                                  │  OPEN IN
-                                  │
-                                  │  ┌────────┐ ┌──────────┐ ┌───────┐
-                                  │  │ Editor │ │ Terminal │ │ Files │
-                                  │  └────────┘ └──────────┘ └───────┘
-                                  │
-                                  │  ──────────────────────────────────────────────────────────────────────────────────────────────────
-                                  │
-                                  │  CLAUDE: NEW SESSION
-                                  │
-                                  │  ┌────────┐ ┌──────┐ ┌──────┐
-                                  │  │ Claude │ │ YOLO │ │ Opus │
-                                  │  └────────┘ └──────┘ └──────┘
-                                  │
-                                  │  CLAUDE: RECENT SESSIONS
-                                  │  No sessions found
-                                  │
-                                  │  ──────────────────────────────────────────────────────────────────────────────────────────────────
-                                  │
-                                  │  MANAGE
-                                  │  Settings for sweep-user/alpha
+                                       │
+        gh cli: ok (sweep-user)        │
+───────────────────────────────────────│  MAIN REPOSITORY
+▼ alpha                                │  Repository: beta
+└─ wt-a-renamed [feat/wt-a-v2]         │  Branch:     main
+  beta                                 │  Commit:     <sha> (<rel>)
+▼ gamma                                │
+└─ gamma-imported [feat/imported]      │  ┌────────────┐ ┌────────────────────────┐
+                                       │  │ Start work │ │ ↓ Git Pull (No remote) │
+                                       │  └────────────┘ └────────────────────────┘
+                                       │
+                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
+                                       │
+                                       │  LOCATION
+                                       │  ┌────────────────────────────────┐
+                                       │  │ <ROOT>/src/beta │
+                                       │  └────────────────────────────────┘
+                                       │
+                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
+                                       │
+                                       │  OPEN IN
+                                       │
+                                       │  ┌────────┐ ┌──────────┐ ┌───────┐
+                                       │  │ Editor │ │ Terminal │ │ Files │
+                                       │  └────────┘ └──────────┘ └───────┘
+                                       │
+                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
+                                       │
+                                       │  CLAUDE: NEW SESSION
+                                       │
+                                       │  ┌────────┐ ┌──────┐ ┌──────┐
+                                       │  │ Claude │ │ YOLO │ │ Opus │
+                                       │  └────────┘ └──────┘ └──────┘
+                                       │
+                                       │  CLAUDE: RECENT SESSIONS
+                                       │  No sessions found
+                                       │
+                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
+                                       │
+                                       │  MANAGE
+                                       │  Settings for sweep-user/alpha
  a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt->"<host>" <clock>
