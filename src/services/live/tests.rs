@@ -108,12 +108,15 @@ impl Hooks {
         let bin = self.home.path().join("bin");
         let mut cmd = std::process::Command::new(bin.join(script));
         cmd.arg(event)
+            .env_remove("TMUX")
             .env("HOME", self.home.path())
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null());
         match pane {
-            Some(pane) => cmd.env("TMUX_PANE", pane),
+            Some(pane) => cmd
+                .env("TMUX_PANE", pane)
+                .env("TMUX", "/tmp/tmux-1000/de\"fault,77,3"),
             None => cmd.env_remove("TMUX_PANE"),
         };
         let mut child = cmd.spawn().expect("the script runs");
@@ -162,6 +165,7 @@ fn the_heartbeat_script_writes_sweeps_and_heals() {
     assert_eq!(parsed.pid, 4242);
     assert_eq!(parsed.cwd, "/w/x");
     assert_eq!(parsed.tmux_pane, "");
+    assert_eq!(parsed.tmux_server, "");
 
     // Inside tmux, the stamp on the window is healed to this session.
     run(
@@ -169,6 +173,11 @@ fn the_heartbeat_script_writes_sweeps_and_heals() {
         r#"{"session_id":"beat-1","cwd":"/w/x"}"#,
         Some("%9"),
     );
+    // It records which server the pane is on, quoted however the socket
+    // path is spelled.
+    let inside = hooks.beat("beat-1").expect("a heartbeat");
+    assert_eq!(inside.tmux_pane, "%9");
+    assert_eq!(inside.tmux_server, "/tmp/tmux-1000/de\"fault,77");
     let stamped = std::fs::read_to_string(hooks.home.path().join("tmux.log")).unwrap_or_default();
     assert!(
         stamped.contains("set-option -w -t %9 @claude_session_id beat-1"),
@@ -326,11 +335,29 @@ fn hook_payloads_drive_the_session_state() {
     assert!(!hooks.home.path().join(".config/forestui/s-1.json").exists());
 }
 
+/// Where these tests' forestui runs: a server (socket and pid, as `$TMUX`
+/// spells them) and tmux session `$0`.
+const OUR_SERVER: &str = "/tmp/tmux-1000/default,77";
+
+fn home() -> Option<Home> {
+    Some(Home {
+        server: OUR_SERVER.into(),
+        session: "$0".into(),
+        group: String::new(),
+    })
+}
+
+/// A heartbeat written on forestui's own tmux server.
 fn beat(sid: &str, pid: u32, pane: &str) -> Heartbeat {
     Heartbeat {
         session_id: sid.into(),
         pid,
         tmux_pane: pane.into(),
+        tmux_server: if pane.is_empty() {
+            String::new()
+        } else {
+            OUR_SERVER.into()
+        },
         cwd: String::new(),
         state: None,
     }
@@ -345,10 +372,22 @@ fn window(sid: &str, running: bool) -> tmux::ClaudeWindow {
     }
 }
 
+fn pane_in(session_id: &str, session: &str, window_id: &str, window: &str) -> tmux::PaneWindow {
+    tmux::PaneWindow {
+        tmux_session: session_id.into(),
+        session_name: session.into(),
+        session_group: String::new(),
+        session_windows: 3,
+        window_id: window_id.into(),
+        window_name: window.into(),
+    }
+}
+
 /// The merge's whole contract: exited windows stay out (that session is
 /// free), stamps outrank heartbeats for the same session, a heartbeat
-/// pane on our own tmux session resolves to a switchable window, and
-/// everything else is elsewhere.
+/// pane on our own tmux session resolves to a switchable window, one on
+/// another session of our server to a window that can be brought over,
+/// and everything else is elsewhere.
 #[test]
 fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
     let windows = vec![window("in-window", true), window("exited", false)];
@@ -359,20 +398,15 @@ fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
         beat("no-tmux", 40, ""),      // no pane at all
     ];
     let resolve = |pane: &str| match pane {
-        "%2" => Some(tmux::PaneWindow {
-            tmux_session: "$0".into(),
-            window_id: "@7".into(),
-            window_name: "hand-made".into(),
-        }),
+        "%2" => Some(pane_in("$0", "forest", "@7", "hand-made")),
         "%3" => Some(tmux::PaneWindow {
-            tmux_session: "$9".into(),
-            window_id: "@8".into(),
-            window_name: "foreign".into(),
+            session_windows: 1,
+            ..pane_in("$9", "work", "@8", "foreign")
         }),
         _ => None,
     };
 
-    let merged = merge(windows, beats, Some("$0".into()), resolve);
+    let merged = merge(windows, beats, home(), resolve);
     let by_id: std::collections::HashMap<&str, &LivePlace> = merged
         .iter()
         .map(|s| (s.session_id.as_str(), &s.place))
@@ -388,15 +422,84 @@ fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
         by_id["our-pane"],
         LivePlace::Window { window_id, window_name } if window_id == "@7" && window_name == "hand-made"
     ));
-    assert!(matches!(
+    // Our server, another tmux session: a window forestui can bring over.
+    assert_eq!(
         by_id["other-pane"],
-        LivePlace::Elsewhere { pid: 30 }
-    ));
+        &LivePlace::OtherSession {
+            window_id: "@8".into(),
+            window_name: "foreign".into(),
+            session_name: "work".into(),
+            last_window: true,
+        }
+    );
     assert!(matches!(by_id["no-tmux"], LivePlace::Elsewhere { pid: 40 }));
 
     // Outside tmux entirely, every heartbeat is elsewhere.
     let merged = merge(Vec::new(), vec![beat("x", 5, "%2")], None, |_| None);
     assert!(matches!(merged[0].place, LivePlace::Elsewhere { pid: 5 }));
+}
+
+/// Pane ids are only unique per tmux server. A heartbeat from another
+/// server whose pane id happens to name one of ours is elsewhere — and so
+/// is one that recorded no server at all (an older plugin): resolving it
+/// would be a guess. Neither is even looked up.
+#[test]
+fn a_pane_resolves_only_on_our_own_tmux_server() {
+    let mut foreign = beat("foreign", 10, "%0");
+    foreign.tmux_server = "/tmp/tmux-1000/other,88".into();
+    let mut unrecorded = beat("unrecorded", 20, "%0");
+    unrecorded.tmux_server = String::new();
+    // Same socket, but a server that was restarted since: its panes are
+    // numbered afresh, so the old `%0` is not today's.
+    let mut restarted = beat("restarted", 30, "%0");
+    restarted.tmux_server = "/tmp/tmux-1000/default,76".into();
+    let looked_up = std::cell::RefCell::new(Vec::new());
+    let merged = merge(
+        Vec::new(),
+        vec![foreign, unrecorded, restarted, beat("ours", 40, "%0")],
+        home(),
+        |pane: &str| {
+            looked_up.borrow_mut().push(pane.to_string());
+            Some(pane_in("$0", "forest", "@1", "forestui"))
+        },
+    );
+    let by_id: std::collections::HashMap<&str, &LivePlace> = merged
+        .iter()
+        .map(|s| (s.session_id.as_str(), &s.place))
+        .collect();
+    assert_eq!(by_id["foreign"], &LivePlace::Elsewhere { pid: 10 });
+    assert_eq!(by_id["unrecorded"], &LivePlace::Elsewhere { pid: 20 });
+    assert_eq!(by_id["restarted"], &LivePlace::Elsewhere { pid: 30 });
+    assert!(matches!(by_id["ours"], LivePlace::Window { .. }));
+    assert_eq!(
+        looked_up.borrow().len(),
+        1,
+        "only our server's pane is resolved"
+    );
+}
+
+/// Sessions in one group share their windows, and tmux names whichever
+/// member it likes as a pane's session. A pane in forestui's own group is
+/// therefore ours — switchable, never offered to be moved to where it
+/// already is.
+#[test]
+fn a_pane_in_our_session_group_is_ours() {
+    let mut home = home().unwrap();
+    home.group = "forest".into();
+    let peer = |pane: &str| {
+        Some(tmux::PaneWindow {
+            session_group: if pane == "%1" { "forest" } else { "" }.into(),
+            ..pane_in("$4", "forest-1", "@3", "claude")
+        })
+    };
+    let merged = merge(
+        Vec::new(),
+        vec![beat("grouped", 10, "%1"), beat("ungrouped", 20, "%2")],
+        Some(home),
+        peer,
+    );
+    assert!(matches!(merged[0].place, LivePlace::Window { .. }));
+    assert!(matches!(merged[1].place, LivePlace::OtherSession { .. }));
 }
 
 /// The states a heartbeat can carry, most urgent last — the sidebar row
@@ -441,7 +544,7 @@ fn the_merge_carries_state_and_cwd_from_the_heartbeat() {
     let merged = merge(
         vec![window("in-window", true), window("no-beat", true)],
         vec![stamped],
-        Some("$0".into()),
+        home(),
         |_| None,
     );
     let by_id: std::collections::HashMap<&str, &LiveSession> =

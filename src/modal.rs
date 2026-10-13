@@ -155,8 +155,18 @@ pub enum ConfirmAction {
         window_id: String,
         window_name: String,
     },
-    /// The guard's other shape: the session is running somewhere forestui
-    /// cannot jump to (another tmux session, or no tmux at all — found via
+    /// The session runs in a window of another tmux session on our server:
+    /// move that window into forestui's session and switch to it. Its Claude
+    /// keeps running — nothing is resumed, so nothing can fork.
+    BringWindow {
+        window_id: String,
+        window_name: String,
+        session_id: String,
+        /// The window is its session's last, so moving it closes the session.
+        closes_session: bool,
+    },
+    /// The guard's last shape: the session is running somewhere forestui
+    /// cannot reach (another tmux server, or no tmux at all — found via
     /// the plugin's heartbeat). Confirming resumes here anyway, eyes open:
     /// two Claudes on one transcript diverge.
     ForceResume {
@@ -180,6 +190,7 @@ impl ConfirmAction {
             | ConfirmAction::DeleteClaudeSession { .. } => "Delete",
             ConfirmAction::PruneFinished(_) => "Prune",
             ConfirmAction::SwitchToWindow { .. } => "Switch",
+            ConfirmAction::BringWindow { .. } => "Bring here",
             ConfirmAction::ForceResume { .. } => "Resume anyway",
         }
     }
@@ -188,7 +199,13 @@ impl ConfirmAction {
     /// "Switch" painted destructive-red would warn against the safe choice,
     /// while "Resume anyway" — forking a running conversation — earns it.
     pub fn is_destructive(&self) -> bool {
-        !matches!(self, ConfirmAction::SwitchToWindow { .. })
+        match self {
+            ConfirmAction::SwitchToWindow { .. } => false,
+            // Moving a window loses nothing — unless it takes the other
+            // tmux session down with it.
+            ConfirmAction::BringWindow { closes_session, .. } => *closes_session,
+            _ => true,
+        }
     }
 }
 

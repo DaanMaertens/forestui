@@ -103,9 +103,7 @@ pub fn current_session() -> Option<String> {
         return None;
     }
 
-    let group = tmux(&["display-message", "-p", "-t", &pane, "#{session_group}"])
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
+    let group = current_session_group().unwrap_or_default();
     if group.is_empty() {
         return Some(own);
     }
@@ -117,6 +115,28 @@ pub fn current_session() -> Option<String> {
     ])
     .unwrap_or_default();
     Some(most_active_in_group(&clients, &group, &own))
+}
+
+/// The session group forestui's session belongs to; empty when it is in
+/// none.
+pub fn current_session_group() -> Option<String> {
+    let pane = std::env::var("TMUX_PANE").ok()?;
+    tmux(&["display-message", "-p", "-t", &pane, "#{session_group}"]).map(|s| s.trim().to_string())
+}
+
+/// Which Claude session a window holds, by its `@claude_session_id` stamp.
+/// The plugin's heartbeat stamps every window a session runs in, so this
+/// answers for windows forestui did not open too.
+pub fn window_session_id(window_id: &str) -> Option<String> {
+    tmux(&[
+        "display-message",
+        "-p",
+        "-t",
+        window_id,
+        "#{@claude_session_id}",
+    ])
+    .map(|s| s.trim().to_string())
+    .filter(|id| !id.is_empty())
 }
 
 /// Of the clients attached to our own session group, the session of the most
@@ -138,6 +158,24 @@ fn most_active_in_group(clients: &str, group: &str, own: &str) -> String {
         }
     }
     best
+}
+
+/// The tmux server this process runs on, as [`server_of`] spells it.
+pub fn current_server() -> Option<String> {
+    let env = std::env::var("TMUX").ok()?;
+    server_of(&env).map(str::to_string)
+}
+
+/// A tmux server's identity from a `$TMUX` value, `<socket>,<pid>,<index>`:
+/// the socket path and the server's pid. The socket alone is not enough — a
+/// server restarted on the same socket numbers its panes afresh, so an old
+/// `%3` would name a new, unrelated pane. `heartbeat.sh` strips the same
+/// last field, so the two compare as plain strings.
+pub fn server_of(tmux_env: &str) -> Option<&str> {
+    tmux_env
+        .rsplit_once(',')
+        .map(|(server, _index)| server)
+        .filter(|server| server.contains(','))
 }
 
 /// The tmux window this process is running in.
@@ -180,10 +218,19 @@ pub fn select_window(window_id: &str) -> bool {
 /// This is how a heartbeat's recorded `TMUX_PANE` resolves back to something
 /// forestui can offer to switch to — but only when the pane's session is
 /// forestui's own, which is why the session rides along for the caller to
-/// compare.
+/// compare. A pane in another session of the same server is a window that
+/// can be brought over, and its session's name and size say from where.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneWindow {
     pub tmux_session: String,
+    pub session_name: String,
+    /// Empty when the session is in no group. Group members share windows,
+    /// so a pane in forestui's own group is forestui's whichever member
+    /// tmux names.
+    pub session_group: String,
+    /// How many windows that session has — moving its last one away closes
+    /// the session.
+    pub session_windows: usize,
     pub window_id: String,
     pub window_name: String,
 }
@@ -194,15 +241,49 @@ pub fn pane_window(pane: &str) -> Option<PaneWindow> {
         "-p",
         "-t",
         pane,
-        "#{session_id}\t#{window_id}\t#{window_name}",
+        "#{session_id}\t#{session_windows}\t#{window_id}\t#{session_group}\t#{session_name}\t#{window_name}",
     ])?;
+    parse_pane_window(&out)
+}
+
+/// Pure form of [`pane_window`], for testing. The two names are free text,
+/// so they come last: a tab in one can garble the names, but never the id
+/// and count the caller acts on.
+fn parse_pane_window(out: &str) -> Option<PaneWindow> {
     let line = out.trim_end_matches('\n');
-    let mut parts = line.splitn(3, '\t');
+    let mut parts = line.splitn(6, '\t');
+    let tmux_session = parts.next()?.to_string();
+    let session_windows = parts.next()?.parse().ok()?;
+    let window_id = parts.next()?.to_string();
     Some(PaneWindow {
-        tmux_session: parts.next()?.to_string(),
-        window_id: parts.next()?.to_string(),
+        tmux_session,
+        session_windows,
+        window_id,
+        session_group: parts.next()?.to_string(),
+        session_name: parts.next()?.to_string(),
         window_name: parts.next()?.to_string(),
     })
+}
+
+/// Move a window from another tmux session on this server into forestui's,
+/// for the duplicate-open guard's "bring it here". `move-window` keeps the
+/// window's processes and its id, so the Claude running in it carries on
+/// untouched; it only changes which session lists it. `-d` leaves the
+/// selection alone — the caller switches once the move has landed.
+pub fn move_window_here(window_id: &str) -> bool {
+    let Some(session) = current_session() else {
+        return false;
+    };
+    // A bare `$0:` target means "the next free index in session $0".
+    tmux(&[
+        "move-window",
+        "-d",
+        "-s",
+        window_id,
+        "-t",
+        &format!("{session}:"),
+    ])
+    .is_some()
 }
 
 /// What `ensure_focus_events` found, and therefore what exit has to undo.

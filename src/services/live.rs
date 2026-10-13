@@ -12,7 +12,8 @@
 //!
 //! A session found by stamp wins (it is switchable); a heartbeat fills in the
 //! rest, resolving its recorded pane back to a window when that pane lives on
-//! forestui's own tmux session, and falling back to "elsewhere" otherwise.
+//! forestui's own tmux server — switchable on forestui's own session,
+//! movable from another — and falling back to "elsewhere" otherwise.
 
 use crate::services::tmux;
 use std::collections::{HashMap, HashSet};
@@ -27,7 +28,17 @@ pub enum LivePlace {
         window_id: String,
         window_name: String,
     },
-    /// Running somewhere forestui cannot jump to: another tmux session, or no
+    /// A window in another tmux session on forestui's own server. Not a
+    /// keypress away, but `move-window` can bring it over, Claude and all.
+    OtherSession {
+        window_id: String,
+        window_name: String,
+        /// The other session's name, for the dialog and the badge.
+        session_name: String,
+        /// Whether it is that session's only window, which moving closes.
+        last_window: bool,
+    },
+    /// Running somewhere forestui cannot reach: another tmux server, or no
     /// tmux at all. The pid is shown so the user can find it.
     Elsewhere { pid: u32 },
 }
@@ -126,6 +137,13 @@ pub struct Heartbeat {
     pub pid: u32,
     #[serde(default)]
     pub tmux_pane: String,
+    /// The tmux server `tmux_pane` belongs to, as [`tmux::server_of`] spells
+    /// it.
+    /// Pane ids are only unique per server, so a pane means nothing without
+    /// it. Empty outside tmux, and in a heartbeat from a plugin older than
+    /// version 7 — which is then never resolved to a window.
+    #[serde(default)]
+    pub tmux_server: String,
     #[serde(default)]
     pub cwd: String,
     /// Written by `state.sh` and on `UserPromptSubmit`. Read leniently: a
@@ -160,13 +178,31 @@ pub fn live_dir() -> PathBuf {
         .join("live")
 }
 
+/// Where forestui itself runs: the tmux server and the session on it that
+/// its windows live in. A heartbeat pane is only ours when both match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Home {
+    pub server: String,
+    pub session: String,
+    /// Our session's group, empty when it has none: a pane in any member
+    /// of it is in our windows.
+    pub group: String,
+}
+
 /// The full liveness picture, both sources merged. One `list-windows`, one
 /// directory read, one `ps` — run off the UI loop like every other scan.
 pub fn snapshot() -> Vec<LiveSession> {
+    let home = tmux::current_server()
+        .zip(tmux::current_session())
+        .map(|(server, session)| Home {
+            server,
+            session,
+            group: tmux::current_session_group().unwrap_or_default(),
+        });
     merge(
         tmux::list_claude_windows(),
         read_heartbeats(),
-        tmux::current_session(),
+        home,
         tmux::pane_window,
     )
 }
@@ -176,7 +212,7 @@ pub fn snapshot() -> Vec<LiveSession> {
 pub fn merge(
     windows: Vec<tmux::ClaudeWindow>,
     beats: Vec<Heartbeat>,
-    ours: Option<String>,
+    home: Option<Home>,
     resolve: impl Fn(&str) -> Option<tmux::PaneWindow>,
 ) -> Vec<LiveSession> {
     let mut seen: HashSet<String> = HashSet::new();
@@ -208,19 +244,35 @@ pub fn merge(
     }
 
     // Heartbeats cover everything else. A recorded pane that resolves onto
-    // our own tmux session is still switchable; anything else is elsewhere.
+    // our own tmux session is still switchable, one on another session of our
+    // server can be brought over, and anything else is elsewhere.
+    // A pane from another server is not even looked up: `resolve` asks *our*
+    // server, where the same id can name an unrelated pane.
     // (A suspended Claude — Ctrl-Z — is alive by pid and so counts as live
     // here, which is right: resuming it somewhere else would fork the
     // conversation a `fg` can still continue.)
     for beat in read_heartbeats_merge(beats, &mut seen) {
-        let place = match (&ours, beat.tmux_pane.is_empty()) {
-            (Some(ours), false) => match resolve(&beat.tmux_pane) {
-                Some(pane) if &pane.tmux_session == ours => LivePlace::Window {
-                    window_id: pane.window_id,
-                    window_name: pane.window_name,
-                },
-                _ => LivePlace::Elsewhere { pid: beat.pid },
-            },
+        let place = match &home {
+            Some(home) if !beat.tmux_pane.is_empty() && beat.tmux_server == home.server => {
+                match resolve(&beat.tmux_pane) {
+                    Some(pane)
+                        if pane.tmux_session == home.session
+                            || (!home.group.is_empty() && pane.session_group == home.group) =>
+                    {
+                        LivePlace::Window {
+                            window_id: pane.window_id,
+                            window_name: pane.window_name,
+                        }
+                    }
+                    Some(pane) => LivePlace::OtherSession {
+                        window_id: pane.window_id,
+                        window_name: pane.window_name,
+                        session_name: pane.session_name,
+                        last_window: pane.session_windows <= 1,
+                    },
+                    _ => LivePlace::Elsewhere { pid: beat.pid },
+                }
+            }
             _ => LivePlace::Elsewhere { pid: beat.pid },
         };
         out.push(LiveSession {

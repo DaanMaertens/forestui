@@ -845,3 +845,34 @@ fn only_a_clean_exit_closes_the_shell() {
         }
     }
 }
+
+/// A heartbeat's pane resolves to its session, that session's size and the
+/// window — the names last, so free text cannot misalign the numbers.
+#[test]
+fn a_pane_resolves_to_its_window_and_session() {
+    assert_eq!(
+        parse_pane_window("$3\t1\t@12\tgrp\twork\tclaude: a\tb\n"),
+        Some(PaneWindow {
+            tmux_session: "$3".into(),
+            session_name: "work".into(),
+            session_group: "grp".into(),
+            session_windows: 1,
+            window_id: "@12".into(),
+            window_name: "claude: a\tb".into(),
+        })
+    );
+    assert_eq!(parse_pane_window(""), None);
+    assert_eq!(parse_pane_window("$3\tmany\t@12\t\twork\tx"), None);
+}
+
+/// `$TMUX` is `<socket>,<server pid>,<session index>`; the server is the
+/// first two, which is what the heartbeat records too.
+#[test]
+fn the_server_is_the_socket_and_pid_of_tmux_env() {
+    assert_eq!(
+        server_of("/tmp/tmux-1000/default,77,3"),
+        Some("/tmp/tmux-1000/default,77")
+    );
+    assert_eq!(server_of(""), None);
+    assert_eq!(server_of("no-commas"), None);
+}

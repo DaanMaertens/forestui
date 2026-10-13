@@ -49,7 +49,7 @@ const EXECUTABLES: &[&str] = &[
 
 /// Bumped whenever a shipped file changes, so an install by an older forestui
 /// is recognised as old rather than reported as the user having edited it.
-const SHIPPED_VERSION: &str = "6";
+const SHIPPED_VERSION: &str = "7";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
@@ -88,8 +88,9 @@ impl Status {
 /// `NotInstalled` is a choice the user never made and `Drifted` is their own
 /// edit — neither is forestui's to warn about. Outdated is different: the
 /// user opted in, and a newer build ships hooks their install lacks (the
-/// liveness heartbeat arrived in version 4, session states in 6), so
-/// silence would look like the feature not working.
+/// liveness heartbeat arrived in version 4, session states in 6, the
+/// heartbeat's tmux server in 7), so silence would look like the feature not
+/// working.
 pub fn upgrade_notice(status: &Status) -> Option<String> {
     match status {
         Status::Outdated { installed } => Some(format!(

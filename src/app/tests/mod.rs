@@ -67,6 +67,23 @@ fn a_live_window(session_id: &str) -> crate::services::live::LiveSession {
     }
 }
 
+fn a_live_in_other_session(
+    session_id: &str,
+    last_window: bool,
+) -> crate::services::live::LiveSession {
+    crate::services::live::LiveSession {
+        session_id: session_id.into(),
+        place: crate::services::live::LivePlace::OtherSession {
+            window_id: "@12".into(),
+            window_name: "hand-made".into(),
+            session_name: "work".into(),
+            last_window,
+        },
+        state: None,
+        cwd: None,
+    }
+}
+
 fn a_live_elsewhere(session_id: &str, pid: u32) -> crate::services::live::LiveSession {
     crate::services::live::LiveSession {
         session_id: session_id.into(),
