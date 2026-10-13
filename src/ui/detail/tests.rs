@@ -285,7 +285,7 @@ async fn session_cards_show_liveness_pins_and_spend() {
             .position(|row| row.contains(needle))
             .unwrap_or_else(|| panic!("{needle:?} is not on screen:\n{screen}"))
     };
-    assert!(row_of("Rename") > row_of("Claude │"), "{screen}");
+    assert!(row_of("Rename") > row_of("Resume │"), "{screen}");
     assert!(row_of("12 msgs") > row_of("on branch feat/x"), "{screen}");
     // The spend rides the meta line, beside the count it explains.
     assert!(
@@ -685,16 +685,15 @@ async fn clicking_a_control_maps_to_its_item() {
     };
 
     // Editor, Terminal and Files share a line, so getting these three right
-    // is what proves the x extents are, and not just the rows. "Claude"
-    // appears twice by design — the CLAUDE section's launch button and the
-    // card's resume button share the standardized label — so both
-    // occurrences are asserted onto their own actions.
+    // is what proves the x extents are, and not just the rows. The CLAUDE
+    // section's launch button and the card's resume button are told apart
+    // by label: "Claude" starts a session, "Resume" goes back to one.
     for (label, nth, item) in [
         ("Editor", 0, DetailItem::Action(Action::Editor)),
         ("Terminal", 0, DetailItem::Action(Action::Terminal)),
         ("Files", 0, DetailItem::Action(Action::Files)),
         ("Claude", 0, DetailItem::Action(Action::ClaudeNew)),
-        ("Claude", 1, DetailItem::Action(Action::ResumeSession(0))),
+        ("Resume", 0, DetailItem::Action(Action::ResumeSession(0))),
         ("Delete", 0, DetailItem::Action(Action::Delete)),
         ("Worktree name", 0, DetailItem::Field(Field::WorktreeName)),
     ] {

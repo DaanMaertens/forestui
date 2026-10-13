@@ -114,10 +114,11 @@ async fn a_session_that_vanished_loses_its_card() {
     assert_eq!(list[0].id, "two");
 }
 
-/// Resuming a session that is *running* must guard: an offer to switch
-/// when it sits in one of our windows, an eyes-open "resume anyway" when
-/// its heartbeat says it runs somewhere unreachable. A session with no
-/// live entry resumes freely.
+/// Resuming a session that is *running* must guard: a session in one of
+/// our windows is switched to straight away — no dialog, no toast, since
+/// going to the conversation is what Resume means — and one whose heartbeat
+/// says it runs somewhere unreachable gets an eyes-open "resume anyway". A
+/// session with no live entry resumes freely.
 ///
 /// Exercised through `guard_open_session` directly, never through
 /// `run_action(Resume…)`: the resume path really launches windows, and a
@@ -126,24 +127,25 @@ async fn a_session_that_vanished_loses_its_card() {
 /// The `cfg!(test)` gate in `services::tmux` now makes that impossible,
 /// and this test stays off the launch path anyway.
 #[tokio::test]
-async fn resuming_an_open_session_offers_its_window_instead() {
+async fn resuming_an_open_session_switches_to_its_window() {
     let (_dir, mut app) = app_with_fixture();
     let path = app.state.selected_path().expect("a selection");
     app.sessions = Some(vec![a_session("one")]);
     app.handle_event(AppEvent::LiveSessions {
         sessions: vec![a_live_window("one")],
     });
+    app.notifications.clear();
 
     assert!(app.guard_open_session(0, &path, false, None));
-
-    let Some(crate::modal::Modal::Confirm(confirm)) = app.modals.last() else {
-        panic!("the guard did not open a dialog: {:?}", app.modals.last());
-    };
-    assert!(matches!(
-        confirm.action,
-        crate::modal::ConfirmAction::SwitchToWindow { .. }
-    ));
-    assert!(confirm.message.contains("claude:demo:wt"));
+    assert!(
+        app.modals.is_empty(),
+        "a switch asks nothing: {:?}",
+        app.modals.last()
+    );
+    // Under test tmux answers as if absent, so the select fails and the
+    // only notice is the window-gone warning; a success would say nothing.
+    let notices: Vec<&str> = app.notifications.iter().map(|n| n.text.as_str()).collect();
+    assert_eq!(notices, ["Window claude:demo:wt is gone"]);
 
     // Running somewhere unreachable: the guard warns about the fork and
     // the confirm carries everything the resume needs, since there is no
@@ -506,5 +508,143 @@ async fn a_failed_session_scan_keeps_what_the_cache_painted() {
     assert!(
         app.sessions.is_some(),
         "a panicked scan must not overwrite painted content"
+    );
+}
+
+/// The session card's launch row, as the content walk builds it: each
+/// control's label, action and whether it can fire.
+fn launch_row(app: &App) -> Vec<(String, DetailItem, bool)> {
+    detail::content(app)
+        .iter()
+        .filter_map(|node| match node {
+            detail::DetailNode::CardBody { rows, .. } => Some(rows.concat()),
+            _ => None,
+        })
+        .flatten()
+        .filter(|c| {
+            matches!(
+                c.item,
+                DetailItem::Action(
+                    Action::ResumeSession(0)
+                        | Action::ResumeYolo(0)
+                        | Action::ResumeCustom { session: 0, .. }
+                )
+            )
+        })
+        .map(|c| (c.label, c.item, c.enabled))
+        .collect()
+}
+
+fn app_with_a_custom_button() -> (tempfile::TempDir, App) {
+    let (dir, mut app) = app_with_fixture();
+    app.settings.custom_buttons = vec![CustomClaudeButton {
+        label: "Opus".into(),
+        prefix: "opus".into(),
+        command: "claude --model opus".into(),
+    }];
+    app.sessions = Some(vec![a_session("one")]);
+    (dir, app)
+}
+
+/// The card's plain button resumes *this* conversation, so it says so;
+/// the CLAUDE: NEW SESSION row above keeps "Claude", which starts one.
+#[tokio::test]
+async fn the_cards_plain_button_reads_resume() {
+    let (_dir, app) = app_with_a_custom_button();
+    let labels: Vec<String> = launch_row(&app).into_iter().map(|(l, ..)| l).collect();
+    assert_eq!(labels, ["Resume", "YOLO", "Opus"]);
+
+    let new_session = detail::content(&app)
+        .iter()
+        .filter_map(|node| match node {
+            detail::DetailNode::Controls { controls, .. } => Some(controls.clone()),
+            _ => None,
+        })
+        .flatten()
+        .find(|c| c.item == DetailItem::Action(Action::ClaudeNew))
+        .expect("the new-session row");
+    assert_eq!(new_session.label, "Claude");
+}
+
+/// A card that is not live offers every launch.
+#[tokio::test]
+async fn a_free_card_enables_every_launch() {
+    let (_dir, app) = app_with_a_custom_button();
+    let row = launch_row(&app);
+    assert_eq!(row.len(), 3);
+    assert!(row.iter().all(|(.., enabled)| *enabled));
+}
+
+/// A live session is one conversation already running: Resume goes to it,
+/// but YOLO or a custom button would only start a second Claude on it with
+/// other flags. They keep their slots, disabled, wherever it runs.
+#[tokio::test]
+async fn a_live_card_disables_all_but_resume() {
+    for live in [
+        a_live_window("one"),
+        a_live_in_other_session("one", false),
+        a_live_elsewhere("one", 4242),
+    ] {
+        let (_dir, mut app) = app_with_a_custom_button();
+        let place = format!("{:?}", live.place);
+        app.handle_event(AppEvent::LiveSessions {
+            sessions: vec![live],
+        });
+        let row = launch_row(&app);
+        assert_eq!(row.len(), 3, "{place}: the row keeps its slots");
+        let enabled: Vec<bool> = row.iter().map(|(.., e)| *e).collect();
+        assert_eq!(enabled, [true, false, false], "{place}");
+    }
+}
+
+/// The disabled launches really are dead, from the mouse and from Enter.
+/// Live elsewhere is the place that shows it: there a launch that fired
+/// would open the force-resume confirm, and Resume beside them still does.
+#[tokio::test]
+async fn a_live_cards_disabled_launches_do_not_fire() {
+    let (_dir, mut app) = app_with_a_custom_button();
+    // A launch refuses a missing directory before it reaches the guard.
+    std::fs::create_dir_all(app.state.selected_path().expect("a selection"))
+        .expect("the worktree directory");
+    app.handle_event(AppEvent::LiveSessions {
+        sessions: vec![a_live_elsewhere("one", 4242)],
+    });
+    app.notifications.clear();
+    snapshot_drawn(&mut app);
+    let index_of = |app: &App, item: DetailItem| {
+        app.detail_items()
+            .iter()
+            .position(|candidate| *candidate == item)
+            .expect("the control is in the pane")
+    };
+
+    for item in [
+        DetailItem::Action(Action::ResumeYolo(0)),
+        DetailItem::Action(Action::ResumeCustom {
+            button: 0,
+            session: 0,
+        }),
+    ] {
+        let index = index_of(&app, item.clone());
+        assert!(!app.drawn_items[index].1, "{item:?} drawn enabled");
+        app.push_hit(rect(40, 5, 8, 3), HitTarget::DetailItem(index));
+        app.handle_mouse(click(42, 6));
+        app.focus = Focus::Detail;
+        app.detail_index = index;
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.modals.is_empty(), "{item:?} fired");
+        assert!(app.notifications.is_empty(), "{item:?} fired");
+    }
+
+    app.detail_index = index_of(&app, DetailItem::Action(Action::ResumeSession(0)));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(
+        matches!(
+            app.modals.last(),
+            Some(crate::modal::Modal::Confirm(confirm))
+                if matches!(confirm.action, crate::modal::ConfirmAction::ForceResume { .. })
+        ),
+        "Resume must still reach the guard: {:?}",
+        app.modals.last()
     );
 }

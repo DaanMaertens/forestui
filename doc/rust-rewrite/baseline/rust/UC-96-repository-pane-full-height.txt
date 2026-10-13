@@ -37,7 +37,7 @@
                                        │
                                        │  ┌───────────────────────────────────────────────────────────────────────────────────────────┐
                                        │  │ session 3: refactor the detail pane so the cards line up      ┌────────┐ ┌──────┐ ┌──────┐│
-                                       │  │                                                               │ Claude │ │ YOLO │ │ Opus ││
+                                       │  │                                                               │ Resume │ │ YOLO │ │ Opus ││
                                        │  │ claude: looking at the card layout now                        └────────┘ └──────┘ └──────┘│
                                        │  │ user: and then check it against the python build                ┌────────┐ ┌─────┐ ┌─────┐│
                                        │  │                                                                 │ Rename │ │ Pin │ │ Del ││
@@ -47,7 +47,7 @@
                                        │
                                        │  ┌───────────────────────────────────────────────────────────────────────────────────────────┐
                                        │  │ session 2: refactor the detail pane so the cards line up      ┌────────┐ ┌──────┐ ┌──────┐│
-                                       │  │                                                               │ Claude │ │ YOLO │ │ Opus ││
+                                       │  │                                                               │ Resume │ │ YOLO │ │ Opus ││
                                        │  │ claude: looking at the card layout now                        └────────┘ └──────┘ └──────┘│
                                        │  │ user: and then check it against the python build                ┌────────┐ ┌─────┐ ┌─────┐│
                                        │  │                                                                 │ Rename │ │ Pin │ │ Del ││
@@ -57,7 +57,7 @@
                                        │
                                        │  ┌───────────────────────────────────────────────────────────────────────────────────────────┐
                                        │  │ session 1: refactor the detail pane so the cards line up      ┌────────┐ ┌──────┐ ┌──────┐│
-                                       │  │                                                               │ Claude │ │ YOLO │ │ Opus ││
+                                       │  │                                                               │ Resume │ │ YOLO │ │ Opus ││
                                        │  │ claude: looking at the card layout now                        └────────┘ └──────┘ └──────┘│
                                        │  │ user: and then check it against the python build                ┌────────┐ ┌─────┐ ┌─────┐│
                                        │  │                                                                 │ Rename │ │ Pin │ │ Del ││

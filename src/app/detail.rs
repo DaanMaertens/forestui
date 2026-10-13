@@ -83,10 +83,16 @@ impl ControlSpec {
     }
 
     fn disabled(action: Action, label: impl Into<String>) -> Self {
-        Self {
-            enabled: false,
-            ..Self::new(action, label, theme::Variant::Normal)
-        }
+        let mut control = Self::new(action, label, theme::Variant::Normal);
+        control.disable();
+        control
+    }
+
+    /// Keep the slot, lose the accent: a disabled control is drawn plain
+    /// whatever it would have worn enabled.
+    fn disable(&mut self) {
+        self.enabled = false;
+        self.variant = theme::Variant::Normal;
     }
 }
 
@@ -418,7 +424,10 @@ fn open_in(nodes: &mut Vec<DetailNode>) {
 /// One launch vocabulary everywhere: the CLAUDE section and every session
 /// card offer the same buttons under the same names in the same accent —
 /// `Claude`, `YOLO`, then the user's own. The section header already says
-/// these start something; "New Session" restated it on every button.
+/// these start something; "New Session" restated it on every button. The
+/// one deliberate exception is the card's plain button, which reads
+/// `Resume`: beside the new-session row, "Claude" on a card read as "start
+/// Claude" rather than "go back to this conversation".
 fn claude(nodes: &mut Vec<DetailNode>, app: &App) {
     nodes.push(DetailNode::Section("CLAUDE: NEW SESSION"));
     let mut row = vec![
@@ -606,10 +615,15 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
         // The whole launch row wears the accent, YOLO-style customs included:
         // five cards of red YOLO buttons read as a wall of warnings, and the
         // CLAUDE section above already colours that choice at full strength.
+        //
+        // A live session is a conversation already running: Resume goes to
+        // it, while YOLO or a custom button could only start a second Claude
+        // on the same transcript with other flags. Those keep their slots,
+        // like Del below, but cannot fire.
         let mut launch = vec![
             ControlSpec::new(
                 Action::ResumeSession(index),
-                "Claude",
+                "Resume",
                 theme::Variant::Accent,
             ),
             ControlSpec::new(Action::ResumeYolo(index), "YOLO", theme::Variant::Accent),
@@ -618,6 +632,11 @@ fn sessions(nodes: &mut Vec<DetailNode>, app: &App) {
             button,
             session: index,
         }));
+        if live.is_some() {
+            for control in &mut launch[1..] {
+                control.disable();
+            }
+        }
         let manage = vec![
             ControlSpec::new(
                 Action::RenameSession(index),
