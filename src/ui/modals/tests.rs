@@ -87,7 +87,13 @@ fn worktree_form(new_branch: bool) -> WorktreeForm {
 
 /// Start work on its `worktree` step, showing `form`.
 fn in_flow(form: WorktreeForm) -> Modal {
-    let mut modal = StartWorkModal::new(&repo(), Some(vec![issue()]), Default::default(), false);
+    let mut modal = StartWorkModal::new(
+        &repo(),
+        Some(vec![issue()]),
+        Default::default(),
+        false,
+        Default::default(),
+    );
     modal.mode = WorkMode::Worktree;
     modal.step = StartWorkStep::Worktree;
     modal.worktree = Some(Box::new(form));
@@ -108,7 +114,13 @@ fn issue() -> GitHubIssue {
 }
 
 fn start_work_modal(step: StartWorkStep) -> Modal {
-    let mut modal = StartWorkModal::new(&repo(), Some(vec![issue()]), Default::default(), false);
+    let mut modal = StartWorkModal::new(
+        &repo(),
+        Some(vec![issue()]),
+        Default::default(),
+        false,
+        Default::default(),
+    );
     modal.step = step;
     Modal::StartWork(Box::new(modal))
 }

@@ -13,7 +13,7 @@ use crate::modal::{
     EditButtonModal, Modal, PromptTemplatesModal, RenameSessionModal, SPINNER, SettingsModal,
     StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal, WorktreeForm,
 };
-use crate::models::Scope;
+use crate::models::{IssueFilter, Scope};
 use crate::picker::SearchPicker;
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
@@ -756,8 +756,34 @@ fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     );
 }
 
+/// What the `issue` list says it holds under `filter`: the line it shows
+/// when empty, and the noun it counts with. A list narrowed by its labels
+/// says so, so a missing issue is read as filtered out rather than absent.
+fn issue_words(filter: IssueFilter) -> (&'static str, Noun) {
+    match filter {
+        IssueFilter::All => ("No open issues", Noun::new("issue", "issues")),
+        IssueFilter::Features => (
+            "No open feature issues",
+            Noun::new("feature issue", "feature issues"),
+        ),
+        IssueFilter::Bugs => ("No open bug issues", Noun::new("bug issue", "bug issues")),
+        IssueFilter::Other => (
+            "No other open issues",
+            Noun::new("other issue", "other issues"),
+        ),
+    }
+}
+
 fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
-    let rect = widgets::centered_rect(WIDTH, START_WORK_HEIGHT, area);
+    // The issue filter takes a row of its own: beside the checkboxes, Back
+    // and Cancel it would not fit the dialog's width.
+    let filter_row = modal.offers_issue_toggles();
+    let controls_height = BUTTON_HEIGHT * if filter_row { 2 } else { 1 };
+    let rect = widgets::centered_rect(
+        WIDTH,
+        START_WORK_HEIGHT - BUTTON_HEIGHT + controls_height,
+        area,
+    );
     let title = format!("Start Work: {}", modal.mode.label());
     let mut column = dialog(frame, rect, &title, theme::title());
 
@@ -765,12 +791,10 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     let (section, loading, empty, noun) = match modal.mode {
         // `session` has a prompt and `worktree` a form, not an item list,
         // so neither lands here.
-        WorkMode::Issue | WorkMode::Session | WorkMode::Worktree => (
-            "Issue",
-            " Loading issues...",
-            "No open issues",
-            Noun::new("issue", "issues"),
-        ),
+        WorkMode::Issue | WorkMode::Session | WorkMode::Worktree => {
+            let (empty, noun) = issue_words(modal.filter);
+            ("Issue", " Loading issues...", empty, noun)
+        }
         WorkMode::PrReview => (
             "Pull Request",
             " Loading pull requests...",
@@ -818,7 +842,7 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
             }
             column.text(frame, count, count_style);
             // Leave room for the gap, the hint and the buttons below the list.
-            let space = column.remaining().saturating_sub(2 + BUTTON_HEIGHT) as usize;
+            let space = column.remaining().saturating_sub(2 + controls_height) as usize;
             picker_results(
                 frame,
                 &mut column,
@@ -861,13 +885,26 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         }
     }
     // The hint and the buttons sit at the bottom however long the list is.
-    let bottom = 1 + BUTTON_HEIGHT;
+    let bottom = 1 + controls_height;
     while column.remaining() > bottom {
         column.gap();
     }
     column.text(frame, "Enter picks · Esc goes back", theme::muted());
+    if filter_row {
+        column.controls(
+            frame,
+            hits,
+            vec![control(
+                &format!("Filter: {}", modal.filter.label()),
+                modal.focus == StartWorkModal::FOCUS_FILTER,
+                theme::Variant::Normal,
+                StartWorkModal::FOCUS_FILTER,
+            )],
+            true,
+        );
+    }
     let mut controls = Vec::new();
-    if modal.offers_blocked_toggle() {
+    if modal.offers_issue_toggles() {
         controls.push(checkbox(
             "Show blocked",
             modal.show_blocked,

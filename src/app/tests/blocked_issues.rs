@@ -22,10 +22,12 @@ fn forget_saved_settings() {
     let _ = std::fs::remove_file(settings_service::settings_path());
 }
 
-/// Into Start work's `issue` list, then onto its "Show blocked" checkbox.
+/// Into Start work's `issue` list, then past the filter onto its "Show
+/// blocked" checkbox.
 fn open_issue_list_on_the_toggle(app: &mut App) {
     app.handle_key(key(KeyCode::Char('s')));
     app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Tab));
     assert_eq!(
         start_work(app).focus,
@@ -77,6 +79,7 @@ async fn the_picker_toggle_keeps_the_query() {
     app.handle_key(key(KeyCode::Char('s')));
     app.handle_key(key(KeyCode::Enter));
     type_text(&mut app, "wait");
+    app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Enter));
     let picker = start_work(&app).picker.as_ref().expect("issues loaded");

@@ -195,3 +195,28 @@ fn settings_keep_show_blocked_issues_across_a_round_trip() {
     let back: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
     assert!(back.show_blocked_issues);
 }
+
+#[test]
+fn settings_without_the_filter_key_list_every_issue() {
+    let settings: Settings = serde_json::from_str("{}").unwrap();
+    assert_eq!(settings.issue_filter, IssueFilter::All);
+    assert_eq!(settings.start_work.bug_labels, vec!["bug".to_string()]);
+}
+
+#[test]
+fn settings_keep_the_issue_filter_across_a_round_trip() {
+    let settings: Settings = serde_json::from_str(r#"{"issue_filter":"bugs"}"#).unwrap();
+    assert_eq!(settings.issue_filter, IssueFilter::Bugs);
+    let back: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+    assert_eq!(back.issue_filter, IssueFilter::Bugs);
+}
+
+/// A filter value a newer build wrote loads as All, and the rest of the file
+/// with it — not the whole file as defaults.
+#[test]
+fn an_unknown_issue_filter_loads_as_all_and_keeps_the_rest() {
+    let settings: Settings =
+        serde_json::from_str(r#"{"issue_filter":"chores","show_blocked_issues":true}"#).unwrap();
+    assert_eq!(settings.issue_filter, IssueFilter::All);
+    assert!(settings.show_blocked_issues);
+}

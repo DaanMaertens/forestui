@@ -182,6 +182,33 @@ async fn a_repositorys_feature_labels_decide_how_its_issues_start() {
     }
 }
 
+/// A repository's own bug labels decide what its Bugs filter lists.
+#[tokio::test]
+async fn a_repositorys_bug_labels_decide_what_its_bugs_filter_lists() {
+    let repos = ReposDir::new();
+    repos.write(
+        "settings.json",
+        r#"{"start_work": {"bug_labels": ["kind/defect"]}}"#,
+    );
+    let settings = crate::models::Settings {
+        issue_filter: crate::models::IssueFilter::Bugs,
+        ..Default::default()
+    };
+    let (_dir, mut app, path) = app_with_settings_and_issues(
+        settings,
+        crate::models::Scope::Mine,
+        vec![
+            labelled_issue(1, "Global bug", &["bug"]),
+            labelled_issue(2, "Repository bug", &["kind/defect"]),
+        ],
+    );
+    on_github(&mut app, &path);
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(listed(&app), vec![2]);
+}
+
 /// A repository's template wins over the global one.
 #[tokio::test]
 async fn a_repository_template_fills_the_confirm_screens_prompt() {

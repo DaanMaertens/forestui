@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 mod blocked_issues;
 mod finished_worktrees;
+mod issue_filter;
 mod linked_worktrees;
 mod mouse;
 mod navigation;

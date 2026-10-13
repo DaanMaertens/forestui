@@ -8,7 +8,7 @@
 use crate::event::BranchList;
 use crate::fuzzy::{self, BranchEntry, Searchable};
 use crate::models::{
-    CustomClaudeButton, GitHubIssue, GitHubPullRequest, MAX_BUTTON_LABEL_LENGTH,
+    CustomClaudeButton, GitHubIssue, GitHubPullRequest, IssueFilter, MAX_BUTTON_LABEL_LENGTH,
     MAX_BUTTON_PREFIX_LENGTH, MAX_CLAUDE_COMMAND_LENGTH, Repository, Scope, Settings,
     StartWorkSettings, WorkItemLink, derive_prefix, validate_button_label, validate_button_prefix,
     validate_claude_command,
@@ -82,6 +82,9 @@ pub enum ModalEffect {
     /// Start work's "Show blocked" was toggled: remember the choice. The
     /// picker has already re-listed itself.
     ShowBlockedIssues(bool),
+    /// Start work's issue filter was cycled: remember the choice. The picker
+    /// has already re-listed itself.
+    IssueFilter(IssueFilter),
     /// Start work's "Not just mine" was toggled: list the items of the
     /// checkout at this path for the flow's new scope. The picker has
     /// dropped the lists it had, which were for the other one.
@@ -776,6 +779,9 @@ pub struct StartWorkModal {
     /// Whether blocked issues are listed. Starts from the shared setting and
     /// is toggled here; the app persists every toggle.
     pub show_blocked: bool,
+    /// Which issues `issue` lists by their labels. Starts from the shared
+    /// setting and is cycled here; the app persists every change.
+    pub filter: IssueFilter,
     /// Whose items are listed. Starts from the settings in effect and is
     /// toggled here for this flow alone: the setting, which the repository
     /// pane's cards follow too, is the file's to change.
@@ -809,12 +815,16 @@ impl StartWorkModal {
     /// The item step's "Not just mine" checkbox, in every mode listed from
     /// GitHub.
     pub const FOCUS_SCOPE: usize = 7;
+    /// The item step's issue filter, on its own row above the others, in the
+    /// modes that list issues.
+    pub const FOCUS_FILTER: usize = 8;
 
     pub fn new(
         repo: &Repository,
         issues: Option<Vec<GitHubIssue>>,
         start_work: StartWorkSettings,
         show_blocked: bool,
+        filter: IssueFilter,
     ) -> Self {
         let mut modal = Self {
             repo_id: repo.id,
@@ -839,6 +849,7 @@ impl StartWorkModal {
             scope_chosen: false,
             start_work,
             show_blocked,
+            filter,
             query_after_reload: None,
             focus: Self::FOCUS_LIST,
         };
@@ -915,10 +926,14 @@ impl StartWorkModal {
     /// different scope replaces the flow's — the settings were not known
     /// when it started from them — unless the user has already chosen one
     /// here, and lists loaded for another scope are dropped for the
-    /// refetch to fill, with what was typed waiting for it. Nothing else
-    /// here decides what the list shows, so any other answer leaves the
-    /// list — and a half-typed query — alone.
+    /// refetch to fill, with what was typed waiting for it. Other labels
+    /// re-list the issues under a filter that reads them; nothing else here
+    /// decides what the list shows, so any other answer leaves the list —
+    /// and a half-typed query — alone.
     pub fn set_start_work(&mut self, start_work: StartWorkSettings) {
+        let relabelled = self.filter != IssueFilter::All
+            && (start_work.feature_labels != self.start_work.feature_labels
+                || start_work.bug_labels != self.start_work.bug_labels);
         if start_work.scope != self.start_work.scope
             && !self.scope_chosen
             && start_work.scope != self.scope
@@ -931,6 +946,10 @@ impl StartWorkModal {
             self.pull_requests = None;
         }
         self.start_work = start_work;
+        // A list dropped for the other scope has no picker to re-list.
+        if relabelled && self.mode == WorkMode::Issue && self.picker.is_some() {
+            self.relist();
+        }
     }
 
     /// Fill `pr-review`'s list once the PRs for `scope` have loaded; kept,
@@ -1003,9 +1022,13 @@ impl StartWorkModal {
                 (true, Some(issues)) => issues,
                 (true, None) => return,
             };
-            work::issue_entries(issues, self.show_blocked, |number| {
-                self.linked.get(&WorkItemLink::Issue { number }).cloned()
-            })
+            work::issue_entries(
+                issues,
+                self.filter,
+                &self.start_work,
+                self.show_blocked,
+                |number| self.linked.get(&WorkItemLink::Issue { number }).cloned(),
+            )
         };
         let mut picker = SearchPicker::new(entries, "Type a number or part of a title...");
         if let Some(query) = self.query_after_reload.take() {
@@ -1034,24 +1057,39 @@ impl StartWorkModal {
         ModalOutcome::Effect(ModalEffect::ListScope(self.repo_path.clone()))
     }
 
-    /// Whether the item step offers "Show blocked": only the modes that list
-    /// issues, and only with GitHub to list them from.
-    pub fn offers_blocked_toggle(&self) -> bool {
+    /// Whether the item step offers "Show blocked" and the issue filter: only
+    /// the modes that list issues, and only with GitHub to list them from.
+    pub fn offers_issue_toggles(&self) -> bool {
         self.mode != WorkMode::PrReview && self.has_github()
     }
 
     /// How many blocked issues the current list leaves out.
     pub fn hidden_blocked(&self) -> usize {
-        match (self.offers_blocked_toggle(), self.issues.as_deref()) {
-            (true, Some(issues)) => work::hidden_blocked(issues, self.show_blocked),
+        match (self.offers_issue_toggles(), self.issues.as_deref()) {
+            (true, Some(issues)) => {
+                work::hidden_blocked(issues, self.filter, &self.start_work, self.show_blocked)
+            }
             _ => 0,
         }
     }
 
-    /// Flip "Show blocked" and re-list, keeping whatever was typed: the
-    /// query is the user's, the rows under it are only a view.
+    /// Flip "Show blocked" and re-list, keeping whatever was typed.
     fn toggle_blocked(&mut self) -> ModalOutcome {
         self.show_blocked = !self.show_blocked;
+        self.relist();
+        ModalOutcome::Effect(ModalEffect::ShowBlockedIssues(self.show_blocked))
+    }
+
+    /// Move the issue filter on and re-list, keeping whatever was typed.
+    fn cycle_filter(&mut self) -> ModalOutcome {
+        self.filter = self.filter.next();
+        self.relist();
+        ModalOutcome::Effect(ModalEffect::IssueFilter(self.filter))
+    }
+
+    /// Rebuild the rows under the query: the query is the user's, the rows
+    /// under it are only a view.
+    fn relist(&mut self) {
         let query = self
             .picker
             .as_ref()
@@ -1061,15 +1099,15 @@ impl StartWorkModal {
         if let (Some(picker), Some(query)) = (self.picker.as_mut(), query) {
             picker.set_query(&query);
         }
-        ModalOutcome::Effect(ModalEffect::ShowBlockedIssues(self.show_blocked))
     }
 
     /// The focus stops on the current step, in Tab order.
     pub fn ring(&self) -> &'static [usize] {
         match self.step {
             StartWorkStep::Mode => &[Self::FOCUS_LIST, Self::FOCUS_CANCEL],
-            StartWorkStep::Item if self.offers_blocked_toggle() => &[
+            StartWorkStep::Item if self.offers_issue_toggles() => &[
                 Self::FOCUS_LIST,
+                Self::FOCUS_FILTER,
                 Self::FOCUS_BLOCKED,
                 Self::FOCUS_SCOPE,
                 Self::FOCUS_BACK,
@@ -1281,6 +1319,11 @@ impl StartWorkModal {
                 if self.ring().contains(&Self::FOCUS_BLOCKED) =>
             {
                 self.toggle_blocked()
+            }
+            (Self::FOCUS_FILTER, KeyCode::Enter | KeyCode::Char(' '))
+                if self.ring().contains(&Self::FOCUS_FILTER) =>
+            {
+                self.cycle_filter()
             }
             (Self::FOCUS_SCOPE, KeyCode::Enter | KeyCode::Char(' '))
                 if self.ring().contains(&Self::FOCUS_SCOPE) =>
@@ -1657,8 +1700,9 @@ pub struct SettingsModal {
     pub remote_control: bool,
     /// Not edited here; carried through so saving the dialog keeps it.
     start_work: StartWorkSettings,
-    /// Not edited here either: the toggle lives where the issues are listed.
+    /// Not edited here either: the toggles live where the issues are listed.
     show_blocked_issues: bool,
+    issue_filter: IssueFilter,
     /// Snapshot, not a live read. The renderer runs on every frame, and asking
     /// on each one meant three file reads and three digests per repaint — I/O
     /// in a draw path, which stutters visibly on a slow or networked home.
@@ -1700,6 +1744,7 @@ impl SettingsModal {
             remote_control: settings.remote_control,
             start_work: settings.start_work.clone(),
             show_blocked_issues: settings.show_blocked_issues,
+            issue_filter: settings.issue_filter,
             integration_status: crate::services::claude_plugin::status(),
             focus: Self::FOCUS_EDITOR,
         }
@@ -1724,6 +1769,7 @@ impl SettingsModal {
             remote_control: self.remote_control,
             start_work: self.start_work.clone(),
             show_blocked_issues: self.show_blocked_issues,
+            issue_filter: self.issue_filter,
         }
     }
 

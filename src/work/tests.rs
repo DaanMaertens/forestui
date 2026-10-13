@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::{Naming, StartWorkSettings};
+use crate::models::{IssueFilter, Naming, StartWorkSettings};
 
 fn defaults() -> StartWorkSettings {
     StartWorkSettings::default()
@@ -135,7 +135,7 @@ fn the_issue_list_holds_every_issue() {
         labelled(2, &["enhancement"]),
         labelled(3, &[]),
     ];
-    let entries = issue_entries(&issues, false, |_| None);
+    let entries = issue_entries(&issues, IssueFilter::All, &defaults(), false, |_| None);
     assert_eq!(entry_numbers(&entries), vec![1, 2, 3]);
 }
 
@@ -450,13 +450,13 @@ fn blocked_issues_are_listed_only_when_shown() {
         blocked(3, &["enhancement"], &[9]),
         blocked(4, &[], &[]),
     ];
-    let hidden = issue_entries(&issues, false, |_| None);
+    let hidden = issue_entries(&issues, IssueFilter::All, &defaults(), false, |_| None);
     assert_eq!(
         entry_numbers(&hidden),
         vec![1, 4],
         "a closed blocker blocks nothing"
     );
-    let shown = issue_entries(&issues, true, |_| None);
+    let shown = issue_entries(&issues, IssueFilter::All, &defaults(), true, |_| None);
     assert_eq!(entry_numbers(&shown), vec![1, 2, 3, 4]);
 }
 
@@ -468,9 +468,12 @@ fn the_hidden_count_is_of_the_blocked_issues_a_list_leaves_out() {
         blocked(3, &[], &[9, 10]),
         blocked(4, &["enhancement"], &[9]),
     ];
-    assert_eq!(hidden_blocked(&issues, false), 3);
     assert_eq!(
-        hidden_blocked(&issues, true),
+        hidden_blocked(&issues, IssueFilter::All, &defaults(), false),
+        3
+    );
+    assert_eq!(
+        hidden_blocked(&issues, IssueFilter::All, &defaults(), true),
         0,
         "nothing is hidden while shown"
     );
@@ -572,4 +575,93 @@ fn an_observation_of_the_wrong_kind_decides_nothing() {
         is_finished(&session(), Observed::State(ItemState::Closed)),
         None
     );
+}
+
+fn in_view(issues: &[GitHubIssue], filter: IssueFilter, settings: &StartWorkSettings) -> Vec<i64> {
+    issues
+        .iter()
+        .filter(|issue| in_filter(issue, filter, settings))
+        .map(|issue| issue.number)
+        .collect()
+}
+
+/// Features carry a feature label, bugs a bug label, others neither; an
+/// issue with both is under Features and under Bugs, and All is every issue.
+#[test]
+fn the_issue_filter_sorts_issues_by_their_labels() {
+    let issues = vec![
+        labelled(1, &[]),
+        labelled(2, &["enhancement"]),
+        labelled(3, &["bug"]),
+        labelled(4, &["bug", "enhancement"]),
+        labelled(5, &["documentation"]),
+    ];
+    let settings = defaults();
+    assert_eq!(
+        in_view(&issues, IssueFilter::All, &settings),
+        vec![1, 2, 3, 4, 5]
+    );
+    assert_eq!(
+        in_view(&issues, IssueFilter::Features, &settings),
+        vec![2, 4]
+    );
+    assert_eq!(in_view(&issues, IssueFilter::Bugs, &settings), vec![3, 4]);
+    assert_eq!(in_view(&issues, IssueFilter::Other, &settings), vec![1, 5]);
+}
+
+/// Labels are matched as GitHub matches them, ignoring case, and the bug
+/// labels are the setting's, not a fixed `bug`.
+#[test]
+fn the_issue_filter_reads_the_label_settings_ignoring_case() {
+    let issues = vec![
+        labelled(1, &["Bug"]),
+        labelled(2, &["kind/defect"]),
+        labelled(3, &["KIND/FEATURE"]),
+    ];
+    assert_eq!(in_view(&issues, IssueFilter::Bugs, &defaults()), vec![1]);
+    let settings = StartWorkSettings {
+        feature_labels: vec!["kind/feature".into()],
+        bug_labels: vec!["kind/defect".into()],
+        ..defaults()
+    };
+    assert_eq!(in_view(&issues, IssueFilter::Bugs, &settings), vec![2]);
+    assert_eq!(in_view(&issues, IssueFilter::Features, &settings), vec![3]);
+    assert_eq!(in_view(&issues, IssueFilter::Other, &settings), vec![1]);
+}
+
+/// Enter cycles All → Features → Bugs → Other and round again.
+#[test]
+fn the_issue_filter_cycles_through_its_values() {
+    let mut filter = IssueFilter::default();
+    let mut seen = Vec::new();
+    for _ in 0..5 {
+        seen.push(filter.label());
+        filter = filter.next();
+    }
+    assert_eq!(seen, vec!["All", "Features", "Bugs", "Other", "All"]);
+}
+
+/// The filter applies before blocked-hiding: the list holds the filter's
+/// issues, and the hidden count is of the filter's blocked ones only.
+#[test]
+fn the_issue_filter_applies_before_blocked_hiding() {
+    let issues = vec![
+        labelled(1, &["bug"]),
+        blocked(2, &["bug"], &[9]),
+        blocked(3, &["enhancement"], &[9]),
+        labelled(4, &[]),
+    ];
+    let settings = defaults();
+    let entries = issue_entries(&issues, IssueFilter::Bugs, &settings, false, |_| None);
+    assert_eq!(entry_numbers(&entries), vec![1]);
+    assert_eq!(
+        hidden_blocked(&issues, IssueFilter::Bugs, &settings, false),
+        1
+    );
+    assert_eq!(
+        hidden_blocked(&issues, IssueFilter::All, &settings, false),
+        2
+    );
+    let entries = issue_entries(&issues, IssueFilter::Bugs, &settings, true, |_| None);
+    assert_eq!(entry_numbers(&entries), vec![1, 2]);
 }

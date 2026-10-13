@@ -357,6 +357,54 @@ pub struct Settings {
     /// Off by default, which is also what a file without the key loads as.
     #[serde(default)]
     pub show_blocked_issues: bool,
+    /// Which issues Start work's `issue` list shows, remembered across runs
+    /// like "Show blocked". A value this build does not know — written by a
+    /// newer one — loads as All rather than taking the file down with it.
+    #[serde(default, deserialize_with = "lenient_issue_filter")]
+    pub issue_filter: IssueFilter,
+}
+
+fn lenient_issue_filter<'de, D>(deserializer: D) -> Result<IssueFilter, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+/// Which open issues the `issue` work mode lists, by their labels: all of
+/// them, the features, the bugs, or the others — neither. An issue with a
+/// feature and a bug label is among the features and among the bugs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IssueFilter {
+    #[default]
+    All,
+    Features,
+    Bugs,
+    Other,
+}
+
+impl IssueFilter {
+    /// The value Start work's filter button moves to next.
+    pub fn next(self) -> Self {
+        match self {
+            IssueFilter::All => IssueFilter::Features,
+            IssueFilter::Features => IssueFilter::Bugs,
+            IssueFilter::Bugs => IssueFilter::Other,
+            IssueFilter::Other => IssueFilter::All,
+        }
+    }
+
+    /// What the filter button reads.
+    pub fn label(self) -> &'static str {
+        match self {
+            IssueFilter::All => "All",
+            IssueFilter::Features => "Features",
+            IssueFilter::Bugs => "Bugs",
+            IssueFilter::Other => "Other",
+        }
+    }
 }
 
 fn lenient_start_work<'de, D>(deserializer: D) -> Result<StartWorkSettings, D::Error>
@@ -446,6 +494,9 @@ pub struct StartWorkSettings {
     /// listed under the `issue` work mode. Matched case-insensitively, as
     /// GitHub does.
     pub feature_labels: Vec<String>,
+    /// An issue carrying any of these is a bug. It only decides where the
+    /// issue appears in the issue filter, never how it starts.
+    pub bug_labels: Vec<String>,
     pub issue: Naming,
     pub feature: Naming,
     pub session: Naming,
@@ -457,6 +508,7 @@ impl Default for StartWorkSettings {
         Self {
             scope: Scope::Mine,
             feature_labels: vec!["enhancement".into()],
+            bug_labels: vec!["bug".into()],
             issue: Naming::new("fix/", "issue-{number}-{slug}"),
             feature: Naming::new("feat/", "feat-{number}-{slug}"),
             session: Naming::new("session/", "session-{slug}"),
@@ -480,6 +532,10 @@ impl StartWorkSettings {
                 .feature_labels
                 .clone()
                 .unwrap_or_else(|| self.feature_labels.clone()),
+            bug_labels: partial
+                .bug_labels
+                .clone()
+                .unwrap_or_else(|| self.bug_labels.clone()),
             issue: self.issue.overlaid(&partial.issue),
             feature: self.feature.overlaid(&partial.feature),
             session: self.session.overlaid(&partial.session),
@@ -500,6 +556,7 @@ impl StartWorkSettings {
 pub struct PartialStartWork {
     pub scope: Option<Scope>,
     pub feature_labels: Option<Vec<String>>,
+    pub bug_labels: Option<Vec<String>>,
     pub issue: PartialNaming,
     pub feature: PartialNaming,
     pub session: PartialNaming,
@@ -535,6 +592,7 @@ impl Default for Settings {
             remote_control: true,
             start_work: StartWorkSettings::default(),
             show_blocked_issues: false,
+            issue_filter: IssueFilter::All,
         }
     }
 }

@@ -2,10 +2,12 @@ use super::*;
 
 use crate::models::Scope;
 
-/// Into Start work's `issue` list, then onto its "Not just mine" checkbox.
+/// Into Start work's `issue` list, then past the filter and "Show blocked"
+/// onto its "Not just mine" checkbox.
 fn open_issue_list_on_the_scope_toggle(app: &mut App) {
     app.handle_key(key(KeyCode::Char('s')));
     app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Tab));
     assert_eq!(
