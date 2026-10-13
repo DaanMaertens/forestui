@@ -9,12 +9,14 @@
 use crate::app::{App, Direction, HitTarget, ModalClick};
 use crate::fuzzy::{self, Searchable};
 use crate::modal::{
-    AddRepositoryModal, ClaudeIntegrationModal, ConfirmModal, CustomButtonsModal, EDITORS,
-    EditButtonModal, Modal, PromptTemplatesModal, RenameSessionModal, SPINNER, SettingsModal,
-    StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal, WorktreeForm,
+    AddRepositoryModal, BackKeyModal, BackKeyStep, ClaudeIntegrationModal, ConfirmModal,
+    CustomButtonsModal, EDITORS, EditButtonModal, Modal, PromptTemplatesModal, RenameSessionModal,
+    SPINNER, SettingsModal, StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal,
+    WorktreeForm,
 };
 use crate::models::{IssueFilter, Scope};
 use crate::picker::SearchPicker;
+use crate::services::tmux::back_key;
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
 use crate::util::{self, Noun};
@@ -86,6 +88,7 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) -> Hits {
         Modal::ClaudeIntegration(m) => claude_integration(frame, m, area, &mut hits),
         Modal::Confirm(m) => confirm(frame, m, area, &mut hits),
         Modal::RenameSession(m) => rename_session(frame, m, area, &mut hits),
+        Modal::BackKey(m) => back_key(frame, m, area, &mut hits),
     }
     hits
 }
@@ -1295,16 +1298,44 @@ fn settings(frame: &mut Frame, modal: &SettingsModal, area: Rect, hits: &mut Hit
         )],
         false,
     );
-    column.line(frame, widgets::section("PROMPT TEMPLATES"));
+    // The back key shares the templates' row for the same reason the Remote
+    // Control checkbox shares the integration's: a section of its own would
+    // push the dialog past a 40-row terminal.
+    let templates = "Edit Prompt Templates...";
+    let indent = (widgets::button_box_width(templates) + GAP) as usize;
+    column.line(
+        frame,
+        Line::from(vec![
+            Span::styled(
+                format!("{:<indent$}", "PROMPT TEMPLATES"),
+                theme::section_header(),
+            ),
+            Span::styled("BACK KEY TO FORESTUI", theme::section_header()),
+        ]),
+    );
     column.controls(
         frame,
         hits,
-        vec![control(
-            "Edit Prompt Templates...",
-            modal.focus == SettingsModal::FOCUS_TEMPLATES,
-            theme::Variant::Normal,
-            SettingsModal::FOCUS_TEMPLATES,
-        )],
+        vec![
+            control(
+                templates,
+                modal.focus == SettingsModal::FOCUS_TEMPLATES,
+                theme::Variant::Normal,
+                SettingsModal::FOCUS_TEMPLATES,
+            ),
+            checkbox(
+                &format!("prefix {}", back_key::glyph(&modal.back_key)),
+                modal.back_key_on,
+                modal.focus == SettingsModal::FOCUS_BACK_KEY,
+                SettingsModal::FOCUS_BACK_KEY,
+            ),
+            control(
+                "Change Key...",
+                modal.focus == SettingsModal::FOCUS_BACK_KEY_CHANGE,
+                theme::Variant::Normal,
+                SettingsModal::FOCUS_BACK_KEY_CHANGE,
+            ),
+        ],
         false,
     );
     column.gap();
@@ -1818,6 +1849,75 @@ fn confirm(frame: &mut Frame, modal: &ConfirmModal, area: Rect, hits: &mut Hits)
     );
     column.gap();
     column.text(frame, "y confirm · n / Esc cancel", theme::muted());
+}
+
+fn back_key(frame: &mut Frame, modal: &BackKeyModal, area: Rect, hits: &mut Hits) {
+    let glyph = back_key::glyph(&modal.key);
+    match modal.step {
+        BackKeyStep::Pick => {
+            // Every key but Esc is an answer here, so there is nothing to
+            // click: a click arrives as Enter, which would be picked.
+            let rect = widgets::centered_rect(WIDTH, CHROME + 3, area);
+            let mut column = dialog(frame, rect, "Back Key", theme::title());
+            column.text(
+                frame,
+                "Press the key to use after the tmux prefix.",
+                theme::secondary(),
+            );
+            column.gap();
+            column.text(frame, "Esc to go back", theme::muted());
+        }
+        BackKeyStep::Offer => {
+            let rect = widgets::centered_rect(WIDTH, CHROME + 10, area);
+            let mut column = dialog(frame, rect, "Back Key", theme::title());
+            column.text(
+                frame,
+                format!(
+                    "forestui uses prefix {glyph} to go from a Claude window back to forestui,"
+                ),
+                theme::secondary(),
+            );
+            column.text(
+                frame,
+                format!("but you have bound prefix {glyph} yourself:"),
+                theme::secondary(),
+            );
+            column.gap();
+            column.text(frame, format!("  {}", modal.binding), theme::primary());
+            column.gap();
+            column.controls(
+                frame,
+                hits,
+                vec![
+                    control(
+                        "Pick Another Key",
+                        modal.focus == BackKeyModal::FOCUS_PICK,
+                        theme::Variant::Primary,
+                        BackKeyModal::FOCUS_PICK,
+                    ),
+                    control(
+                        "Use It Anyway",
+                        modal.focus == BackKeyModal::FOCUS_ANYWAY,
+                        theme::Variant::Normal,
+                        BackKeyModal::FOCUS_ANYWAY,
+                    ),
+                    control(
+                        "Off",
+                        modal.focus == BackKeyModal::FOCUS_OFF,
+                        theme::Variant::Normal,
+                        BackKeyModal::FOCUS_OFF,
+                    ),
+                ],
+                true,
+            );
+            column.gap();
+            column.text(
+                frame,
+                "Use it anyway: yours keeps working everywhere but Claude windows.",
+                theme::muted(),
+            );
+        }
+    }
 }
 
 #[cfg(test)]

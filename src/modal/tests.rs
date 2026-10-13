@@ -39,6 +39,8 @@ fn escape_closes_every_modal() {
             "old name".into(),
             None,
         )),
+        Modal::BackKey(BackKeyModal::offer("Left", "previous-window")),
+        Modal::BackKey(BackKeyModal::pick()),
     ];
     for modal in &mut modals {
         assert!(matches!(
@@ -522,4 +524,163 @@ fn unknown_theme_names_resolve_to_the_default_slug() {
     };
     let modal = SettingsModal::new(&settings);
     assert_eq!(modal.theme_slug, "forest-dark");
+}
+
+fn offer() -> Modal {
+    let mut modal = BackKeyModal::offer("Left", "previous-window");
+    modal.disarm();
+    Modal::BackKey(modal)
+}
+
+fn focus_and_enter(modal: &mut Modal, index: usize) -> ModalOutcome {
+    modal.set_focus(index);
+    modal.handle_key(key(KeyCode::Enter))
+}
+
+#[test]
+fn use_it_anyway_answers_with_the_key_and_the_binding_it_takes() {
+    let mut modal = offer();
+    match focus_and_enter(&mut modal, BackKeyModal::FOCUS_ANYWAY) {
+        ModalOutcome::Submit(ModalResult::BackKeyAnswered(BackKeyAnswer::UseAnyway {
+            key,
+            binding,
+        })) => {
+            assert_eq!(key, "Left");
+            assert_eq!(binding, "previous-window");
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
+#[test]
+fn off_answers_off() {
+    let mut modal = offer();
+    assert!(matches!(
+        focus_and_enter(&mut modal, BackKeyModal::FOCUS_OFF),
+        ModalOutcome::Submit(ModalResult::BackKeyAnswered(BackKeyAnswer::Off))
+    ));
+}
+
+/// Picking waits for a key — any key, `Ctrl` combinations included, which
+/// every other dialog drops — and Esc goes back to the offer rather than
+/// leaving it unanswered.
+#[test]
+fn pick_another_key_takes_the_next_key_pressed() {
+    let mut modal = offer();
+    assert!(matches!(
+        focus_and_enter(&mut modal, BackKeyModal::FOCUS_PICK),
+        ModalOutcome::None
+    ));
+    assert!(matches!(
+        modal.handle_key(key(KeyCode::Esc)),
+        ModalOutcome::None
+    ));
+    let Modal::BackKey(inner) = &modal else {
+        unreachable!()
+    };
+    assert_eq!(inner.step, BackKeyStep::Offer);
+
+    focus_and_enter(&mut modal, BackKeyModal::FOCUS_PICK);
+    match modal.handle_key(ctrl(KeyCode::Char('h'))) {
+        ModalOutcome::Submit(ModalResult::BackKeyAnswered(BackKeyAnswer::Key(name))) => {
+            assert_eq!(name, "C-h");
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
+/// The offer opens by itself at startup; an Enter already queued must not
+/// answer it.
+#[test]
+fn the_offer_ignores_enter_until_it_is_armed() {
+    let mut modal = Modal::BackKey(BackKeyModal::offer("Left", "previous-window"));
+    modal.set_focus(BackKeyModal::FOCUS_OFF);
+    assert!(matches!(
+        modal.handle_key(key(KeyCode::Enter)),
+        ModalOutcome::None
+    ));
+}
+
+/// From Settings, a picked key goes back to the dialog, which shows it and
+/// turns the back key on; Save carries it.
+#[test]
+fn settings_picks_a_back_key_and_saves_it() {
+    let settings = Settings {
+        back_key: None,
+        ..Settings::default()
+    };
+    let mut parent = Modal::Settings(Box::new(SettingsModal::new(&settings)));
+    let Modal::Settings(m) = &mut parent else {
+        unreachable!()
+    };
+    m.focus = SettingsModal::FOCUS_BACK_KEY_CHANGE;
+    let ModalOutcome::Push(child) = m.handle_key(key(KeyCode::Enter)) else {
+        panic!("Change Key opens the picker");
+    };
+    let mut child = *child;
+    let ModalOutcome::Submit(result) = child.handle_key(key(KeyCode::Char('b'))) else {
+        panic!("a key answers the picker");
+    };
+    assert!(matches!(&result, ModalResult::BackKeyPicked(k) if k == "b"));
+    parent.receive_child(&result);
+    let Modal::Settings(m) = &mut parent else {
+        unreachable!()
+    };
+    m.focus = SettingsModal::FOCUS_SAVE;
+    let ModalOutcome::Submit(ModalResult::SettingsSaved(saved)) = m.handle_key(key(KeyCode::Enter))
+    else {
+        panic!("Save submits");
+    };
+    assert_eq!(saved.back_key.as_deref(), Some("b"));
+}
+
+#[test]
+fn settings_turns_the_back_key_off_and_on_again() {
+    let mut modal = SettingsModal::new(&Settings::default());
+    modal.focus = SettingsModal::FOCUS_BACK_KEY;
+    modal.handle_key(key(KeyCode::Char(' ')));
+    assert!(!modal.back_key_on);
+    modal.focus = SettingsModal::FOCUS_SAVE;
+    let ModalOutcome::Submit(ModalResult::SettingsSaved(saved)) =
+        modal.handle_key(key(KeyCode::Enter))
+    else {
+        panic!("Save submits");
+    };
+    assert_eq!(saved.back_key, None);
+
+    let mut modal = SettingsModal::new(&saved);
+    modal.focus = SettingsModal::FOCUS_BACK_KEY;
+    modal.handle_key(key(KeyCode::Enter));
+    assert!(modal.back_key_on);
+    assert_eq!(modal.back_key, "Left", "the key it had comes back");
+}
+
+/// "Use it anyway" was answered for one key's binding; a different key is a
+/// different question.
+#[test]
+fn picking_another_key_in_settings_forgets_the_accepted_binding() {
+    let settings = Settings {
+        back_key_accepted: Some("previous-window".into()),
+        ..Settings::default()
+    };
+    let mut kept = SettingsModal::new(&settings);
+    kept.focus = SettingsModal::FOCUS_SAVE;
+    let ModalOutcome::Submit(ModalResult::SettingsSaved(saved)) =
+        kept.handle_key(key(KeyCode::Enter))
+    else {
+        panic!("Save submits");
+    };
+    assert_eq!(saved.back_key_accepted.as_deref(), Some("previous-window"));
+
+    let mut moved = Modal::Settings(Box::new(SettingsModal::new(&settings)));
+    moved.receive_child(&ModalResult::BackKeyPicked("b".into()));
+    let Modal::Settings(m) = &mut moved else {
+        unreachable!()
+    };
+    m.focus = SettingsModal::FOCUS_SAVE;
+    let ModalOutcome::Submit(ModalResult::SettingsSaved(saved)) = m.handle_key(key(KeyCode::Enter))
+    else {
+        panic!("Save submits");
+    };
+    assert_eq!(saved.back_key_accepted, None);
 }

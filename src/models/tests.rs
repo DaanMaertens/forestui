@@ -220,3 +220,34 @@ fn an_unknown_issue_filter_loads_as_all_and_keeps_the_rest() {
     assert_eq!(settings.issue_filter, IssueFilter::All);
     assert!(settings.show_blocked_issues);
 }
+
+/// A file from before the back key loads with it on, as prefix + ←.
+#[test]
+fn settings_without_the_back_key_load_it_on_left() {
+    let settings: Settings = serde_json::from_str("{}").unwrap();
+    assert_eq!(settings.back_key.as_deref(), Some("Left"));
+    assert_eq!(settings.back_key_accepted, None);
+    assert_eq!(Settings::default().back_key.as_deref(), Some("Left"));
+}
+
+/// Off is saved as `null`, which must not load back as the default.
+#[test]
+fn a_back_key_turned_off_stays_off_across_a_round_trip() {
+    let settings = Settings {
+        back_key: None,
+        ..Settings::default()
+    };
+    let json = serde_json::to_string(&settings).unwrap();
+    assert!(json.contains(r#""back_key":null"#), "{json}");
+    let back: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.back_key, None);
+}
+
+#[test]
+fn a_chosen_back_key_and_its_accepted_binding_survive_a_round_trip() {
+    let settings: Settings =
+        serde_json::from_str(r#"{"back_key":"b","back_key_accepted":"previous-window"}"#).unwrap();
+    let back: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+    assert_eq!(back.back_key.as_deref(), Some("b"));
+    assert_eq!(back.back_key_accepted.as_deref(), Some("previous-window"));
+}

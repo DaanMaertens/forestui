@@ -160,10 +160,20 @@ exits.
 #### Going back to forestui without stopping Claude
 
 Ctrl+D quits Claude; it never sends it to the background. To leave a session
-working and go back to forestui, switch tmux windows instead. forestui is
-the first window of its tmux session, so press your tmux prefix and then `0`
-(`Ctrl+B 0` by default; `1` if your tmux sets `base-index 1`). Claude keeps
-running in its own window. `Ctrl+B l` goes back to the window you came from,
+working and go back to forestui, press the **back key**: your tmux prefix and
+then `←` (`Ctrl+B ←` by default). Claude keeps running in its own window, and
+the status line of a Claude window says so (`C-b ← forestui`). The back key
+only acts in Claude windows forestui opened; everywhere else the key does
+what it did before (tmux's default moves to the pane on the left).
+
+If you have bound prefix + `←` yourself, forestui asks once: pick another key,
+use it anyway (your binding keeps working outside Claude windows), or turn it
+off. Change it later under **Settings → Back key to forestui**. forestui puts
+your binding and `status-right` back when it exits.
+
+Plain tmux window switching works too. forestui is the first window of its
+tmux session, so press your tmux prefix and then `0` (`Ctrl+B 0` by default;
+`1` if your tmux sets `base-index 1`). `Ctrl+B l` goes back to the window you came from,
 `Ctrl+B w` picks one from a list, and `Ctrl+B d` detaches tmux altogether,
 leaving forestui and every session running; start `forestui` again to
 reattach.

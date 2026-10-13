@@ -17,6 +17,7 @@ use crate::picker::SearchPicker;
 use crate::prompt::{self, Template};
 use crate::repo_settings::{ConfigFile, RepoKey};
 use crate::services::github::{PullRequests, PullRequestsError};
+use crate::services::tmux::back_key;
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
 use crate::util;
 use crate::work::{self, ItemEntry, WorkItem, WorkMode, WorktreeNames};
@@ -233,6 +234,24 @@ pub enum ModalResult {
         name: String,
         live_window_id: Option<String>,
     },
+    /// The Settings dialog's key picker caught a key; the dialog carries it
+    /// until Save.
+    BackKeyPicked(String),
+    /// The back key offer was answered; applied and saved at once.
+    BackKeyAnswered(BackKeyAnswer),
+}
+
+/// The answers to the back key offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackKeyAnswer {
+    /// Use this key instead; it goes through the same check.
+    Key(String),
+    /// Take `key` over the user's `binding`, in Claude windows only.
+    UseAnyway {
+        key: String,
+        binding: String,
+    },
+    Off,
 }
 
 #[derive(Debug)]
@@ -248,6 +267,7 @@ pub enum Modal {
     ClaudeIntegration(ClaudeIntegrationModal),
     Confirm(ConfirmModal),
     RenameSession(RenameSessionModal),
+    BackKey(BackKeyModal),
 }
 
 impl Modal {
@@ -256,7 +276,13 @@ impl Modal {
         // so without this `Ctrl+D` deleted a custom button and `Ctrl+Y`
         // answered a confirmation. Only the combinations a focused text field
         // claims get through — see `widgets::is_plain_press`.
-        if matches!(key.code, KeyCode::Char(_)) && !is_plain_press(key) && !text_input_claims(key) {
+        // The back key picker is the exception: there, `Ctrl+A` is an answer.
+        let picking = matches!(self, Modal::BackKey(m) if m.step == BackKeyStep::Pick);
+        if matches!(key.code, KeyCode::Char(_))
+            && !is_plain_press(key)
+            && !text_input_claims(key)
+            && !picking
+        {
             return ModalOutcome::None;
         }
 
@@ -272,6 +298,7 @@ impl Modal {
             Modal::ClaudeIntegration(m) => m.handle_key(key),
             Modal::Confirm(m) => m.handle_key(key),
             Modal::RenameSession(m) => m.handle_key(key),
+            Modal::BackKey(m) => m.handle_key(key),
         }
     }
 
@@ -283,6 +310,10 @@ impl Modal {
             }
             (Modal::Settings(parent), ModalResult::ThemeChosen(slug)) => {
                 parent.theme_slug = slug;
+            }
+            (Modal::Settings(parent), ModalResult::BackKeyPicked(key)) => {
+                parent.back_key = key.clone();
+                parent.back_key_on = true;
             }
             (Modal::CustomButtons(parent), ModalResult::CustomButtonSaved(button)) => {
                 parent.apply_edit((**button).clone());
@@ -313,6 +344,7 @@ impl Modal {
             // Confirm has two choices rather than a ring: 0 Cancel, 1 Delete.
             Modal::Confirm(m) => m.confirm_focused = index == 1,
             Modal::RenameSession(m) => m.focus = index.min(RenameSessionModal::FIELDS - 1),
+            Modal::BackKey(m) => m.focus = index.min(BackKeyModal::FIELDS - 1),
         }
     }
 
@@ -1698,6 +1730,14 @@ pub struct SettingsModal {
     pub custom_buttons: Vec<CustomClaudeButton>,
     /// Start Claude sessions with `--remote-control`.
     pub remote_control: bool,
+    /// Whether the back key is on, and the key it is on. Kept apart so
+    /// turning it off and on again in one visit gets the same key back.
+    pub back_key_on: bool,
+    pub back_key: String,
+    /// The user's binding a "use it anyway" accepted. It belongs to the key
+    /// it was answered for, so picking another key here drops it.
+    back_key_accepted: Option<String>,
+    opened_with_back_key: String,
     /// Not edited here; carried through so saving the dialog keeps it.
     start_work: StartWorkSettings,
     /// Not edited here either: the toggles live where the issues are listed.
@@ -1720,10 +1760,12 @@ impl SettingsModal {
     pub const FOCUS_THEME: usize = 2;
     pub const FOCUS_MANAGE: usize = 3;
     pub const FOCUS_TEMPLATES: usize = 4;
-    pub const FOCUS_INTEGRATION: usize = 5;
-    pub const FOCUS_REMOTE_CONTROL: usize = 6;
-    pub const FOCUS_SAVE: usize = 7;
-    pub const FOCUS_CANCEL: usize = 8;
+    pub const FOCUS_BACK_KEY: usize = 5;
+    pub const FOCUS_BACK_KEY_CHANGE: usize = 6;
+    pub const FOCUS_INTEGRATION: usize = 7;
+    pub const FOCUS_REMOTE_CONTROL: usize = 8;
+    pub const FOCUS_SAVE: usize = 9;
+    pub const FOCUS_CANCEL: usize = 10;
     pub const FIELDS: usize = Self::FOCUS_CANCEL + 1;
 
     pub fn new(settings: &Settings) -> Self {
@@ -1732,6 +1774,10 @@ impl SettingsModal {
         let theme_slug = crate::theme::by_slug(&settings.theme_name)
             .unwrap_or(&crate::theme::THEMES[0])
             .slug;
+        let back_key = settings
+            .back_key
+            .clone()
+            .unwrap_or_else(|| back_key::DEFAULT_KEY.to_string());
         Self {
             editor_index: EDITORS
                 .iter()
@@ -1742,6 +1788,10 @@ impl SettingsModal {
             branch_prefix: TextInput::new(settings.branch_prefix.clone()).with_placeholder("feat/"),
             custom_buttons: settings.custom_buttons.clone(),
             remote_control: settings.remote_control,
+            back_key_on: settings.back_key.is_some(),
+            back_key: back_key.clone(),
+            back_key_accepted: settings.back_key_accepted.clone(),
+            opened_with_back_key: back_key,
             start_work: settings.start_work.clone(),
             show_blocked_issues: settings.show_blocked_issues,
             issue_filter: settings.issue_filter,
@@ -1770,6 +1820,11 @@ impl SettingsModal {
             start_work: self.start_work.clone(),
             show_blocked_issues: self.show_blocked_issues,
             issue_filter: self.issue_filter,
+            back_key: self.back_key_on.then(|| self.back_key.clone()),
+            back_key_accepted: self
+                .back_key_accepted
+                .clone()
+                .filter(|_| self.back_key == self.opened_with_back_key),
         }
     }
 
@@ -1810,6 +1865,13 @@ impl SettingsModal {
             (Self::FOCUS_REMOTE_CONTROL, KeyCode::Enter | KeyCode::Char(' ')) => {
                 self.remote_control = !self.remote_control;
                 ModalOutcome::None
+            }
+            (Self::FOCUS_BACK_KEY, KeyCode::Enter | KeyCode::Char(' ')) => {
+                self.back_key_on = !self.back_key_on;
+                ModalOutcome::None
+            }
+            (Self::FOCUS_BACK_KEY_CHANGE, KeyCode::Enter) => {
+                ModalOutcome::Push(Box::new(Modal::BackKey(BackKeyModal::pick())))
             }
             (Self::FOCUS_THEME, KeyCode::Enter) => {
                 ModalOutcome::Push(Box::new(Modal::ThemePicker(ThemePickerModal::new())))
@@ -2479,6 +2541,132 @@ impl ConfirmModal {
                     ModalOutcome::None
                 }
             }
+            _ => ModalOutcome::None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------- Back key
+
+/// Where the back key dialog is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackKeyStep {
+    /// The key is the user's own: pick another, use it anyway, or turn it off.
+    Offer,
+    /// Waiting for the key to use after the prefix.
+    Pick,
+}
+
+/// The back key offer, shown when the configured key is already bound to
+/// something of the user's — and the key picker, which the offer and the
+/// Settings dialog both open.
+#[derive(Debug)]
+pub struct BackKeyModal {
+    pub step: BackKeyStep,
+    /// The key the offer is about.
+    pub key: String,
+    /// The command the user bound it to, as tmux printed it.
+    pub binding: String,
+    /// Opened from Settings: a picked key goes back to that dialog, and Esc
+    /// closes rather than returning to an offer that was never made.
+    from_settings: bool,
+    /// One of the `FOCUS_*` constants, on the offer step.
+    pub focus: usize,
+    /// The offer appears on its own at startup, so keys typed before it was
+    /// drawn must not answer it — as with [`ConfirmModal::with_arm_delay`].
+    armed_at: Option<std::time::Instant>,
+}
+
+impl BackKeyModal {
+    pub const FOCUS_PICK: usize = 0;
+    pub const FOCUS_ANYWAY: usize = 1;
+    pub const FOCUS_OFF: usize = 2;
+    pub const FIELDS: usize = Self::FOCUS_OFF + 1;
+
+    pub fn offer(key: impl Into<String>, binding: impl Into<String>) -> Self {
+        Self {
+            step: BackKeyStep::Offer,
+            key: key.into(),
+            binding: binding.into(),
+            from_settings: false,
+            focus: Self::FOCUS_PICK,
+            armed_at: Some(std::time::Instant::now() + CONFIRM_ARM_DELAY),
+        }
+    }
+
+    /// The picker on its own, for the Settings dialog.
+    pub fn pick() -> Self {
+        Self {
+            step: BackKeyStep::Pick,
+            key: String::new(),
+            binding: String::new(),
+            from_settings: true,
+            focus: Self::FOCUS_PICK,
+            armed_at: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn disarm(&mut self) {
+        self.armed_at = None;
+    }
+
+    fn armed(&self) -> bool {
+        self.armed_at
+            .is_none_or(|at| std::time::Instant::now() >= at)
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> ModalOutcome {
+        match self.step {
+            BackKeyStep::Pick => self.handle_pick(key),
+            BackKeyStep::Offer => self.handle_offer(key),
+        }
+    }
+
+    fn handle_pick(&mut self, key: KeyEvent) -> ModalOutcome {
+        if is_escape(key) {
+            if self.from_settings {
+                return ModalOutcome::Close;
+            }
+            self.step = BackKeyStep::Offer;
+            return ModalOutcome::None;
+        }
+        let Some(name) = back_key::key_name(key) else {
+            return ModalOutcome::None;
+        };
+        ModalOutcome::Submit(if self.from_settings {
+            ModalResult::BackKeyPicked(name)
+        } else {
+            ModalResult::BackKeyAnswered(BackKeyAnswer::Key(name))
+        })
+    }
+
+    fn handle_offer(&mut self, key: KeyEvent) -> ModalOutcome {
+        if is_escape(key) {
+            return ModalOutcome::Close;
+        }
+        match key.code {
+            KeyCode::Left | KeyCode::BackTab => {
+                self.focus = wrap_dec(self.focus, Self::FIELDS);
+                ModalOutcome::None
+            }
+            KeyCode::Right | KeyCode::Tab => {
+                self.focus = (self.focus + 1) % Self::FIELDS;
+                ModalOutcome::None
+            }
+            KeyCode::Enter if self.armed() => match self.focus {
+                Self::FOCUS_PICK => {
+                    self.step = BackKeyStep::Pick;
+                    ModalOutcome::None
+                }
+                Self::FOCUS_ANYWAY => {
+                    ModalOutcome::Submit(ModalResult::BackKeyAnswered(BackKeyAnswer::UseAnyway {
+                        key: self.key.clone(),
+                        binding: self.binding.clone(),
+                    }))
+                }
+                _ => ModalOutcome::Submit(ModalResult::BackKeyAnswered(BackKeyAnswer::Off)),
+            },
             _ => ModalOutcome::None,
         }
     }

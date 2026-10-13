@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub mod back_key;
+
 pub const TUI_EDITORS: [&str; 10] = [
     "vim", "nvim", "vi", "emacs", "nano", "helix", "hx", "micro", "kakoune", "kak",
 ];
@@ -33,6 +35,35 @@ fn tmux(args: &[&str]) -> Option<String> {
         return None;
     }
     let output = Command::new("tmux").args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Run tmux with `input` on its stdin, for `source-file -`.
+///
+/// Some commands are only ever available as *text*: `list-keys` prints a
+/// binding in tmux's own command syntax, and handing that line back to tmux's
+/// parser is the one way to restore it exactly — splitting it into argv here
+/// would mean re-implementing tmux's quoting rules. Gated like [`tmux`].
+fn tmux_with_input(args: &[&str], input: &str) -> Option<String> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    if cfg!(test) {
+        return None;
+    }
+    let mut child = Command::new("tmux")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    // Dropping the handle closes stdin, which is what ends `source-file -`.
+    child.stdin.take()?.write_all(input.as_bytes()).ok()?;
+    let output = child.wait_with_output().ok()?;
     if !output.status.success() {
         return None;
     }

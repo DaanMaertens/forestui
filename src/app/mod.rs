@@ -377,6 +377,46 @@ impl App {
         if std::mem::take(&mut self.focus_events_owned) {
             tmux::disable_focus_events();
         }
+        // Whether or not this run bound the back key: releasing with nobody
+        // else left also restores what a killed run left bound.
+        tmux::back_key::release(tmux::current_window().as_deref());
+    }
+
+    /// Bind, move or release the back key to match the settings — at
+    /// startup, and whenever they change.
+    pub(crate) fn apply_back_key(&mut self) {
+        let window = tmux::current_window();
+        let claim = match (&self.settings.back_key, &window) {
+            (Some(key), Some(window)) => {
+                tmux::back_key::claim(key, self.settings.back_key_accepted.as_deref(), window)
+            }
+            _ => {
+                tmux::back_key::release(window.as_deref());
+                return;
+            }
+        };
+        if let tmux::back_key::Claim::Conflict(_) = &claim {
+            // Not ours to keep while the question is open: a key bound for
+            // an earlier setting goes back, so only the answer binds.
+            tmux::back_key::release(window.as_deref());
+        }
+        self.on_back_key_claim(claim);
+    }
+
+    /// Ask about a key the user bound themselves, once at a time.
+    pub(crate) fn on_back_key_claim(&mut self, claim: tmux::back_key::Claim) {
+        let tmux::back_key::Claim::Conflict(binding) = claim else {
+            return;
+        };
+        let Some(key) = self.settings.back_key.clone() else {
+            return;
+        };
+        self.modals.retain(|m| !matches!(m, Modal::BackKey(_)));
+        self.modals
+            .push(Modal::BackKey(crate::modal::BackKeyModal::offer(
+                key, binding,
+            )));
+        self.redraw = true;
     }
 
     // ------------------------------------------------------------------ startup
@@ -412,6 +452,7 @@ impl App {
         }
         self.check_plugin_version();
         self.probe_claude_cli();
+        self.apply_back_key();
     }
 
     /// Ask the installed Claude, once, whether it knows `--remote-control`.
