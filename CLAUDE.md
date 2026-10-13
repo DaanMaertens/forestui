@@ -43,12 +43,6 @@ forestui is a terminal UI for managing Git worktrees, built with Rust and
 ratatui. It runs inside tmux and gives developers one place to manage many
 worktrees, their editors, their terminals, and their Claude Code sessions.
 
-It was a Python/Textual application through v0.9.x. The rewrite is in
-`doc/rust-rewrite/` — architecture, migration plan, and the `tu`-driven
-acceptance playbook. The behavioural spec of the Python build was removed once
-the port shipped; it lives in git history at `ae9cb1a`. The code, not that
-spec, is the reference for how forestui behaves now.
-
 Rust (edition 2024) on ratatui + crossterm, tokio, serde and clap — versions
 are in `Cargo.toml`. Git and tmux are driven by shelling out to the real
 binaries, not through bindings: the commands stay inspectable and there is no
@@ -147,10 +141,8 @@ that an `include_str!` in a test file resolves one directory deeper than in its
 parent.
 
 The App tests are the one exception: there are too many for one file, so they
-are split by feature under `src/app/tests/` — `navigation.rs`, `worktrees.rs`,
-`sessions.rs`, `mouse.rs`, `start_work.rs`, `repository_settings.rs` and so
-on. A new App test goes in the file for its feature, or in a new one declared
-in `src/app/tests/mod.rs`. Each file starts with `use super::*;`, and a helper
+are split by feature under `src/app/tests/`. A new App test goes in the file
+for its feature, or in a new one declared in `src/app/tests/mod.rs`. Each file starts with `use super::*;`, and a helper
 used by more than one file lives in `mod.rs`.
 
 They run with `make test`. Async code uses `#[tokio::test]`. Rendering is
