@@ -43,92 +43,39 @@ forestui is a terminal UI for managing Git worktrees, built with Rust and
 ratatui. It runs inside tmux and gives developers one place to manage many
 worktrees, their editors, their terminals, and their Claude Code sessions.
 
-It was a Python/Textual application through v0.9.x. The rewrite is in
-`doc/rust-rewrite/` — architecture, migration plan, and the `tu`-driven
-acceptance playbook. The behavioural spec of the Python build was removed once
-the port shipped; it lives in git history at `ae9cb1a`. The code, not that
-spec, is the reference for how forestui behaves now.
+Rust (edition 2024) on ratatui + crossterm, tokio, serde and clap — versions
+are in `Cargo.toml`. Git and tmux are driven by shelling out to the real
+binaries, not through bindings: the commands stay inspectable and there is no
+libgit2 build dependency. forestui requires tmux and re-executes itself into a
+tmux session when started outside one, via `std::env::current_exe()` — so a
+`cargo run` build re-launches itself rather than whatever `forestui` is on
+`PATH`.
 
-## Tech Stack
+A quit (`q`, Ctrl-C, or Enter on a crash report) detaches the terminal that
+quit, back to the shell forestui started from, while the Claude windows keep
+running — but only from a forest session (`cli::is_forest_session`); inside a
+session the user made the terminal stays attached. tmux does not say which
+client sent a key, so the most recently active client in the forest is the
+one detached.
 
-- **Rust 1.88+**, edition 2024
-- **ratatui 0.30** for the TUI, **crossterm 0.29** (re-exported as `ratatui::crossterm`)
-- **tokio** for background work and subprocesses
-- **serde / serde_json** for the two JSON config files
-- **clap** (derive) for the CLI
-
-Git and tmux are driven by shelling out to the real binaries, not through
-bindings. That keeps the commands inspectable and avoids a libgit2 build
-dependency.
-
-## Project Structure
-
-```
-forestui/
-├── Cargo.toml
-├── src/
-│   ├── main.rs               # Entry point, tokio runtime, crash reporting
-│   ├── cli.rs                # clap args + the tmux bootstrap (ensure_tmux)
-│   ├── app/
-│   │   ├── mod.rs            # App state, startup, sidebar, event folding
-│   │   ├── detail.rs         # Detail-pane content walk (single source of truth)
-│   │   ├── keys.rs           # Keyboard input and the rename fields
-│   │   ├── mouse.rs          # Hit testing, hover, wheel routing, scrollbar
-│   │   ├── repo_settings.rs  # Per-checkout GitHub key and settings overrides
-│   │   └── actions.rs        # What activating a control does; spawned flows
-│   ├── event.rs              # AppEvent + the single event channel
-│   ├── modal.rs              # Modal stack: state, focus model, key handling
-│   ├── models.rs             # Serde models (config file schemas)
-│   ├── repo_settings.rs      # Repository settings: key, merge, pre-filled files
-│   ├── state.rs              # Persisted repositories (.forestui-config.json)
-│   ├── theme.rs              # Colour palette and shared styles
-│   ├── util.rs               # Paths, slugs, relative times, fuzzy branch search
-│   ├── version_check.rs      # Startup self-update (see below)
-│   ├── ui/
-│   │   ├── mod.rs            # draw(): layout, header, footer, notifications
-│   │   ├── sidebar.rs        # Repository/worktree tree
-│   │   ├── detail.rs         # Repository and worktree detail panes
-│   │   ├── modals.rs         # Modal overlays
-│   │   └── widgets.rs        # TextInput and small helpers
-│   └── services/
-│       ├── git.rs            # Async git operations
-│       ├── tmux.rs           # tmux window management
-│       ├── github.rs         # gh CLI integration
-│       ├── claude_plugin.rs  # Installing the Claude Code title-sync plugin
-│       ├── claude_session.rs # Claude Code session tracking
-│       └── settings.rs       # User preferences + runtime forest path
-├── assets/
-│   └── claude-plugin/        # The Claude Code plugin, embedded in the binary
-├── Makefile                  # Development commands
-├── install.sh                # Installation script
-└── README.md
-```
+Each module opens with a `//!` line saying what it owns; `ls src/` plus those
+headers is the map.
 
 ## Development Commands
 
 ```bash
-make lint         # cargo clippy --all-targets -- -D warnings
-make typecheck    # cargo check --all-targets
-make format-check # cargo fmt --check
-make test         # cargo test
-make check        # all of the above
+make check         # lint + typecheck + format-check + test
 make check-shipped # lint + tests under --features binary-release
-make format       # cargo fmt
-make run          # cargo run
-make clean        # cargo clean
+make format        # cargo fmt
+make run           # cargo run
 ```
 
-Always run `make check` before committing changes.
-
-`make check-shipped` runs the same lint and tests with `--features binary-release`,
-which is the configuration the release workflow builds. The default build
-compiles strictly less code — the in-place updater is `#[cfg]`-ed out — so the
-two fail differently, and a mistake inside the feature-gated block is invisible
-to `make check`. CI runs both.
+CI also runs `make check-shipped`: the in-place updater is `#[cfg]`-ed out of the default
+build, so a mistake inside the feature-gated block is invisible to
+`make check`.
 
 ## Code Conventions
 
-### Rust
 - Edition 2024. Prefer let-chains (`if let Some(x) = ... && cond`) over nesting.
 - No `unwrap()` or `expect()` on anything that can fail at runtime. Config
   parsing, subprocess spawning, and filesystem access all degrade gracefully —
@@ -136,549 +83,60 @@ to `make check`. CI runs both.
 - Errors that reach the user become a notification, not a panic.
 - Colours come from `theme.rs`. Never hardcode a `Color::Rgb` in a UI module.
 - Comments explain *why*, not *what*.
-
-### Immediate-mode UI
-ratatui redraws the whole frame every event; there are no persistent widget
-objects and no CSS. Three consequences shape the code:
-
-1. **Focus is an index, not a widget.** `app/detail.rs::content()` walks the
-   current selection once and produces the pane's full node list — text, cards,
-   and every focusable control in order. `App::detail_items()` collects the
-   focusable items from that list and `ui/detail.rs` renders the same list, so
-   item N on screen is item N in the key handler *by construction*. To add or
-   move a control, change the content walk; both consumers follow automatically.
-
-   Activation goes through one more indirection: each frame the renderer
-   snapshots the drawn items onto `App::drawn_items` (with each control's
-   enabled bit), and a click or `Enter` resolves against that snapshot — never
-   against a freshly derived list, which a background event drained in the same
-   batch may already have reshaped. The snapshot is what was on screen, which
-   is what the user acted on; a control drawn as disabled must not fire.
-2. **Layout is `Layout`/`Constraint`, not stylesheets.** Sizes are computed per
-   frame; nothing is "auto height".
-3. **Mouse support is manual.** There is no widget tree to hit-test against, so
-   every frame the renderers record the rectangle of each clickable thing via
-   `App::push_hit(rect, HitTarget::…)`, and `App::handle_mouse` resolves a click
-   against that list (last recorded wins, so a modal takes clicks from the panes
-   it covers). A control that is drawn but never recorded is dead to the mouse —
-   that was a real regression: the first Rust build enabled no mouse capture at
-   all and every click did nothing.
-
-   `main.rs` writes the mouse modes by hand rather than using crossterm's
-   `EnableMouseCapture`, and **must keep `?1003h` (any-motion) among them** —
-   without it the terminal never reports a bare pointer move, so hover becomes
-   impossible rather than merely unstyled. Motion is affordable because
-   `App::handle_mouse` sets `App::redraw` only when the *hovered target changes*.
-   That gate is what stops a moving mouse repainting the app continuously;
-   removing it brings back the flicker that motion reporting was first disabled
-   for.
-
-Controls are drawn as three-row bordered boxes from one builder in
-`ui/widgets.rs`: `button_box`/`button_box_width` for modal buttons (Textual's
-`min-width: 10`) and the same code via `boxed_rows`/`boxed_width` with no
-minimum for the detail pane, whose boxes hug their labels. Use the matching
-width function for the rectangle you record, so the hit region matches what
-was drawn.
-
-### Async and the event loop
-Everything funnels through one `mpsc::UnboundedReceiver<AppEvent>` in
-`event.rs`. Terminal input arrives from a blocking reader thread; background
-work arrives from `tokio::spawn`.
-
-**Never block the event loop.** For any operation that may take time (git, gh,
-scanning session files):
-1. Render immediately with a loading state (`app.sessions` is an `Option`,
-   where `None` means "still loading").
-2. `tokio::spawn` the work with a cloned `EventTx`.
-3. Send an `AppEvent` when it completes; `App::handle_event` folds it into state.
-
-Late results must be discarded when the selection has moved on — compare the
-event's `path` against the current one before applying it.
-
-**The main loop is the single writer of `.forestui-config.json`.** Background
-tasks never load or save state themselves — they send their results as data
-(`WorktreeAdded`, `WorktreesScanned`, `WorktreeRenamed`) and `App::handle_event`
-folds them in and persists. Two writers means last-write-wins, and a user
-action mid-flight silently clobbers the task's save. Success toasts belong in
-the fold, not the task: a result the fold drops must not be announced.
-
-**The worktree list is reconciled against git, not owned by the config.**
-`git worktree list` is scanned in the background (startup, repo add, selection
-change, focus return, a 30s sweep) and the fold adopts, prunes and
-branch-corrects via `AppState::reconcile_worktrees` — the config only
-annotates worktrees (name, archived flag, sort order). A scan result is a
-*snapshot*, so it must never outrank a fresher mutation. `app/worktree_sync.rs`
-owns that rule: a scan starts with a `ScanTicket`, and handing the ticket back
-with the listing says whether to ignore it (stale, or a create running on that
-repository), keep state (git could not list), or reconcile it while leaving
-the worktrees with a change in flight alone.
-
-**Finished worktrees ride on the same scans.** Each scan also kicks a
-check (throttled per repository, `app/finished.rs`) that asks `gh` for each
-linked issue's or PR's state and git whether a session's branch is merged into
-the remote default branch; `work::is_finished` is the rule. The marks are
-derived and never saved. A worktree the check could not answer for (`gh`
-signed out, no remote default branch) keeps its previous mark — "could not
-tell" must not unmark it.
-
-**Prune is one routine, `prune::prune_worktree`**, shared by the repository
-pane's **Prune finished (N)** and `forestui prune`. It skips a worktree with
-uncommitted changes or commits on no remote branch (any remote branch counts,
-so a merged PR whose branch was deleted upstream is still prunable), then
-removes it and force-deletes its local branch. In the App each removal starts
-through `WorktreeSync` like a Delete, and one task hands every ticket back in
-`WorktreesPruned`, so the user gets one notification for the whole prune.
-The CLI has no `WorktreeSync`: `prune::prune_forest` reconciles each
-repository against git, runs the same finished check, and prunes through
-`prune_tracked`. It is a one-shot dispatched in `main` before `ensure_tmux`,
-so it never starts tmux. It is also the one writer of `.forestui-config.json`
-outside the main loop, tolerated because a running App heals: its next save
-restores the pruned entries and its next scan drops them, directories gone.
-
-**Every worktree-mutating flow goes through `WorktreeSync`.** Starting the
-change returns a change ticket — or nothing, if the worktree already has a
-change running, since a worktree takes one change at a time — the task carries
-it in its result event, and the fold hands it back. Finishing always moves the
-repository's epoch on, success or not, so every exit path of the task must
-send an event that carries the ticket; a path that only toasts leaves the
-change in flight for good.
-
-**The tick must earn its repaints.** Ticks arrive ten times a second; an idle
-frame repaints once a second (matching the second granularity of the relative
-times on screen) and at full rate only while a spinner is actually visible.
-Anything animated that is added later has to mark the frame dirty from
-`App::on_tick`, or it freezes; anything that is not visibly changing must not.
-
-### Services
-Services are free functions in modules, not singletons. Shared caches (the
-GitHub issue cache, the auth status) live behind a `OnceLock<Mutex<...>>` inside
-the module that owns them.
-
-## Key Design Decisions
-
-### tmux Requirement
-forestui requires tmux and re-executes itself into a tmux session when started
-outside one. This enables TUI editors in tmux windows, session persistence, and
-fast switching between editor, app, and Claude windows.
-
-The re-exec uses `std::env::current_exe()`, so a `cargo run` build re-launches
-itself rather than whatever `forestui` happens to be on `PATH`.
-
-A quit (`q`, Ctrl-C, or a crash report once Enter is pressed) detaches the
-terminal that quit, so it lands back in the shell forestui started from while
-the Claude windows keep running for the next start to attach to. Only from a
-forest session (`cli::is_forest_session`: the base session or a `<base>-<pid>`
-grouped one) — forestui started inside a session the user made leaves that
-terminal attached. tmux does not say which client sent a key, so the most
-recently active client in the forest is the one detached. A panic does not
-detach.
-
-### The Claude integration: names follow tabs, liveness follows sessions
-
-A tmux window forestui opened and the Claude session running in it carry the
-same name, in both directions: renaming the tab renames the session, and
-`/rename` renames the tab. The two are **one string, verbatim** — nothing is
-added, stripped or parsed. A window called `yolo:thing` holds a session called
-`yolo:thing`. Prefixes are forestui's opening move when it creates a window,
-not a format anything reads back.
-
-It is carried by a Claude Code **plugin** — a directory under the Claude config
-dir, which Claude discovers on its own. Installing therefore writes nothing to
-the user's `settings.json`, and hooks they configured themselves are never
-parsed or rewritten; plugin hooks and settings hooks both run. Enabling and
-disabling is Claude's own business (`claude plugin enable|disable`), which is
-why nothing here edits `enabledPlugins`. Install it with
-`forestui --claude-plugin install`; `status` prints every path an install would
-write without writing any of them.
-
-Three pieces make it work, and each is load-bearing:
-
-A new session is named at launch, by passing Claude's own `-n` flag with the
-window's name. That is not interchangeable with setting the title from a hook:
-Claude draws the name in the prompt box from the first frame with `-n`, whereas
-a title a hook sets at `SessionStart` is stored and never drawn — the session is
-correctly named and looks unnamed. A hook still names one on its first prompt if
-`-n` never reached it.
-
-**A resumed session is not given `-n`.** It already carries the name it was
-given, and the window's name may have picked up a `:2` from uniquifying against
-a window still open for the same conversation — passing it would overwrite the
-real name with the suffixed one. The hook adopts the stored name onto the
-window instead.
-
-- **`@claude_session_id`**, a second window option stamped the same way (from
-  inside the window, ahead of the command), records which Claude session the
-  window holds — the pre-minted `--session-id` for a fresh session, the
-  resumed id otherwise. It is what makes window ↔ session a recorded fact:
-  the live badge, the duplicate-open guard and the delete refusal all
-  resolve against one `list-windows` sweep over these stamps, never against
-  transcript mtimes. Corollary: the shell history line for a
-  fresh session remembers the *resume* form (`claude -r '<id>'`), because
-  `--session-id` refuses to run once the session exists and the up arrow
-  exists precisely for the second run.
-- **Heartbeats** complete the picture for sessions forestui did not start.
-  The plugin's `heartbeat.sh` runs inside *every* Claude session on the
-  machine and keeps one file per session under `~/.config/forestui/live/`,
-  carrying the claude process id — validated against `ps` before it is
-  believed, swept when stale. `services/live.rs` merges heartbeats with the
-  window stamps: a heartbeat whose recorded pane sits on forestui's own tmux
-  session (or a member of its session group, which shares its windows) is
-  switchable like a stamped window. One in another tmux session on the same
-  server is offered to be *brought here*: `move-window`, so Claude keeps
-  running. The move goes ahead only if the window's heartbeat-healed
-  `@claude_session_id` still names the session, and the window gets no birth
-  name, so title sync and the back key still leave it alone. Anything else
-  shows as "live elsewhere" and resuming it is an eyes-open confirm. The
-  heartbeat records its pane's tmux *server* too (`$TMUX` minus the session
-  index): pane ids are only unique per server, so a pane is resolved only
-  when it was written on forestui's own server, and one with no server
-  recorded is elsewhere, never a guessed window. The hook also re-stamps
-  `@claude_session_id` on its window, healing a stale stamp left by an
-  earlier launch.
-- **Session state** — *busy*, *needs you* or *idle* — rides in the same
-  heartbeat file as an optional `state` field. `heartbeat.sh` writes it with
-  the file (busy on `UserPromptSubmit`; idle on `SessionStart`, except a
-  compaction restart, which keeps whatever it was), and `state.sh` updates it
-  in place in between: `Notification` for a permission prompt or question
-  and `PreToolUse` of `AskUserQuestion` → needs you, any tool use *after*
-  needs you → busy (the user answered), `Stop` and the `idle_prompt`
-  notification → idle. Only those two scripts write the file and never on
-  the same event; their writes can still interleave across events (an
-  `idle_prompt` landing as a prompt is submitted), a millisecond window the
-  turn's `Stop` repairs, so it is documented in `state.sh` rather than
-  locked. The tool-use hooks fire on every tool call, so their common path
-  writes nothing. Esc fires no
-  `Stop`, so an interrupted session reads busy until `idle_prompt` (~60 s)
-  corrects it — accepted, not worked around. A heartbeat with no `state`
-  (an older plugin) is *unknown* and shows as it always did; it is never a
-  guessed state. The App re-reads just the states of the sessions the last
-  live scan found once a second (`STATE_READ_INTERVAL`, files only, no tmux or
-  `ps`) and repaints only when one changed. A session card's badge reads
-  `● live · busy`; a worktree's sidebar row takes the colour of the most
-  urgent state among sessions in forestui's *own* windows (needs you > busy >
-  idle) and leads with `{N}` from two of them (a stateless one counts but
-  lends no colour) — a finished worktree keeps its
-  finished name colour, the count still wears the state's.
-- **`@claude_birth_name`**, a tmux window option stamped when the window is
-  created, answers one question: did forestui open this window? A window the
-  user made by hand carries none and is left alone, as is a bare `claude` in a
-  plain terminal. It is written from *inside* the window, ahead of the command
-  that needs it — stamping it from forestui after `new-window` returns is a
-  separate tmux call, and a fast-starting Claude could reach its first hook
-  before it lands.
-- **`@claude_synced_name`** records the last agreed name. Two-way sync cannot
-  tell which side moved from one value: equal names are ambiguous between
-  nobody changing and both changing alike, and unequal names do not say who is
-  stale. When both moved, the tab wins.
-- **Window names reach a shell**, so they are quoted literally with single
-  quotes rather than by any escaping heuristic. A session title can be set by a
-  `SessionStart` hook in a repository's own `.claude/settings.json`, so by the
-  time a name gets here it is not necessarily the user's own text. The shell
-  reading it is *interactive*, where double quotes would not even stop zsh
-  history expansion.
-
-There is deliberately no off switch, per window or global. Installed means the
-two names agree; not wanting that is an uninstall.
-
-**Remote Control rides on the same name, so it is passed bare.** The Settings
-checkbox (`remote_control`, on by default — a settings file without the key
-loads it *on*, so updates pick it up; only an explicit `false` is off) adds
-`--remote-control` to every launch
-`claude_command_line` builds — both built-in buttons, custom buttons, resumes,
-and the history line — and never gives it a value. With no value, Claude names
-the remote session after the session itself: the `-n` name on a fresh launch,
-the stored title on a resume, and it follows `/rename`; all three were checked
-against the phone app. A value could only disagree with that, and on a resume
-it would be the window's name — the `:2`-suffixed one the missing `-n` exists
-to keep away. The value is optional (`--remote-control [name]`), so the flag is
-always followed by `-r` or `-n`, never a bare word it could take as its name;
-a test holds that line for built-in and custom launches alike. A custom command
-that already asks for it (`--remote-control` or Claude's `--rc` alias, bare or
-`=name`) is left alone — Claude reads `--remote-control` first, so ours would
-override the button's name. A Claude too old to know the flag would refuse
-every launch, so `services/claude_cli.rs` asks `claude --help` once at startup
-and drops the flag only on a definite no; a probe that could not run keeps it.
-
-### Terminal input modes
-
-forestui asks the terminal for five DEC private modes (`src/terminal.rs`):
-mouse buttons, drag, any-motion, SGR coordinates, focus reporting. They are
-*terminal* state, not process state, so every way out of the process has to put
-them back. `src/terminal.rs` documents the four paths that do — the guard's
-`Drop`, a chained panic hook, a signal handler, and OFF-before-ON at startup,
-which heals whatever a `SIGKILL`ed run left behind. A mode added to `MODES_ON`
-fails a test until `MODES_OFF` covers it too.
-
-Two of the five are optional, because each costs something inside tmux.
-`?1003h` (any-motion) is what hover needs; `?1004h` plus tmux's server-wide
-`focus-events` is what refresh-on-return needs. tmux cancels a pending prefix
-on any key it cannot find in the `prefix` table, and a mouse or focus report is
-such a key — so with these modes on, a pointer move or a focus change landing
-between the prefix and the next key eats the command. Neither event has a key
-name to bind in tmux 3.4, so taking the mode away is the only defence, which is
-what `--no-hover` and `--no-focus-events` are. Both must stay in
-`self_command`, or the tmux re-exec silently drops them.
-
-`focus-events` is a **server** option: turning it on reaches every session and
-client on that server, and it used to stay on long after forestui exited.
-`App::release_tmux_options` puts it back. Ownership is recorded in a tmux user
-option rather than in memory, so a run that is killed before its cleanup does
-not strand the setting forever — the next run adopts it and hands it back. A
-user who set the option themselves keeps it, marker absent.
-
-### The back key
-
-prefix + ← (configurable, `back_key` in settings) takes a Claude window
-forestui opened back to forestui's window; it lives in
-`services/tmux/back_key.rs`. It is a **server-wide** binding and a global
-`status-right` hint, so like `focus-events` it is put back on exit — and the
-cleanup state lives in tmux, not the process:
-
-- The binding is the same text for every forestui on the server: an
-  `if-shell -F` on `@claude_birth_name` that runs the previous binding in
-  every other window. It finds its target at press time — the window marked
-  `@forestui_home` in the viewer's session, via `run-shell -C` (tmux does not
-  expand formats in a plain `-t`) — so a rename, grouped sessions and two
-  forests all work. `switch-client -T root` ends the key's repeat, or an
-  arrow pressed right after landing would be eaten.
-- `@forestui_home` holds the forestui's pid. The binding and hint are
-  restored when no mark with a live pid is left, which is also how a killed
-  run is healed by the next start — the pid matters because a forestui
-  started from a shell leaves its window behind when killed.
-- What the key and `status-right` were before is saved in global
-  `@forestui_*` options, and restored only if the current value is still
-  ours: a user who rebinds in the meantime keeps their change.
-- Only a binding that is neither tmux's default nor the one the user already
-  accepted (`back_key_accepted`) brings up the offer.
-
-### Claude runs inside a shell, not as the window's command
-
-A tmux window forestui opens for Claude runs the user's shell, interactively,
-and Claude is one of its *jobs* — not the window's own process.
-
-That is the whole point. A window whose only process is Claude has nothing
-underneath it: Ctrl-C leaves a dead pane, and Claude's own Ctrl-Z suspend stops
-the process with no shell left to `fg` it back, so the session is unreachable
-and the window gets closed to be rid of it — a lost conversation. With a shell
-underneath, a suspended session lands at a prompt where `fg` resumes it, a
-crash or a refused launch lands at one where the up arrow retries it, and
-nothing has to be thrown away. A *clean* exit closes the window — see below.
-
-The command is **not typed into the window**. It is written into a startup file
-that forestui generates and points the shell at, so it is already there when
-the shell reads it — nothing to race, nothing to arrive half-read. Each shell
-has exactly one such hook, and each hook *replaces* one of the user's own files
-rather than adding to it, so the generated file sources the file it displaced:
-
-| shell | pointed at with | replaces, so sources back |
-|---|---|---|
-| zsh | `ZDOTDIR=<dir>` | `.zshenv` and `.zshrc` |
-| bash | `--rcfile <file>` | `.bashrc` |
-| sh, dash, ksh, mksh, ash, yash | `ENV=<file>` | whatever `ENV` already named |
-
-The shell is started interactive and non-login, which is exactly what
-`$SHELL -ic` gave before, so a Claude window's environment is unchanged from
-the build that ran Claude directly. `startup_for` is pure and tested; the file
-deletes itself once read, so nothing accumulates in the temp dir.
-
-Four things in the generated file are load-bearing:
-
-- **`set -m`.** Without it a command run from a startup file is not a job:
-  bash hands it the shell's own ignored `SIGTSTP`, so Ctrl-Z does nothing at
-  all and the window wedges with no way back. zsh already runs interactive
-  shells this way; saying so costs nothing and makes the file mean the same
-  thing under every shell.
-- **The birth stamp goes in ahead of the command**, from inside the window, for
-  the reason it always did: the shell starts Claude by itself, so a stamp
-  forestui sends after `new-window` returns is a separate tmux call a
-  fast-starting Claude can beat to its first hook.
-- **The command is pushed into the shell's history** (`print -s`, `history -s`)
-  where the shell has a builtin for it. Typing it used to do that for free, and
-  after an accidental Ctrl-C the up arrow is the shortest way back. *When* it
-  is pushed is load-bearing for zsh: zsh reads `HISTFILE` only after its
-  startup files, and Claude runs inside this one, so a line pushed from it
-  lands under the whole loaded file — with `share_history`, the up arrow then
-  found another window's line and resumed a different conversation. zsh
-  pushes from a one-shot `precmd` hook instead, at the first prompt after
-  Claude exits or is suspended. bash reads its history before the rc file and
-  needs no hook. `the_remembered_line_is_the_newest_history_entry` drives both
-  real shells to hold this.
-- **A clean exit takes the shell with it** (`[ $? -eq 0 ] && exit` after the
-  command), so Ctrl-D twice closes the window and lands back in forestui
-  rather than at a prompt that needs a third Ctrl-D. Claude exits 0 for Ctrl-D
-  twice, Ctrl-C twice and `/exit` alike — the status is all the shell sees, so
-  those three cannot be told apart and all close. Ctrl-Z leaves 148 and a crash
-  or refused launch some other non-zero status, and those keep the shell.
-  A session resumed with `fg` and then exited cleanly is still at a prompt:
-  the line that tests the status already ran when it was suspended.
-  `only_a_clean_exit_closes_the_shell` drives bash and sh; zsh refuses `set -m`
-  without a terminal, so it is checked under `tu`.
-
-A shell with no hook we have tested — fish, nushell — falls back to typing the
-line into a plain shell with `send-keys`. That path is a real fallback, not a
-leftover: it needs no per-shell knowledge at all. Its one weakness is why it is
-not the default — keystrokes sent before the shell is ready wait in the
-terminal for it, and a startup that *consumes* input (zsh-newuser-install in a
-bare `HOME` is a real example) eats them. Because it is keystrokes, the line
-must be one line of text: `send-keys -l` sends literal characters and `Enter`
-is a separate key name, which is why it is two calls.
-
-Either way the line itself is built by `claude_command_line` and stripped of
-control characters by `single_line`. A newline in a window name would be an
-Enter key on one path and a second line of the startup file on the other — and
-window names come from session titles, which a repository's own
-`.claude/settings.json` can set.
-
-The typed fallback does not get the clean-exit rule: it knows nothing about
-the shell it types into, so a window there still drops to a prompt when Claude
-exits.
-
-### Self-update
-forestui keeps itself current the way the Python build did — automatically, on
-launch — but never on the UI thread. `App::check_for_update` spawns the check
-once the terminal is up and sends its verdict back as `AppEvent::UpdateChecked`.
-Success is **not a toast**: once the new version is in place,
-`App::pending_update` is set and the title bar reads
-`forestui v<current> (v<new> ready — restart to update)` for the rest of the
-run — the running process *is* the old build until it exits, so the notice
-stays true until then, and a toast would time out while the user looked
-elsewhere. A too-narrow bar gets the compact `(v<new> — restart)`, and one too
-narrow even for that drops the running version rather than clip "restart". An
-instance whose binary another instance already replaced (Linux reports
-`<exe> (deleted)`) counts as installed too. A `cargo install` build, which does
-not replace itself, marks the title `(v<new> available — cargo install
-forestui)` instead; that one returns on every launch until the user updates. Network failures (offline, a download that dropped, a
-release whose assets have not finished uploading) stay silent and retry next
-launch. Only a *persistent local* failure — an unwritable install dir — shows
-an error notification, and is remembered for an hour in
-`~/.config/forestui/latest_version_check.json` (`install_failed`) so the
-multi-MB download is not re-spent on every launch while it would fail
-identically. That memo is the *only* thing that file now holds, and the only
-state that survives a launch.
-
-What it does depends on how the binary got there:
-
-- **From a GitHub release** — built with `--features binary-release`, so it
-  downloads the asset for its platform, verifies it against the published
-  `.sha256` (no checksum, no update — release assets **must** ship their
-  checksums), and atomically swaps it over `current_exe()` via the same
-  fsync-then-rename writer the config files use. Replacing the file under a
-  running process is safe on Unix; the new build takes effect on the next
-  launch.
-- **From `cargo install`** — the feature is off, so it only reports that a newer
-  version exists. Recompiling a crate underneath a running TUI is not something
-  to do unasked.
-- **From source** (version `0.0.0`) — nothing at all, which is what stops
-  `cargo run` in a checkout from overwriting itself.
-
-**The version lookup is not cached.** GitHub is asked on every launch, so a
-release reaches the user the next time they open forestui rather than whenever
-a TTL happened to lapse — the check is already off the UI thread, so nobody
-waits on the round trip. The corollary is that a failed lookup has nothing to
-fall back on, which is the point: there is no remembered version to act on, so
-offline is silence rather than a doomed download or a nag.
-`--no-self-update` skips the check entirely.
-
-`release_asset_url` must keep producing `forestui_<os>_<arch>`, matching
-`install.sh` and the release workflow. Drift there is a silent 404 on every
-update, which is why a test asserts the shape.
-
-### Multi-Forest Support
-The forest directory is a CLI argument, not a setting:
-
-```bash
-forestui ~/forest      # default
-forestui ~/work        # different forest
-```
-
-Each forest has its own `.forestui-config.json` state file. Note that the
-worktree *list* under a repository is reconciled from `git worktree list`,
-which knows nothing about forests: tracking the same repository in two
-forests shows the same worktrees in both, and removing one removes it for
-both. Forests separate which *repositories* you look at, not worktree
-ownership — git owns that.
-
-### Config Compatibility
-forestui updates itself on launch, so the builds that matter are the newest
-release and the one before it (`n-1`) — the Python build is history, not a
-constraint. `.forestui-config.json` and `~/.config/forestui/settings.json` must
-load in both directions across that one-release gap:
-
-- **Add** fields with a `#[serde(default)]` (or `default = "…"`), so a file
-  written by `n-1` loads here. `n-1` ignores the key it does not know — and
-  drops it on its next save, so a new field's default must be a value that
-  is fine to fall back to.
-- **Remove** a field by deleting it: unknown keys are ignored on load
-  (never add `deny_unknown_fields`) and vanish on the next save.
-- **Rename** a field only across two releases, reading both names in the
-  first, or `n-1` and `n` silently lose the value to each other.
-
-Partial files load cleanly because every field is defaulted.
-
-Both files are written via `util::write_atomically` (sibling temp file +
-rename). A corrupt config deliberately loads as *empty* state so a bad byte
-never blocks startup — which is exactly why the write itself must never be
-able to produce a torn file.
-
-### Coexistence with forest (macOS)
-- forestui uses `.forestui-config.json`
-- forest uses `.forest-config.json`
-- Both can share the same `~/forest` directory safely
-
-## Common Tasks
-
-### Adding a New Service
-1. Create `src/services/myservice.rs`
-2. Add `pub mod myservice;` to `src/services/mod.rs`
-3. Expose free functions; keep any shared state in a module-private `OnceLock`
-
-### Adding a Detail-Pane Action
-1. Add a variant to `Action` in `src/app/detail.rs`
-2. Emit a `ControlSpec` for it from the content walk in `src/app/detail.rs`
-   (`repository()` / `worktree()` / their sections) — the item list and the
-   rendering both derive from that one walk, so there is no second place to
-   keep in sync
-3. Handle it in `App::run_action` in `src/app/actions.rs`
-4. If it needs a new visual shape (not a boxed control), add a `DetailNode`
-   variant and render it in `render_node` in `src/ui/detail.rs`
-
-### Adding a Key Binding
-1. Add it to `BINDINGS` in `src/app/keys.rs` — the footer renders this table
-   and is the app's *only* key-discovery surface (there is no help screen; the
-   `?` toast was removed with issue #30). A test asserts the whole footer fits
-   140 columns, so a new entry means shortening a label somewhere; entries
-   that do not fit a narrower terminal clip from the right and lose their
-   click target
-2. Handle the key in the `handle_key` match in the same file
-
-### Adding a Modal
-1. Add the state struct and its `handle_key` to `src/modal.rs`, declaring a
-   `FOCUS_*` constant per control — the constants are the contract the
-   renderer uses too
-2. Add a variant to the `Modal` enum and wire it into `handle_key` / `tick`
-3. Render it in `src/ui/modals.rs`
-4. If it returns a value, add a `ModalResult` variant and handle it in
-   `App::apply_modal_result`
-
-### Adding a New CLI Option
-1. Add the field to `Args` in `src/cli.rs`
-2. Carry it through `self_command` so the tmux re-exec preserves it
-3. Handle it in `main`
-
-### Modifying Settings
-1. Update `Settings` in `src/models.rs` (keep `#[serde(default)]`)
-2. Update `SettingsModal` in `src/modal.rs` and its rendering in `src/ui/modals.rs`
-3. Settings are persisted to `~/.config/forestui/settings.json`
-
-Start work settings and prompt templates can also be overridden per
-repository, under `~/.config/forestui/repos/<owner>/<name>/` (a
-`settings.json` read only for its `start_work` section, plus a `prompts/`
-directory) — never inside a checkout. The key is the `owner/name` `gh`
-resolves, learned in the background, so code that needs Start work settings
-asks `App::start_work_for(path)` and template lookups go through
-`App::prompt_layers_for(path)` (repository, then global, then built-in),
-never `settings.start_work` or `prompts_dir()` directly. A repository with no
-GitHub repository has no key and uses the global settings.
+- Services are free functions in modules, not singletons; shared caches live
+  behind a module-private `OnceLock<Mutex<...>>`.
+
+Three event-loop rules hold everywhere (`doc/design/event-loop.md` has the
+mechanics and reasons):
+
+- **Never block the event loop.** Slow work (git, gh, scanning files) renders a
+  loading state, runs in `tokio::spawn`, and comes back as an `AppEvent` that
+  `App::handle_event` folds in — discarding it if the selection moved on.
+- **The main loop is the single writer of `.forestui-config.json`.** Tasks
+  send results as data; the fold persists and owns any success toast.
+- **Every worktree-mutating flow goes through `WorktreeSync`**, and every exit
+  path of its task sends an event carrying the change ticket.
+
+## Area notes
+
+Read the note before changing its area — each records load-bearing reasons
+the code alone does not show:
+
+- **Event loop** (`doc/design/event-loop.md`) — before adding an `AppEvent`,
+  a spawned task, a worktree scan or mutation, or anything animated on the
+  tick.
+- **Rendering** (`doc/design/rendering.md`) — before adding or moving a
+  detail-pane control, a clickable region, or a boxed button; before touching
+  focus, hit testing or `App::drawn_items`.
+- **Common tasks** (`doc/common-tasks.md`) — before adding a service,
+  detail-pane action, key binding, modal, CLI option or setting, or per-
+  repository Start work overrides.
+- **Config files** (`doc/design/config.md`) — before adding, removing or
+  renaming a field in `.forestui-config.json` or `settings.json`, or touching
+  how forests are separated.
+- **Claude integration** (`doc/design/claude-integration.md`) — before
+  touching `assets/claude-plugin/`, `services/claude_plugin.rs`,
+  `services/live.rs`, `services/claude_cli.rs`, the `@claude_*` window
+  options, session states, or the flags `claude_command_line` passes
+  (`-n`, `--remote-control`).
+- **Claude inside a shell** (`doc/design/claude-in-shell.md`) — before
+  touching how `services/tmux.rs` launches a Claude window: `startup_for`,
+  the generated startup file, history push, clean-exit rule, or the
+  `send-keys` fallback.
+- **Terminal input modes** (`doc/design/terminal-input-modes.md`) — before
+  touching `src/terminal.rs`, mouse/focus modes, `--no-hover`,
+  `--no-focus-events`, or tmux's `focus-events`.
+- **Back key** (`doc/design/back-key.md`) — before touching
+  `services/tmux/back_key.rs`, `back_key`/`back_key_accepted`, or the
+  `@forestui_*` tmux options.
+- **Self-update** (`doc/design/self-update.md`) — before touching
+  `version_check.rs`, the `binary-release` feature, the title-bar update
+  notice, or release asset names.
+- **Finished worktrees and prune** (`doc/design/finished-and-prune.md`) —
+  before touching `app/finished.rs`, `work::is_finished`, `prune.rs`, or
+  `forestui prune`.
+- **Releasing** (`doc/releasing.md`) — before cutting a release or changing
+  how the version or dev-mode window name is derived.
 
 ## Testing
 
@@ -690,23 +148,13 @@ that an `include_str!` in a test file resolves one directory deeper than in its
 parent.
 
 The App tests are the one exception: there are too many for one file, so they
-are split by feature under `src/app/tests/` — `navigation.rs`, `worktrees.rs`,
-`sessions.rs`, `mouse.rs`, `start_work.rs`, `repository_settings.rs` and so
-on. A new App test goes in the file for its feature, or in a new one declared
-in `src/app/tests/mod.rs`. Each file starts with `use super::*;`, and a helper
+are split by feature under `src/app/tests/`. A new App test goes in the file
+for its feature, or in a new one declared in `src/app/tests/mod.rs`. Each file starts with `use super::*;`, and a helper
 used by more than one file lives in `mod.rs`.
 
-They run with `make test`. Async code uses `#[tokio::test]`. Rendering is tested against
-`ratatui::backend::TestBackend`, which renders into an in-memory buffer you can
-assert on.
-
-**Terminal handover:** `scripts/terminal-modes-probe.py` runs the built binary
-on a private pty, kills it every way that used to leak the input modes, and
-asserts the reset arrived — plus that raw mode and the alternate screen were
-undone and the exit status still reports the signal. Unit tests can pin the
-mode strings and the guard's `Drop`; only a real terminal can show what a
-signal handler actually emitted. Run it after touching `src/terminal.rs`; it
-isolates itself (own forest, own `TMUX_TMPDIR`) and cleans up.
+They run with `make test`. Async code uses `#[tokio::test]`. Rendering is
+tested against `ratatui::backend::TestBackend`, which renders into an
+in-memory buffer you can assert on.
 
 **Visual/behavioural verification:** forestui is a TUI app — lint, typecheck and
 unit tests alone cannot catch visual bugs, wrong window names, broken
@@ -714,70 +162,13 @@ interactions, or UI regressions. Use the `test-forestui` skill to drive forestui
 in a headless terminal with `tu` and verify the change works. Do this
 proactively, not only when asked.
 
-`doc/rust-rewrite/TU_USECASES.md` is the acceptance playbook: 99 numbered
+`doc/rust-rewrite/TU_USECASES.md` is the acceptance playbook: numbered
 scenarios with exact keystrokes and expected output. The P0 cases are the
-regression suite — run the relevant ones after any behavioural change.
+regression suite — run the relevant ones after any behavioural change. Before
+running or extending `scripts/tu-sweep.sh`, or refreshing
+`doc/rust-rewrite/baseline/`, read `doc/rust-rewrite/SWEEP.md`.
 
-UC-53–70 (except the retired UC-59), the flow cases UC-72, UC-78–84/86/99–101/103–106,
-and the guards UC-90/96 are automated —
-frames plus on-disk assertions (`ASSERTIONS.txt`). Capture a build and compare
-two builds with:
-
-```bash
-scripts/tu-sweep.sh rust ./target/release/forestui
-scripts/tu-compare.sh rust python
-scripts/tu-composite.sh rust python   # side-by-side PNGs, one per case
-```
-
-The committed `baseline/python/` frames are a **frozen reference**, captured
-from the installed 1.3.0 release (the build users actually ran). That release
-is no longer installed here, so treat those frames as read-only history:
-re-sweep `rust` freely, never regenerate `python`. `tu-compare.sh` works from
-the committed frames; `tu-composite.sh` needs PNGs from a live sweep of both
-builds, which the Python side can no longer produce.
-
-Each case writes a normalised text frame to
-`doc/rust-rewrite/baseline/<build>/` (committed — this is the diffable
-baseline) and a PNG to `doc/rust-rewrite/screenshots/<build>/` (gitignored,
-for eyeballing colour and focus). After a UI change, re-run the sweep and
-review the frame diff: an unexpected change there is a regression, an expected
-one needs the baseline refreshed in the same commit.
-
-**Text frames alone are not enough.** Colour, focus rings and selection
-highlights exist only in the pixels — a button that lost its accent renders an
-identical frame. `tu-composite.sh` pairs the two builds' PNGs per case so those
-differences are visible rather than inferred; read the composites after any
-change to `theme.rs` or a renderer.
-
-A sweep that does not exercise a section will happily report parity for it.
-UC-96 guards against that specifically: it captures the repository pane at full
-height and asserts that sessions and issues actually rendered and that no
-section fell back to its empty state. Keep that guard honest when adding cases.
-
-The harness waits on screen conditions, never fixed sleeps — Textual repaints
-far slower than ratatui, and fixed sleeps produced false mismatches. Anything
-added to the sweep must use `await <regex>`.
-
-All of the below runs under the isolation rule at the top of this file: tmux
-is driven through `tu` with `TMUX_TMPDIR`, never directly.
-
-Note that `ensure_tmux` re-executes the binary, so for `tu` runs you must
-build first and pass the built binary's path as the sweep's command argument
-(e.g. `scripts/tu-sweep.sh rust ./target/release/forestui`) — `cargo run` does
-not work under `tu`. Pass an absolute path when the tu session's working
-directory is not the repo. Run only one tu-driving script at a time:
-concurrent drivers corrupt each other's sessions.
-
-## Versioning
-
-Version is `0.0.0` in source (`Cargo.toml` and `cli::VERSION`). Real versions
-are derived from git tags at release time by the release workflow.
-
-Running from source shows version `0.0.0` and auto-enables dev mode, which gives
-the tmux window a timestamped name (`forestui-dev-HHMM`) so a dev instance never
-collides with a real one.
-
-### Development
+## Development
 
 **Always work from a git worktree on its own branch — never edit files in the
 main checkout, and never commit to `main` directly.** Before writing any code:
@@ -795,26 +186,8 @@ can be in flight at once. Remove the worktree once its PR is merged.
    not push code that fails formatting, clippy, or tests — fix issues first.
 3. Open a PR and merge to `main`
 
-### Releasing
-
-```bash
-gh release create v0.10.0 --generate-notes
-```
-
-This triggers the release workflow, which stamps the version from the tag,
-builds the static musl binaries for Linux (x86_64, aarch64) and the macOS
-Apple-silicon binary, attaches them to the release with their checksums, and
-publishes to crates.io.
-
 ## Git Commits
 
 - Do NOT include `Co-Authored-By` attribution
 - Do NOT include "Generated with Claude Code" footer
 - Write clear, concise commit messages
-
-## References
-
-- [forest (macOS)](https://github.com/ricwo/forest) - Original inspiration
-- [ratatui Documentation](https://ratatui.rs)
-- [crossterm Documentation](https://docs.rs/crossterm)
-- [tokio Documentation](https://tokio.rs)

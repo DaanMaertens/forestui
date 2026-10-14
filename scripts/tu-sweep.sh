@@ -367,7 +367,7 @@ import json, os, re, sys
 root = os.environ["ROOT"]
 text = json.load(sys.stdin)["content"]
 text = text.replace(root, "<ROOT>")
-# The command line is echoed in frames that show a shell. CLAUDE.md tells you
+# The command line is echoed in frames that show a shell. SWEEP.md tells you
 # to pass an absolute binary path when the tu cwd is not the repo, which would
 # otherwise put a local path — and the branch worktree it was built in — into a
 # committed frame, making the baseline depend on who ran the sweep and from
