@@ -245,24 +245,71 @@ pub async fn create_detached_worktree(repo_path: &str, worktree_path: &Path) -> 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoveOutcome {
     Removed,
-    /// git refused because the tree holds uncommitted work. The summary is
-    /// human-readable, e.g. "3 modified, 2 untracked".
-    Dirty(String),
+    /// git refused, and getting past the refusal would lose something. The
+    /// caller shows the user what, then calls [`force_remove_worktree`] with
+    /// [`Refusal::force`].
+    Refused(Refusal),
+}
+
+/// Why a plain removal stopped, in the terms the user decides on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub changes: Changes,
+    /// `Some` when the worktree is locked.
+    pub lock: Option<Lock>,
+}
+
+impl Refusal {
+    /// How far a removal must go to get past this refusal.
+    pub fn force(&self) -> Force {
+        if self.lock.is_some() {
+            Force::ChangesAndLock
+        } else {
+            Force::Changes
+        }
+    }
+}
+
+/// What a refused tree holds that removing it would discard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Changes {
+    /// Nothing: the tree is clean, or its directory is already gone.
+    None,
+    /// Summary like "3 modified, 2 untracked".
+    Uncommitted(String),
+    /// `git status` failed (dubious ownership, corrupt index, …), so what
+    /// would be lost cannot be listed. Carries git's reason.
+    Unknown(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lock {
+    /// The reason given to `git worktree lock --reason`, if any.
+    pub reason: Option<String>,
+}
+
+/// Which of git's removal safety checks a forced removal overrides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Force {
+    /// Uncommitted changes and untracked files (`--force`).
+    Changes,
+    /// Those and a lock as well (`--force --force`).
+    ChangesAndLock,
 }
 
 /// Remove a worktree without destroying uncommitted work.
 ///
 /// `git worktree remove` refuses a tree with uncommitted changes or untracked
-/// files. That refusal is a safety check, so it is surfaced as
-/// [`RemoveOutcome::Dirty`] for the caller to confirm rather than papered over
-/// with `--force`. `--force` runs only when there is provably nothing to lose:
-/// the directory is already gone, or `git status` read the tree and found it
-/// clean (a clean tree can still be refused, e.g. when it contains a
-/// submodule). A tree whose status *cannot* be read is an error, not a force —
-/// resolving that ambiguity in the destructive direction is the exact bug this
-/// function exists to prevent. A locked worktree is also an error: git wants
-/// `--force --force` for those, and offering "delete anyway" only to fail on
-/// the lock would mislead.
+/// files, and a locked one. Those refusals are safety checks, so they are
+/// surfaced as [`RemoveOutcome::Refused`] for the caller to confirm rather
+/// than papered over with `--force`. `--force` runs unasked only when there
+/// is provably nothing to lose: the directory is already gone, or `git
+/// status` read the tree and found it clean (a clean tree can still be
+/// refused, e.g. when it contains a submodule). A tree whose status *cannot*
+/// be read is refused with [`Changes::Unknown`], never forced — resolving that
+/// ambiguity in the destructive direction is the exact bug this function
+/// exists to prevent. A lock is always refused: whoever locked the tree did
+/// so to keep it from being removed, so the user must see it.
 pub async fn remove_worktree(repo_path: &str, worktree_path: &str) -> GitResult<RemoveOutcome> {
     let repo = expand(repo_path);
     let wt_dir = expand(worktree_path);
@@ -273,37 +320,45 @@ pub async fn remove_worktree(repo_path: &str, worktree_path: &str) -> GitResult<
         return Ok(RemoveOutcome::Removed);
     }
 
-    if worktree_entry(&repo, &wt_dir).await == Some(WorktreeEntry::Locked) {
-        return Err(GitError(
-            "worktree is locked — unlock it first (git worktree unlock)".into(),
-        ));
-    }
-
+    let lock = match worktree_entry(&repo, &wt_dir).await {
+        Some(WorktreeEntry::Locked(reason)) => Some(Lock { reason }),
+        _ => None,
+    };
     // Ask the tree itself instead of parsing stderr, whose wording is not a
     // stable interface across git versions.
-    if wt_dir.exists() {
+    let changes = if wt_dir.exists() {
         match tree_state(&wt_dir).await {
-            TreeState::Dirty(summary) => return Ok(RemoveOutcome::Dirty(summary)),
-            TreeState::Clean => {}
-            TreeState::Unreadable(reason) => {
-                return Err(GitError(format!(
-                    "cannot verify the worktree is clean: {reason}"
-                )));
-            }
+            TreeState::Clean => Changes::None,
+            TreeState::Dirty(summary) => Changes::Uncommitted(summary),
+            TreeState::Unreadable(why) => Changes::Unknown(reason(&why)),
         }
+    } else {
+        Changes::None
+    };
+    if lock.is_some() || changes != Changes::None {
+        return Ok(RemoveOutcome::Refused(Refusal { changes, lock }));
     }
-    force_remove_worktree(repo_path, worktree_path).await?;
+    force_remove_worktree(repo_path, worktree_path, Force::Changes).await?;
     Ok(RemoveOutcome::Removed)
 }
 
-/// Remove a worktree discarding whatever is in it. Only for after the user has
-/// seen what they are about to lose (or there is provably nothing to lose).
-pub async fn force_remove_worktree(repo_path: &str, worktree_path: &str) -> GitResult<()> {
+/// Remove a worktree discarding whatever `force` lets it. Only for after the
+/// user has seen what they are about to lose (or there is provably nothing
+/// to lose).
+pub async fn force_remove_worktree(
+    repo_path: &str,
+    worktree_path: &str,
+    force: Force,
+) -> GitResult<()> {
     let repo = expand(repo_path);
     let wt_dir = expand(worktree_path);
     let wt = wt_dir.to_string_lossy().to_string();
-    let (code, _out, stderr) =
-        run_git(&["worktree", "remove", "--force", wt.as_str()], Some(&repo)).await?;
+    let mut args = vec!["worktree", "remove", "--force"];
+    if force == Force::ChangesAndLock {
+        args.push("--force");
+    }
+    args.push(wt.as_str());
+    let (code, _out, stderr) = run_git(&args, Some(&repo)).await?;
     if code == 0 {
         return Ok(());
     }
@@ -395,10 +450,11 @@ async fn tree_state(dir: &Path) -> TreeState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum WorktreeEntry {
     Listed,
-    Locked,
+    /// With the lock's reason, if it was given one.
+    Locked(Option<String>),
 }
 
 /// Whether `git worktree list` knows the given directory, and whether it is
@@ -414,23 +470,24 @@ async fn worktree_entry(repo: &Path, wt_dir: &Path) -> Option<WorktreeEntry> {
     let target = std::fs::canonicalize(wt_dir).unwrap_or_else(|_| wt_dir.to_path_buf());
     for block in stdout.split("\n\n") {
         let mut path: Option<&str> = None;
-        let mut locked = false;
+        let mut locked = None;
         for line in block.lines() {
             let line = line.trim();
             if let Some(rest) = line.strip_prefix("worktree ") {
                 path = Some(rest);
-            } else if line == "locked" || line.starts_with("locked ") {
-                locked = true;
+            } else if line == "locked" {
+                locked = Some(None);
+            } else if let Some(reason) = line.strip_prefix("locked ") {
+                locked = Some(Some(reason.to_string()));
             }
         }
         if let Some(p) = path {
             let p = Path::new(p);
             let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
             if p == target {
-                return Some(if locked {
-                    WorktreeEntry::Locked
-                } else {
-                    WorktreeEntry::Listed
+                return Some(match locked {
+                    Some(reason) => WorktreeEntry::Locked(reason),
+                    None => WorktreeEntry::Listed,
                 });
             }
         }

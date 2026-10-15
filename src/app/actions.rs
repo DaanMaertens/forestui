@@ -51,7 +51,7 @@ async fn create_review_worktree(
         .map_err(|error| error.to_string())?;
     let path = worktree_path.to_string_lossy().to_string();
     if let Err(error) = github::checkout_pull_request(&path, number).await {
-        let _ = git::force_remove_worktree(source_path, &path).await;
+        let _ = git::force_remove_worktree(source_path, &path, git::Force::Changes).await;
         return Err(error);
     }
     Ok(match git::get_current_branch(&path).await {
@@ -447,10 +447,10 @@ impl App {
                 self.reload_detail();
             }
             ConfirmAction::DeleteWorktree(worktree_id) => {
-                self.spawn_worktree_removal(worktree_id, false);
+                self.spawn_worktree_removal(worktree_id, None);
             }
-            ConfirmAction::ForceDeleteWorktree(worktree_id) => {
-                self.spawn_worktree_removal(worktree_id, true);
+            ConfirmAction::ForceDeleteWorktree(worktree_id, force) => {
+                self.spawn_worktree_removal(worktree_id, Some(force));
             }
             ConfirmAction::PruneFinished(worktree_ids) => self.spawn_prune(&worktree_ids),
             ConfirmAction::DeleteClaudeSession {
@@ -512,8 +512,9 @@ impl App {
 
     /// Run a worktree removal in the background. The entry leaves state only
     /// when git has actually removed the worktree — the fold decides, so a
-    /// dirty refusal can stop with everything intact.
-    fn spawn_worktree_removal(&mut self, worktree_id: Uuid, force: bool) {
+    /// refusal can stop with everything intact. `force` is `None` for a plain
+    /// removal, and what to override once the user has confirmed a refusal.
+    fn spawn_worktree_removal(&mut self, worktree_id: Uuid, force: Option<git::Force>) {
         let Some((repo, worktree)) = self.state.find_worktree(worktree_id) else {
             return;
         };
@@ -543,12 +544,11 @@ impl App {
                 Some(listed) => listed.branch.unwrap_or_default(),
                 None => tracked_branch,
             };
-            let outcome = if force {
-                git::force_remove_worktree(&repo_path, &worktree_path)
+            let outcome = match force {
+                Some(force) => git::force_remove_worktree(&repo_path, &worktree_path, force)
                     .await
-                    .map(|()| git::RemoveOutcome::Removed)
-            } else {
-                git::remove_worktree(&repo_path, &worktree_path).await
+                    .map(|()| git::RemoveOutcome::Removed),
+                None => git::remove_worktree(&repo_path, &worktree_path).await,
             }
             .map_err(|error| error.to_string());
             // After the removal, not before: a branch checked out in the

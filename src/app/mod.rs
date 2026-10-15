@@ -71,6 +71,86 @@ fn informative_branch(branch: &str, name: &str, prefix: &str) -> Option<String> 
     Some(branch.to_string())
 }
 
+/// Title and message for the confirm a refused Delete opens: what deleting
+/// anyway would discard, and the lock it would break. Every refusal gets one —
+/// a flat "could not delete" would leave the user no way forward from the UI.
+fn refusal_dialog(name: &str, refusal: &git::Refusal) -> (&'static str, String) {
+    // The name is capped so what matters — what would be lost — never clips
+    // off the dialog edge.
+    let display = crate::util::truncate(name, 40);
+    let named = format!("'{display}'");
+    let mut lines = Vec::new();
+    // Once the lock line has named the worktree, the rest refers back to it.
+    let (title, subject, object) = match &refusal.lock {
+        Some(lock) => {
+            lines.push(match &lock.reason {
+                Some(reason) => {
+                    format!(
+                        "'{display}' is locked: {}",
+                        crate::util::truncate(reason, 40)
+                    )
+                }
+                None => format!("'{display}' is locked."),
+            });
+            ("Locked Worktree", "It", "it")
+        }
+        None if matches!(refusal.changes, git::Changes::Unknown(_)) => {
+            ("Cannot List Changes", named.as_str(), named.as_str())
+        }
+        None => ("Uncommitted Changes", named.as_str(), named.as_str()),
+    };
+    let unlock = if refusal.lock.is_some() {
+        "unlock it and "
+    } else {
+        ""
+    };
+    match &refusal.changes {
+        git::Changes::None => lines.push(format!("Deleting will {unlock}remove it.")),
+        git::Changes::Uncommitted(summary) => {
+            lines.push(format!("{subject} has uncommitted changes:"));
+            lines.push(summary.clone());
+            lines.push(format!("Deleting will {unlock}discard them permanently."));
+        }
+        git::Changes::Unknown(why) => {
+            lines.push(format!("Could not list the changes in {object}:"));
+            // The dialog does not wrap, and git's reason often leads with a
+            // long path that would push the reason itself off the edge.
+            lines.extend(wrap(why, 72).into_iter().take(4));
+            lines.push(format!(
+                "Deleting will {unlock}discard any changes in it permanently."
+            ));
+        }
+    }
+    (title, lines.join("\n"))
+}
+
+/// Break `text` into lines of at most `width` characters, at spaces where it
+/// can and inside a word only when the word alone is longer than a line.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let mut word: Vec<char> = word.chars().collect();
+        let used = line.chars().count();
+        if used > 0 && used + 1 + word.len() > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        while line.chars().count() + word.len() > width {
+            let room = width - line.chars().count();
+            line.extend(word.drain(..room));
+            lines.push(std::mem::take(&mut line));
+        }
+        line.extend(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 /// One visible line in the sidebar tree.
 #[derive(Debug, Clone)]
 pub enum SidebarRow {
@@ -1638,17 +1718,16 @@ impl App {
                     None => {}
                 }
             }
-            Ok(git::RemoveOutcome::Dirty(summary)) => {
-                // The name is capped so the summary — the one thing the user
-                // needs before confirming — never clips off the dialog edge.
-                let display = crate::util::truncate(&name, 40);
+            Ok(git::RemoveOutcome::Refused(refusal)) => {
+                let (title, message) = refusal_dialog(&name, &refusal);
                 self.modals.push(Modal::Confirm(
                     crate::modal::ConfirmModal::new(
-                        "Uncommitted Changes",
-                        format!(
-                            "'{display}' has uncommitted changes:\n{summary}\nDeleting will discard them permanently."
+                        title,
+                        message,
+                        crate::modal::ConfirmAction::ForceDeleteWorktree(
+                            worktree_id,
+                            refusal.force(),
                         ),
-                        crate::modal::ConfirmAction::ForceDeleteWorktree(worktree_id),
                     )
                     // Pushed by a background event, not a user action — a
                     // keystroke already in the queue must not confirm it.

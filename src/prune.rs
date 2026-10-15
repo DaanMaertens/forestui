@@ -85,9 +85,24 @@ pub async fn prune_worktree(repo_path: &str, worktree_path: &str, branch: &str) 
 
     match git::remove_worktree(repo_path, worktree_path).await {
         Ok(git::RemoveOutcome::Removed) => {}
-        // Written to between the check and the removal.
-        Ok(git::RemoveOutcome::Dirty(summary)) => {
-            return Outcome::Skipped(Skip::Uncommitted(summary));
+        // Prune never forces: whatever git refused for is left alone.
+        Ok(git::RemoveOutcome::Refused(refusal)) => {
+            return if refusal.lock.is_some() {
+                Outcome::Failed(
+                    "worktree is locked — unlock it first (git worktree unlock)".to_string(),
+                )
+            } else {
+                match refusal.changes {
+                    // Written to between the check and the removal.
+                    git::Changes::Uncommitted(summary) => {
+                        Outcome::Skipped(Skip::Uncommitted(summary))
+                    }
+                    git::Changes::Unknown(why) => {
+                        Outcome::Failed(format!("cannot verify the worktree is clean: {why}"))
+                    }
+                    git::Changes::None => Outcome::Failed("git refused to remove it".to_string()),
+                }
+            };
         }
         Err(error) => return Outcome::Failed(error.to_string()),
     }
