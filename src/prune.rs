@@ -115,10 +115,15 @@ pub enum BranchFate {
 
 /// Delete `branch` unless it holds commits that are on no remote branch —
 /// prune's rule, applied after the worktree is already gone — or it is the
-/// repository's default branch. `None` when
+/// repository's default branch or `base_branch`, the base branch its
+/// repository settings name. `None` when
 /// there is no such local branch, or none at all (a detached `HEAD`). Anything git cannot answer keeps the
 /// branch: a leftover branch only blocks a name, a lost one loses work.
-pub async fn delete_branch_if_pushed(repo_path: &str, branch: &str) -> Option<BranchFate> {
+pub async fn delete_branch_if_pushed(
+    repo_path: &str,
+    branch: &str,
+    base_branch: Option<&str>,
+) -> Option<BranchFate> {
     let branch_ref = format!("refs/heads/{branch}");
     if branch.is_empty() || branch == "HEAD" || git::get_ref(repo_path, &branch_ref).await.is_none()
     {
@@ -134,8 +139,8 @@ pub async fn delete_branch_if_pushed(repo_path: &str, branch: &str) -> Option<Br
         Ok(remotes) if remotes.is_empty() => return kept(reason(&Skip::NoRemote)),
         Ok(remotes) => {
             let remote_default = git::remote_default_branch(repo_path, &remotes).await;
-            if is_default_branch(branch, remote_default.as_deref()) {
-                return kept("the default branch".to_string());
+            if let Some(why) = protected(branch, remote_default.as_deref(), base_branch, &remotes) {
+                return kept(why.to_string());
             }
         }
         Err(error) => return kept(sentence(&error.to_string())),
@@ -149,6 +154,37 @@ pub async fn delete_branch_if_pushed(repo_path: &str, branch: &str) -> Option<Br
         Ok(()) => Some(BranchFate::Deleted(branch.to_string())),
         Err(error) => kept(sentence(&error.to_string())),
     }
+}
+
+/// Why `branch` is never deleted along with a worktree, if it is one of
+/// those. The default branch is the stronger reason, so a branch that is
+/// both is named for it.
+fn protected(
+    branch: &str,
+    remote_default: Option<&str>,
+    base_branch: Option<&str>,
+    remotes: &[String],
+) -> Option<&'static str> {
+    if is_default_branch(branch, remote_default) {
+        Some("the default branch")
+    } else if base_branch.is_some_and(|base| local_name(base, remotes) == branch) {
+        Some("the base branch")
+    } else {
+        None
+    }
+}
+
+/// The local branch a ref names: `origin/develop` is `develop` for a known
+/// remote `origin`, so a base branch set to either form keeps the local one.
+fn local_name<'a>(reference: &'a str, remotes: &[String]) -> &'a str {
+    remotes
+        .iter()
+        .find_map(|remote| {
+            reference
+                .strip_prefix(remote.as_str())
+                .and_then(|rest| rest.strip_prefix('/'))
+        })
+        .unwrap_or(reference)
 }
 
 /// Whether `branch` is the default branch, given the remote's default as

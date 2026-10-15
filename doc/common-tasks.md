@@ -52,3 +52,14 @@ asks `App::start_work_for(path)` and template lookups go through
 `App::prompt_layers_for(path)` (repository, then global, then built-in),
 never `settings.start_work` or `prompts_dir()` directly. A repository with no
 GitHub repository has no key and uses the global settings.
+
+One key exists only in a repository's file: `start_work.base_branch`, what
+new work stems from (`origin/develop`, or a local `develop`). It is not on
+`StartWorkSettings` — the global settings have no such field, the remote's
+default branch being the only sensible global value — so it is read with
+`App::base_branch_for(path)` rather than through `start_work_for`. It
+prefills the Base field of Start work's confirm screen and of the plain
+worktree form (`modal::initial_base_branch`), falling back to
+`default_base_branch` with an inline note when the branch list lacks it;
+Delete keeps it as it keeps the default branch. The prefilled settings file
+writes it as `null`, so it can be found.

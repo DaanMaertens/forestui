@@ -88,7 +88,16 @@ struct RepoSettingsFile {
 /// The same shape as written, pre-filled from the global settings.
 #[derive(Serialize)]
 struct PrefilledFile<'a> {
-    start_work: &'a StartWorkSettings,
+    start_work: PrefilledStartWork<'a>,
+}
+
+/// The global Start work settings, plus the keys only a repository has —
+/// written as `null`, so they can be found in the file and filled in.
+#[derive(Serialize)]
+struct PrefilledStartWork<'a> {
+    #[serde(flatten)]
+    global: &'a StartWorkSettings,
+    base_branch: Option<String>,
 }
 
 /// A repository's overrides, and why there are none if its file was there
@@ -142,8 +151,13 @@ pub fn ensure_settings_file(dir: &Path, global: &StartWorkSettings) -> std::io::
     let path = dir.join(SETTINGS_FILE);
     if !path.exists() {
         std::fs::create_dir_all(dir)?;
-        let json = serde_json::to_string_pretty(&PrefilledFile { start_work: global })
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let json = serde_json::to_string_pretty(&PrefilledFile {
+            start_work: PrefilledStartWork {
+                global,
+                base_branch: None,
+            },
+        })
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         crate::util::write_atomically(&path, &format!("{json}\n"))?;
     }
     Ok(path)

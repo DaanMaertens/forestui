@@ -3,8 +3,11 @@
 **Finished worktrees ride on the worktree scans** (the background `git worktree
 list` reconcile in `event-loop.md`). Each scan also kicks a check (throttled per
 repository, `app/finished.rs`) that asks `gh` for each linked issue's or PR's
-state and git whether a session's branch is merged into the remote default
-branch; `work::is_finished` is the rule. The marks are derived and never saved.
+state and git whether a session's branch is merged into the base branch the
+worktree recorded when it was created (`Worktree.base_branch`), or into the
+remote default branch for a worktree from before that was recorded;
+`work::is_finished` is the rule. The check never reads repository settings,
+so `forestui prune` judges the same way without them. The marks are derived and never saved.
 A worktree the check could not answer for (`gh` signed out, no remote default
 branch) keeps its previous mark — "could not tell" must not unmark it.
 
@@ -29,7 +32,9 @@ The order differs from prune: a Delete removes the worktree regardless (dirty
 trees have their own confirm), then deletes the branch only if nothing on it
 is unpushed and it is not the default branch (a worktree made on `main`
 hands it back; with no remote default recorded, `main` and `master` are
-spared), and keeps it — saying why in the notification — on any doubt.
+spared) or the base branch the repository settings name (matched by its local
+name, so `origin/develop` spares `develop`; read on the main loop and passed
+into the task), and keeps it — saying why in the notification — on any doubt.
 The branch comes from git's worktree list before removal, not from state, so
 a branch switched since the last scan is not the one deleted.
 Remote branches are never touched.

@@ -296,7 +296,8 @@ impl App {
                 name,
                 branch,
                 new_branch,
-            } => self.create_worktree(repo_id, name, branch, new_branch, None, false, None),
+                base_branch,
+            } => self.create_worktree(repo_id, name, branch, new_branch, base_branch, false, None),
             ModalResult::WorktreeForWorkItem {
                 repo_id,
                 link,
@@ -527,6 +528,8 @@ impl App {
         let repo_path = repo.source_path.clone();
         let worktree_path = worktree.path.clone();
         let tracked_branch = worktree.branch.clone();
+        // Read here, not in the task: the main loop owns the settings.
+        let base_branch = self.base_branch_for(&repo_path);
         // Immediate feedback: on a large tree the round trip takes seconds and
         // the frame would otherwise be identical to the one before confirming.
         self.notify(format!("Deleting '{name}'…"), Severity::Information);
@@ -552,7 +555,12 @@ impl App {
             // worktree is one git will not delete.
             let branch_fate = match outcome {
                 Ok(git::RemoveOutcome::Removed) => {
-                    crate::prune::delete_branch_if_pushed(&repo_path, &branch).await
+                    crate::prune::delete_branch_if_pushed(
+                        &repo_path,
+                        &branch,
+                        base_branch.as_deref(),
+                    )
+                    .await
                 }
                 _ => None,
             };
@@ -644,6 +652,7 @@ impl App {
                 let Some(repo) = self.state.find_repository(repo_id) else {
                     return;
                 };
+                let configured_base = self.base_branch_for(&repo.source_path);
                 // The flow it was loaded for, still open; otherwise the user
                 // moved on while the branches loaded.
                 if let Some(Modal::StartWork(flow)) = self.modals.last_mut()
@@ -651,10 +660,10 @@ impl App {
                 {
                     flow.set_worktree_form(WorktreeForm::new(
                         repo,
-                        list.branches,
-                        list.remotes,
+                        list,
                         settings_service::get_forest_path(),
                         self.settings.branch_prefix.clone(),
+                        configured_base,
                     ));
                 }
             }
@@ -689,6 +698,7 @@ impl App {
             template.text,
             list,
             settings_service::get_forest_path(),
+            self.base_branch_for(&repo.source_path),
         );
         self.modals.push(Modal::StartWorkConfirm(Box::new(modal)));
         if let Some(warning) = template.warning {
@@ -1095,9 +1105,14 @@ impl App {
     }
 
     pub(super) fn action_delete(&mut self) {
-        if let Some((_repo, worktree)) = self.state.selected_worktree() {
+        if let Some((repo, worktree)) = self.state.selected_worktree() {
             let name = worktree.name.clone();
             let id = worktree.id;
+            let kept = if self.base_branch_for(&repo.source_path).is_some() {
+                "The default and base branches, or one with unpushed commits, are kept."
+            } else {
+                "The default branch, or one with unpushed commits, is kept."
+            };
             // A removal running already shows on the disabled Delete control;
             // a rename running is invisible, so it gets a word instead of a
             // confirm whose answer would be refused.
@@ -1116,7 +1131,7 @@ impl App {
                 "" | "HEAD" => format!("Permanently delete '{name}'?"),
                 // One line each, capped: the dialog clips rather than wraps.
                 branch => format!(
-                    "Permanently delete '{}'\nand its local branch '{}'?\nThe default branch, or one with unpushed commits, is kept.",
+                    "Permanently delete '{}'\nand its local branch '{}'?\n{kept}",
                     crate::util::truncate(&name, 50),
                     crate::util::truncate(branch, 50),
                 ),
@@ -1794,7 +1809,7 @@ impl App {
                 )
             };
 
-            if let Err(error) = git::create_worktree(
+            let branch = match git::create_worktree(
                 &source_path,
                 &worktree_path,
                 &branch,
@@ -1803,10 +1818,13 @@ impl App {
             )
             .await
             {
-                tx.error(format!("Failed to create worktree: {error}"));
-                tx.send(AppEvent::WorktreeAddFailed { create });
-                return;
-            }
+                Ok(branch) => branch,
+                Err(error) => {
+                    tx.error(format!("Failed to create worktree: {error}"));
+                    tx.send(AppEvent::WorktreeAddFailed { create });
+                    return;
+                }
+            };
 
             let mut worktree = Worktree::new(
                 name.clone(),

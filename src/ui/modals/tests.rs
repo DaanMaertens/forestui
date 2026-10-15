@@ -76,10 +76,15 @@ fn repo() -> Repository {
 fn worktree_form(new_branch: bool) -> WorktreeForm {
     let mut form = WorktreeForm::new(
         &repo(),
-        vec!["main".into(), "feat/login".into(), "origin/main".into()],
-        vec!["origin".into()],
+        crate::event::BranchList {
+            branches: vec!["main".into(), "feat/login".into(), "origin/main".into()],
+            remotes: vec!["origin".into()],
+            remote_default: Some("origin/main".into()),
+            current_branch: "main".into(),
+        },
         PathBuf::from("/forest"),
         "feat/".into(),
+        None,
     );
     form.new_branch = new_branch;
     form
@@ -145,6 +150,7 @@ fn confirm_modal() -> Modal {
         crate::prompt::ISSUE_TEMPLATE.to_string(),
         branches,
         PathBuf::from("/forest"),
+        None,
     )))
 }
 

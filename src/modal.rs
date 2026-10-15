@@ -214,6 +214,8 @@ pub enum ModalResult {
         name: String,
         branch: String,
         new_branch: bool,
+        /// What a new branch stems from; `None` stems from HEAD.
+        base_branch: Option<String>,
     },
     WorktreeForWorkItem {
         repo_id: Uuid,
@@ -419,6 +421,20 @@ fn edit_input(input: &mut TextInput, key: KeyEvent) -> bool {
     input.apply_edit_key(key)
 }
 
+/// Right at the end of a base field takes the completion shown after it.
+/// Asked before the field edits: otherwise Right is always a cursor move,
+/// and the hint's "→ accepts" would never fire.
+fn accept_suggestion(input: &mut TextInput, suggestion: Option<String>, key: KeyEvent) -> bool {
+    let at_end = input.cursor() == input.value().chars().count();
+    match suggestion {
+        Some(suggestion) if key.code == KeyCode::Right && at_end && suggestion != input.value() => {
+            input.set_value(suggestion);
+            true
+        }
+        _ => false,
+    }
+}
+
 // ---------------------------------------------------------------- Add repository
 
 #[derive(Debug)]
@@ -517,6 +533,11 @@ pub struct WorktreeForm {
     pub branch: TextInput,
     /// The existing-branch search. Its query is the chosen branch.
     pub picker: SearchPicker<BranchEntry>,
+    /// What a new branch stems from; empty stems from the checkout's HEAD.
+    pub base_branch: TextInput,
+    branches: BranchList,
+    /// The base branch the repository settings name, as the form opened.
+    configured_base: Option<String>,
     pub new_branch: bool,
     pub error: String,
     /// One of the `FOCUS_*` constants, or [`WorktreeForm::create_index`],
@@ -526,25 +547,30 @@ pub struct WorktreeForm {
 }
 
 impl WorktreeForm {
-    /// The fixed head of the focus ring. Create, Back and Cancel follow, but
-    /// their indices move with the mode — the results list only exists while an
-    /// existing branch is being picked — so they are methods, not constants.
+    /// The fixed head of the focus ring, then one stop that depends on the
+    /// mode: the base a new branch stems from, or the results list an
+    /// existing branch is picked from. Create, Back and Cancel follow, so
+    /// they are methods, not constants.
     pub const FOCUS_NAME: usize = 0;
     pub const FOCUS_MODE: usize = 1;
     pub const FOCUS_BRANCH: usize = 2;
+    pub const FOCUS_BASE: usize = 3;
     pub const FOCUS_RESULTS: usize = 3;
 
+    /// `configured_base` is the repository settings' base branch.
     pub fn new(
         repo: &Repository,
-        branches: Vec<String>,
-        remotes: Vec<String>,
+        branches: BranchList,
         forest_dir: PathBuf,
         branch_prefix: String,
+        configured_base: Option<String>,
     ) -> Self {
         let entries = branches
+            .branches
             .iter()
-            .map(|b| BranchEntry::new(b, &remotes))
+            .map(|b| BranchEntry::new(b, &branches.remotes))
             .collect();
+        let base = initial_base_branch(&branches, configured_base.as_deref());
         Self {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
@@ -553,6 +579,9 @@ impl WorktreeForm {
             name: TextInput::new("").with_placeholder("my-feature"),
             branch: TextInput::new("").with_placeholder(format!("{branch_prefix}my-feature")),
             picker: SearchPicker::new(entries, "Start typing to search branches..."),
+            base_branch: TextInput::new(base).with_placeholder("HEAD"),
+            branches,
+            configured_base,
             new_branch: true,
             error: String::new(),
             focus: Self::FOCUS_NAME,
@@ -560,10 +589,8 @@ impl WorktreeForm {
     }
 
     pub fn field_count(&self) -> usize {
-        // The fixed head, then Create, Back and Cancel; the results list sits
-        // between them only while an existing branch is being picked.
-        let head = Self::FOCUS_BRANCH + 1;
-        head + usize::from(!self.new_branch) + 3
+        // The fixed head, the mode's own stop, then Create, Back and Cancel.
+        Self::FOCUS_BRANCH + 1 + 1 + 3
     }
 
     pub fn create_index(&self) -> usize {
@@ -585,6 +612,35 @@ impl WorktreeForm {
         } else {
             Some(Self::FOCUS_RESULTS)
         }
+    }
+
+    /// Index of the base field, which only exists in new-branch mode.
+    fn base_index(&self) -> Option<usize> {
+        self.new_branch.then_some(Self::FOCUS_BASE)
+    }
+
+    /// The inline suggestion shown after the typed base branch.
+    pub fn base_suggestion(&self) -> Option<String> {
+        let value = self.base_branch.value();
+        if value.is_empty() {
+            return None;
+        }
+        fuzzy::fuzzy_match_branches(value, &self.branches.branches, &self.branches.remotes, 1)
+            .into_iter()
+            .next()
+            .map(|(b, _)| b)
+    }
+
+    /// The repository settings' base branch, when the branch list lacks it.
+    pub fn missing_base(&self) -> Option<&str> {
+        missing_base_branch(&self.branches, self.configured_base.as_deref())
+    }
+
+    /// Whether the typed base is one to stem from: none at all (HEAD), or a
+    /// branch in the list.
+    fn base_exists(&self) -> bool {
+        let base = self.base_branch.value();
+        base.is_empty() || self.branches.branches.iter().any(|b| b == base)
     }
 
     pub fn set_focus(&mut self, index: usize) {
@@ -632,10 +688,11 @@ impl WorktreeForm {
         }
     }
 
-    /// The Create control is disabled when an existing branch is not real.
+    /// The Create control is disabled when an existing branch, or a new
+    /// branch's base, is not real.
     pub fn can_create(&self) -> bool {
         if self.new_branch {
-            return true;
+            return self.base_exists();
         }
         self.branch_exists(&self.selected_branch())
     }
@@ -665,17 +722,23 @@ impl WorktreeForm {
             self.error = format!("Branch '{branch}' does not exist");
             return ModalOutcome::None;
         }
+        if self.new_branch && !self.base_exists() {
+            self.error = format!("Base branch '{}' does not exist", self.base_branch.value());
+            return ModalOutcome::None;
+        }
         if let Some(path) = self.path_preview()
             && path.exists()
         {
             self.error = "Worktree path already exists".into();
             return ModalOutcome::None;
         }
+        let base = self.base_branch.value().to_string();
         ModalOutcome::Submit(ModalResult::WorktreeCreated {
             repo_id: self.repo_id,
             name,
             branch,
             new_branch: self.new_branch,
+            base_branch: (self.new_branch && !base.is_empty()).then_some(base),
         })
     }
 
@@ -699,6 +762,16 @@ impl WorktreeForm {
                 self.picker.edit_query(key)
             };
             if used {
+                self.error.clear();
+                return ModalOutcome::None;
+            }
+        }
+
+        if self.base_index() == Some(self.focus) {
+            let suggestion = self.base_suggestion();
+            if accept_suggestion(&mut self.base_branch, suggestion, key)
+                || edit_input(&mut self.base_branch, key)
+            {
                 self.error.clear();
                 return ModalOutcome::None;
             }
@@ -746,11 +819,8 @@ impl WorktreeForm {
             if self.focus == self.create_index()
                 || self.focus == Self::FOCUS_NAME
                 || self.focus == Self::FOCUS_BRANCH
+                || self.base_index() == Some(self.focus)
             {
-                if !self.can_create() {
-                    self.error = format!("Branch '{}' does not exist", self.selected_branch());
-                    return ModalOutcome::None;
-                }
                 return self.submit();
             }
         }
@@ -1446,6 +1516,8 @@ pub struct StartWorkConfirmModal {
     pub name: TextInput,
     pub branch: TextInput,
     pub base_branch: TextInput,
+    /// The base branch the repository settings name, as the screen opened.
+    configured_base: Option<String>,
     pub pull_first: bool,
     /// Launch with the built-in YOLO flag. Off on every open: trusting one
     /// task must not become the default for the next.
@@ -1525,7 +1597,8 @@ impl StartWorkConfirmModal {
 
     /// `names` are passed in rather than derived from `item`: a session's
     /// may carry a suffix the clash question chose. `template` is
-    /// the text of `item.template()`, read by the caller.
+    /// the text of `item.template()`, read by the caller. `configured_base`
+    /// is the repository settings' base branch.
     pub fn new(
         repo: &Repository,
         item: WorkItem,
@@ -1533,8 +1606,9 @@ impl StartWorkConfirmModal {
         template: String,
         branches: BranchList,
         forest_dir: PathBuf,
+        configured_base: Option<String>,
     ) -> Self {
-        let base = default_base_branch(&branches);
+        let base = initial_base_branch(&branches, configured_base.as_deref());
         Self {
             repo_id: repo.id,
             repo_name: repo.name.clone(),
@@ -1545,6 +1619,7 @@ impl StartWorkConfirmModal {
             name: TextInput::new(names.worktree).with_placeholder("worktree-name"),
             branch: TextInput::new(names.branch).with_placeholder("branch-name"),
             base_branch: TextInput::new(base).with_placeholder("origin/main"),
+            configured_base,
             pull_first: true,
             yolo: false,
             template,
@@ -1636,6 +1711,11 @@ impl StartWorkConfirmModal {
             .map(|(b, _)| b)
     }
 
+    /// The repository settings' base branch, when the branch list lacks it.
+    pub fn missing_base(&self) -> Option<&str> {
+        missing_base_branch(&self.branches, self.configured_base.as_deref())
+    }
+
     /// Mid-edit counts as not ready: launching then would start Claude on
     /// the prompt the editor is about to replace.
     pub fn can_launch(&self) -> bool {
@@ -1653,11 +1733,17 @@ impl StartWorkConfirmModal {
     /// Apply a refreshed branch list after a fetch.
     pub fn update_branches(&mut self, branches: BranchList) {
         self.is_fetching = false;
+        // A base still at what the screen chose follows the new list, so a
+        // fetch that brings in the repository's base branch switches to it;
+        // a base the user typed stays.
+        let chosen = initial_base_branch(&self.branches, self.configured_base.as_deref());
         self.branches = branches;
         let base = self.base_branch.value().to_string();
-        if base.is_empty() || !self.branches.branches.contains(&base) {
-            self.base_branch
-                .set_value(default_base_branch(&self.branches));
+        if base.is_empty() || base == chosen || !self.branches.branches.contains(&base) {
+            self.base_branch.set_value(initial_base_branch(
+                &self.branches,
+                self.configured_base.as_deref(),
+            ));
         }
     }
 
@@ -1688,6 +1774,13 @@ impl StartWorkConfirmModal {
             return ModalOutcome::Close;
         }
 
+        if self.focus == Self::FOCUS_BASE {
+            let suggestion = self.base_suggestion();
+            if accept_suggestion(&mut self.base_branch, suggestion, key) {
+                return ModalOutcome::None;
+            }
+        }
+
         let editable = match self.focus {
             Self::FOCUS_NAME => Some(&mut self.name),
             Self::FOCUS_BRANCH => Some(&mut self.branch),
@@ -1706,14 +1799,6 @@ impl StartWorkConfirmModal {
                 self.names_edited |= now != before;
                 return ModalOutcome::None;
             }
-        }
-
-        if self.focus == Self::FOCUS_BASE
-            && key.code == KeyCode::Right
-            && let Some(suggestion) = self.base_suggestion()
-        {
-            self.base_branch.set_value(suggestion);
-            return ModalOutcome::None;
         }
 
         let ring = self.ring();
@@ -1780,6 +1865,23 @@ impl StartWorkConfirmModal {
             yolo: self.yolo,
         }
     }
+}
+
+/// What a new branch stems from unless the user changes it: the base branch
+/// the repository settings name, when `list` has it, otherwise
+/// [`default_base_branch`].
+pub fn initial_base_branch(list: &BranchList, configured: Option<&str>) -> String {
+    match configured {
+        Some(base) if list.branches.iter().any(|b| b == base) => base.to_string(),
+        _ => default_base_branch(list),
+    }
+}
+
+/// The base branch the repository settings name, when `list` does not have
+/// it: a typo, or a branch gone upstream. Start work falls back rather than
+/// refusing, so the dialog says why the field holds something else.
+pub fn missing_base_branch<'a>(list: &BranchList, configured: Option<&'a str>) -> Option<&'a str> {
+    configured.filter(|base| !list.branches.iter().any(|b| b == base))
 }
 
 /// What new work branches from: the remote's default branch when it records

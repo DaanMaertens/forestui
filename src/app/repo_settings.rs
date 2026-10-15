@@ -42,6 +42,15 @@ impl App {
         }
     }
 
+    /// The base branch a checkout's repository settings name, if any. Only
+    /// a repository's file has one; there is no global value to fall back to.
+    pub fn base_branch_for(&self, path: &str) -> Option<String> {
+        self.repos
+            .get(path)
+            .and_then(|lookup| lookup.overrides.base_branch())
+            .map(str::to_string)
+    }
+
     /// Where a checkout's prompt templates are looked for, first to last:
     /// its repository's, then the global ones. The built-in default comes
     /// after both.
