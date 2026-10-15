@@ -94,7 +94,7 @@ fn worktree_form(new_branch: bool) -> WorktreeForm {
 fn in_flow(form: WorktreeForm) -> Modal {
     let mut modal = StartWorkModal::new(
         &repo(),
-        Some(vec![issue()]),
+        Some(Ok(vec![issue()])),
         Default::default(),
         false,
         Default::default(),
@@ -121,7 +121,7 @@ fn issue() -> GitHubIssue {
 fn start_work_modal(step: StartWorkStep) -> Modal {
     let mut modal = StartWorkModal::new(
         &repo(),
-        Some(vec![issue()]),
+        Some(Ok(vec![issue()])),
         Default::default(),
         false,
         Default::default(),
@@ -597,4 +597,24 @@ fn the_settings_dialog_still_fits_80_by_40_with_the_back_key() {
         );
     }
     assert!(screen.contains("BACK KEY TO FORESTUI"), "{screen}");
+}
+
+/// A failed fetch failed for every filter: it says "issues", not the
+/// filter's "feature issues", and not that there are none.
+#[test]
+fn a_failed_issue_list_names_issues_whatever_the_filter() {
+    let mut modal = StartWorkModal::new(
+        &repo(),
+        Some(Err(crate::services::github::ListError::Failed)),
+        Default::default(),
+        false,
+        crate::models::IssueFilter::Features,
+    );
+    modal.step = StartWorkStep::Item;
+    let screen = render(&Modal::StartWork(Box::new(modal)), 120, 40);
+    assert!(
+        screen.contains("Could not load the issues from GitHub"),
+        "{screen}"
+    );
+    assert!(!screen.contains("No open feature issues"), "{screen}");
 }

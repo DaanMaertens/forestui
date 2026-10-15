@@ -55,14 +55,14 @@ async fn the_scope_toggle_waits_for_its_own_list() {
     app.handle_event(AppEvent::Issues {
         path: path.clone(),
         scope: Scope::Mine,
-        issues: vec![open_issue(1, "Mine")],
+        issues: Ok(vec![open_issue(1, "Mine")]),
     });
     assert!(start_work(&app).picker.is_none());
 
     app.handle_event(AppEvent::Issues {
         path: path.clone(),
         scope: Scope::All,
-        issues: vec![open_issue(1, "Mine"), open_issue(3, "Unassigned")],
+        issues: Ok(vec![open_issue(1, "Mine"), open_issue(3, "Unassigned")]),
     });
     assert_eq!(listed(&app), vec![1, 3]);
 }

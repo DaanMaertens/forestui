@@ -16,7 +16,7 @@ use crate::models::{
 use crate::picker::SearchPicker;
 use crate::prompt::{self, Template};
 use crate::repo_settings::{ConfigFile, RepoKey};
-use crate::services::github::{PullRequests, PullRequestsError};
+use crate::services::github::{IssuesResult, ListError, PullRequests};
 use crate::services::tmux::back_key;
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
 use crate::util;
@@ -870,11 +870,12 @@ pub struct StartWorkModal {
     /// repository has one, and greying its modes out for the length of a
     /// `gh` call would flash on every open.
     pub github: Option<bool>,
-    /// Every loaded issue; the picker holds the ones `mode` lists.
-    issues: Option<Vec<GitHubIssue>>,
+    /// Every loaded issue; the picker holds the ones `mode` lists. An
+    /// error when `gh` could not list them.
+    issues: Option<IssuesResult>,
     /// The PRs `pr-review` lists, once `gh` has answered — or why it
     /// could not.
-    pull_requests: Option<Result<Vec<GitHubPullRequest>, PullRequestsError>>,
+    pull_requests: Option<Result<Vec<GitHubPullRequest>, ListError>>,
     /// The login `gh` is authenticated as, which a PR's author is compared
     /// with to settle its review kind.
     viewer: Option<String>,
@@ -942,7 +943,7 @@ impl StartWorkModal {
 
     pub fn new(
         repo: &Repository,
-        issues: Option<Vec<GitHubIssue>>,
+        issues: Option<IssuesResult>,
         start_work: StartWorkSettings,
         show_blocked: bool,
         filter: IssueFilter,
@@ -1040,12 +1041,20 @@ impl StartWorkModal {
     /// Fill the item list once the issues for `scope` have loaded; a list
     /// for the other scope is not this flow's. Issues already loaded are
     /// kept: replacing the list under a half-typed query would move the
-    /// selection out from under the user.
-    pub fn set_issues(&mut self, scope: Scope, issues: Vec<GitHubIssue>) {
-        if scope == self.scope && self.issues.is_none() {
-            self.issues = Some(issues);
-            self.fill_picker();
+    /// selection out from under the user. A failure is not a list, so the
+    /// retry behind a cached one takes its place, keeping what was typed.
+    pub fn set_issues(&mut self, scope: Scope, issues: IssuesResult) {
+        if scope != self.scope || matches!(self.issues, Some(Ok(_))) {
+            return;
         }
+        self.issues = Some(issues);
+        if self.mode == WorkMode::PrReview {
+            return;
+        }
+        if let Some(picker) = self.picker.take() {
+            self.query_after_reload = Some(picker.query().value().to_string());
+        }
+        self.fill_picker();
     }
 
     /// Take the settings in effect once the repository's own are known. A
@@ -1083,7 +1092,7 @@ impl StartWorkModal {
     pub fn set_pull_requests(
         &mut self,
         scope: Scope,
-        result: Result<PullRequests, PullRequestsError>,
+        result: Result<PullRequests, ListError>,
     ) -> bool {
         if scope != self.scope || self.pull_requests.is_some() {
             return false;
@@ -1101,13 +1110,14 @@ impl StartWorkModal {
         true
     }
 
-    /// Why the list on screen could not be loaded: only `pr-review`'s
-    /// list can fail this way.
-    pub fn pull_requests_error(&self) -> Option<PullRequestsError> {
-        match &self.pull_requests {
-            Some(Err(error)) if self.mode == WorkMode::PrReview => Some(*error),
-            _ => None,
-        }
+    /// Why the list on screen could not be loaded, if it could not.
+    pub fn list_error(&self) -> Option<ListError> {
+        let failed = match self.mode {
+            WorkMode::PrReview => self.pull_requests.as_ref().map(|prs| prs.as_ref().err()),
+            WorkMode::Issue => self.issues.as_ref().map(|issues| issues.as_ref().err()),
+            WorkMode::Session | WorkMode::Worktree => None,
+        };
+        failed.flatten().copied()
     }
 
     /// Choose a mode, listing its items. Re-choosing the current one keeps
@@ -1143,9 +1153,10 @@ impl StartWorkModal {
             // Without GitHub there are no issues to wait for. No mode with a
             // list is offered then, but an empty list says so rather than
             // loading forever.
-            let issues = match (self.has_github(), self.issues.as_deref()) {
-                (false, _) => &[][..],
-                (true, Some(issues)) => issues,
+            // A failed fetch lists nothing, as for the PRs.
+            let issues = match (self.has_github(), &self.issues) {
+                (false, _) | (true, Some(Err(_))) => &[][..],
+                (true, Some(Ok(issues))) => issues.as_slice(),
                 (true, None) => return,
             };
             work::issue_entries(
@@ -1156,11 +1167,24 @@ impl StartWorkModal {
                 |number| self.linked.get(&WorkItemLink::Issue { number }).cloned(),
             )
         };
-        let mut picker = SearchPicker::new(entries, "Type a number or part of a title...");
+        // Every row reachable by Up/Down and the wheel, not only by search:
+        // the issues are fetched a hundred at a time per query (#76).
+        let mut picker =
+            SearchPicker::new(entries, "Type a number or part of a title...").unlimited();
         if let Some(query) = self.query_after_reload.take() {
             picker.set_query(&query);
         }
         self.picker = Some(picker);
+    }
+
+    /// Move the item list's selection by a wheel notch. Only the item step
+    /// has a list to browse; elsewhere the wheel does nothing.
+    pub fn step_selection(&mut self, delta: isize) {
+        if self.step == StartWorkStep::Item
+            && let Some(picker) = self.picker.as_mut()
+        {
+            picker.step(delta);
+        }
     }
 
     /// Whether the item step offers "Not just mine": every list that comes
@@ -1191,8 +1215,8 @@ impl StartWorkModal {
 
     /// How many blocked issues the current list leaves out.
     pub fn hidden_blocked(&self) -> usize {
-        match (self.offers_issue_toggles(), self.issues.as_deref()) {
-            (true, Some(issues)) => {
+        match (self.offers_issue_toggles(), &self.issues) {
+            (true, Some(Ok(issues))) => {
                 work::hidden_blocked(issues, self.filter, &self.start_work, self.show_blocked)
             }
             _ => 0,

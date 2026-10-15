@@ -519,7 +519,7 @@ async fn issues_that_arrive_later_fill_the_picker() {
     app.handle_event(AppEvent::Issues {
         path,
         scope: crate::models::Scope::Mine,
-        issues: vec![open_issue(42, "Fix login bug")],
+        issues: Ok(vec![open_issue(42, "Fix login bug")]),
     });
 
     let picker = start_work(&app).picker.as_ref().expect("filled");
@@ -606,4 +606,57 @@ async fn every_step_renders() {
     assert!(confirm.contains("Start Work: Issue #42"), "{confirm}");
     assert!(confirm.contains("gh issue view 42 --comments"), "{confirm}");
     assert!(confirm.contains("Launch"), "{confirm}");
+}
+
+/// A list `gh` could not give is not an empty one: the picker says it
+/// could not load, not "no open issues" (#76). The retry behind it then
+/// takes its place, keeping what was typed.
+#[tokio::test]
+async fn a_failed_issue_list_says_so_and_a_retry_replaces_it() {
+    let (_dir, mut app) = app_with_fixture();
+    let path = app.state.repositories()[0].source_path.clone();
+    github::invalidate_cache(&path);
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+
+    app.handle_event(AppEvent::Issues {
+        path: path.clone(),
+        scope: crate::models::Scope::Mine,
+        issues: Err(github::ListError::Failed),
+    });
+    assert!(listed(&app).is_empty());
+    let screen = rendered(&mut app);
+    assert!(
+        screen.contains("Could not load the issues from GitHub"),
+        "{screen}"
+    );
+    assert!(!screen.contains("No open issues"), "{screen}");
+
+    app.handle_key(key(KeyCode::Char('7')));
+    app.handle_event(AppEvent::Issues {
+        path,
+        scope: crate::models::Scope::Mine,
+        issues: Ok(vec![open_issue(7, "Back online"), open_issue(8, "Other")]),
+    });
+    assert_eq!(listed(&app), vec![7, 8]);
+    assert_eq!(
+        start_work(&app)
+            .picker
+            .as_ref()
+            .map(|p| p.query().value().to_string()),
+        Some("7".into())
+    );
+    assert!(!rendered(&mut app).contains("Could not load"));
+}
+
+/// Every issue fetched can be browsed to, not only searched for: the list
+/// holds them all where other pickers stop at their best fifty.
+#[tokio::test]
+async fn the_issue_list_lists_every_issue_not_the_first_fifty() {
+    let (_dir, mut app, _) = app_with_issues((1..=80).map(|n| open_issue(n, "Issue")).collect());
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    let picker = start_work(&app).picker.as_ref().expect("issues loaded");
+    assert_eq!(picker.match_count(), 80);
+    assert!(rendered(&mut app).contains("80 issues"));
 }

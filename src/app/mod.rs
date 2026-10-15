@@ -46,7 +46,6 @@ pub const SESSION_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 /// the full live scan (tmux, `ps`) keeps the slower cadence above.
 pub const STATE_READ_INTERVAL: Duration = Duration::from_secs(1);
 pub const SESSION_LIMIT: usize = 5;
-pub const ISSUE_LIMIT: usize = 10;
 /// Lines the detail pane moves per wheel notch, matching Textual's
 /// `scroll_sensitivity_y` of 3.
 pub(super) const SCROLL_STEP: isize = 3;
@@ -1044,7 +1043,7 @@ impl App {
         }
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            let issues = github::list_issues(&path, ISSUE_LIMIT, scope).await;
+            let issues = github::list_issues(&path, scope).await;
             tx.send(AppEvent::Issues {
                 path,
                 scope,

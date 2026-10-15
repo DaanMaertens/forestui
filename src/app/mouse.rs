@@ -171,6 +171,19 @@ impl App {
             .map(|hit| hit.target)
     }
 
+    /// Hand a wheel notch to the topmost modal, if it has a list to browse.
+    /// Both lists are longer than their windows and a click on a row
+    /// commits, so the wheel is the mouse's only way to browse them: the
+    /// theme picker (live-previewing as it goes) and Start work's items.
+    fn wheel_in_modal(&mut self, delta: isize) -> bool {
+        match self.modals.last_mut() {
+            Some(crate::modal::Modal::ThemePicker(picker)) => picker.step(delta),
+            Some(crate::modal::Modal::StartWork(flow)) => flow.step_selection(delta),
+            _ => return false,
+        }
+        true
+    }
+
     pub fn handle_mouse(&mut self, mouse: ratatui::crossterm::event::MouseEvent) {
         use ratatui::crossterm::event::{MouseButton, MouseEventKind};
 
@@ -185,11 +198,7 @@ impl App {
 
         match mouse.kind {
             MouseEventKind::ScrollDown => {
-                if let Some(crate::modal::Modal::ThemePicker(picker)) = self.modals.last_mut() {
-                    // The picker's list is longer than its window and clicking
-                    // a row commits — the wheel is the only mouse gesture that
-                    // can browse (and live-preview) without choosing.
-                    picker.step(1);
+                if self.wheel_in_modal(1) {
                     self.redraw = true;
                 } else if !modal_open {
                     self.scroll_at(mouse.column, mouse.row, 1);
@@ -197,8 +206,7 @@ impl App {
                 return;
             }
             MouseEventKind::ScrollUp => {
-                if let Some(crate::modal::Modal::ThemePicker(picker)) = self.modals.last_mut() {
-                    picker.step(-1);
+                if self.wheel_in_modal(-1) {
                     self.redraw = true;
                 } else if !modal_open {
                     self.scroll_at(mouse.column, mouse.row, -1);

@@ -808,18 +808,19 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     let mut column = dialog(frame, rect, &title, theme::title());
 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
-    let (section, loading, empty, noun) = match modal.mode {
+    let (section, loading, empty, noun, items) = match modal.mode {
         // `session` has a prompt and `worktree` a form, not an item list,
         // so neither lands here.
         WorkMode::Issue | WorkMode::Session | WorkMode::Worktree => {
             let (empty, noun) = issue_words(modal.filter);
-            ("Issue", " Loading issues...", empty, noun)
+            ("Issue", " Loading issues...", empty, noun, "issues")
         }
         WorkMode::PrReview => (
             "Pull Request",
             " Loading pull requests...",
             "No open PRs",
             Noun::new("PR", "PRs"),
+            "PRs",
         ),
     };
     // The empty line names the scope it searched, so "nothing for me" is
@@ -830,9 +831,11 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         (Scope::Mine, _) => " assigned to or opened by you",
     };
     // A list that could not be fetched is not an empty one: it says why
-    // instead, so a failure never reads as "you have no PRs".
-    let (empty, empty_style) = match modal.pull_requests_error() {
-        Some(error) => (error.message().to_string(), theme::warning()),
+    // instead, so a failure never reads as "you have none".
+    let (empty, empty_style) = match modal.list_error() {
+        // The whole fetch failed, whatever the filter: "issues", not
+        // "feature issues".
+        Some(error) => (error.message(items), theme::warning()),
         _ => (format!("{empty}{mine}"), theme::muted()),
     };
     column.line(frame, widgets::section(section));

@@ -9,6 +9,15 @@ use tokio::process::Command;
 
 pub const CACHE_TTL_SECONDS: i64 = 300;
 
+/// Issues asked of each `gh issue list` call: the most `gh` returns in one
+/// request. Large enough that the cap does not decide what Start work lists
+/// once its blocked and filtered issues are hidden — a page of ten left the
+/// list empty while older unblocked issues were open (#76).
+pub const ISSUE_FETCH_LIMIT: usize = 100;
+
+/// An issue list as `gh` answered it, or why there is none.
+pub type IssuesResult = Result<Vec<GitHubIssue>, ListError>;
+
 /// Result of `gh auth status`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthStatus {
@@ -32,7 +41,7 @@ impl AuthStatus {
 }
 
 struct Cached {
-    issues: Vec<GitHubIssue>,
+    issues: IssuesResult,
     fetched_at: DateTime<Utc>,
 }
 
@@ -62,7 +71,7 @@ struct IssueCache {
 
 impl IssueCache {
     /// `Some((issues, fresh))` when a fetch has completed, `None` otherwise.
-    fn peek(&self, path: &str, scope: Scope) -> Option<(Vec<GitHubIssue>, bool)> {
+    fn peek(&self, path: &str, scope: Scope) -> Option<(IssuesResult, bool)> {
         let cached = self.entries.get(&(path.to_string(), scope))?;
         let fresh = (Utc::now() - cached.fetched_at).num_seconds() < CACHE_TTL_SECONDS;
         Some((cached.issues.clone(), fresh))
@@ -71,29 +80,44 @@ impl IssueCache {
     /// Store a fetch result unless an invalidation landed while it ran.
     /// `fresh` decides the stamp: `false` back-dates the entry to the TTL
     /// boundary so it renders instantly but re-checks on the next visit.
+    /// A failure is never fresh, and never replaces a list that loaded:
+    /// that list, stale as it is, says more than "could not load".
     fn store_if_current(
         &mut self,
         generation: u64,
         path: &str,
         scope: Scope,
-        issues: &[GitHubIssue],
+        issues: &IssuesResult,
         fresh: bool,
     ) {
         if self.generation != generation {
             return;
         }
-        let fetched_at = if fresh {
+        let key = (path.to_string(), scope);
+        if issues.is_err()
+            && let Some(cached) = self.entries.get_mut(&key)
+            && cached.issues.is_ok()
+        {
+            cached.fetched_at = Self::stale_stamp();
+            return;
+        }
+        let fetched_at = if fresh && issues.is_ok() {
             Utc::now()
         } else {
-            Utc::now() - chrono::Duration::seconds(CACHE_TTL_SECONDS)
+            Self::stale_stamp()
         };
         self.entries.insert(
-            (path.to_string(), scope),
+            key,
             Cached {
-                issues: issues.to_vec(),
+                issues: issues.clone(),
                 fetched_at,
             },
         );
+    }
+
+    /// A stamp at the TTL boundary: rendered at once, re-checked next visit.
+    fn stale_stamp() -> DateTime<Utc> {
+        Utc::now() - chrono::Duration::seconds(CACHE_TTL_SECONDS)
     }
 
     /// Drop one path's entry. Deliberately not a clear-everything: nuking the
@@ -201,13 +225,13 @@ pub async fn get_repo_info(path: &str) -> Option<(String, String)> {
 /// fetch has completed this run, `None` when nothing is cached. Safe to call
 /// from the render thread — the lock is only ever held for map operations,
 /// never across an await.
-pub fn peek_issues(path: &str, scope: Scope) -> Option<(Vec<GitHubIssue>, bool)> {
+pub fn peek_issues(path: &str, scope: Scope) -> Option<(IssuesResult, bool)> {
     state().lock().ok()?.issues.peek(path, scope)
 }
 
 /// Open issues in `scope` — assigned to or opened by the current user, or
-/// every one — newest first.
-pub async fn list_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue> {
+/// every one — newest first, or why `gh` could not list them.
+pub async fn list_issues(path: &str, scope: Scope) -> IssuesResult {
     // The cache answers before any subprocess runs; a warm hit costs nothing.
     // Freshness has exactly one definition, and it lives in `peek_issues`.
     if let Some((issues, true)) = peek_issues(path, scope) {
@@ -218,25 +242,31 @@ pub async fn list_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIs
         .map(|g| g.issues.generation)
         .unwrap_or_default();
 
-    // Empty answers are cached too — a local-only repository or an
-    // unauthenticated `gh` would otherwise re-flash "Loading…" and re-spawn
-    // subprocesses on every visit — but as *already stale*: the panel renders
-    // them instantly while the next visit silently re-checks, so a transient
-    // failure (a killed probe, a network blip during `gh repo view`) never
-    // masquerades as a confident 300-second "No issues found".
+    // Failures and gate answers are cached too — a local-only repository or
+    // an unauthenticated `gh` would otherwise re-flash "Loading…" and
+    // re-spawn subprocesses on every visit — but as *already stale*: the
+    // list renders them instantly while the next visit silently re-checks,
+    // so a transient failure (a killed probe, a network blip) never
+    // masquerades as a confident 300-second answer.
     let (auth, _) = get_auth_status().await;
-    if auth != AuthStatus::Authenticated {
-        return store_if_current(generation, path, scope, Vec::new(), false);
+    if let Some(error) = unusable_gh(auth) {
+        return store_if_current(generation, path, scope, Err(error), false);
     }
 
     // Only the gate cares about owner/repo: a path that is not a GitHub
     // repository has no issues to list.
     if get_repo_info(path).await.is_none() {
-        return store_if_current(generation, path, scope, Vec::new(), false);
+        return store_if_current(generation, path, scope, Ok(Vec::new()), false);
     }
 
-    let issues = fetch_issues(path, limit, scope).await;
-    store_if_current(generation, path, scope, issues, true)
+    // A list missing one query's issues is shown, but asked again next visit.
+    match fetch_issues(path, scope).await {
+        Ok(Merged {
+            items: issues,
+            incomplete,
+        }) => store_if_current(generation, path, scope, Ok(issues), !incomplete),
+        Err(error) => store_if_current(generation, path, scope, Err(error), false),
+    }
 }
 
 /// [`IssueCache::store_if_current`] on the shared cache, handing the issues
@@ -245,9 +275,9 @@ fn store_if_current(
     generation: u64,
     path: &str,
     scope: Scope,
-    issues: Vec<GitHubIssue>,
+    issues: IssuesResult,
     fresh: bool,
-) -> Vec<GitHubIssue> {
+) -> IssuesResult {
     if let Ok(mut guard) = state().lock() {
         guard
             .issues
@@ -266,10 +296,13 @@ pub fn seed_cache_for_test(
     fetched_at: DateTime<Utc>,
 ) {
     if let Ok(mut guard) = state().lock() {
-        guard
-            .issues
-            .entries
-            .insert((path.to_string(), scope), Cached { issues, fetched_at });
+        guard.issues.entries.insert(
+            (path.to_string(), scope),
+            Cached {
+                issues: Ok(issues),
+                fetched_at,
+            },
+        );
     }
 }
 
@@ -306,16 +339,14 @@ fn rejects_blocked_by(stderr: &str) -> bool {
     stderr.contains("Unknown JSON field") && stderr.contains("blockedBy")
 }
 
-async fn fetch_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue> {
-    let limit_str = limit.to_string();
-
-    let mut issues: Vec<GitHubIssue> = Vec::new();
-    let mut seen: Vec<i64> = Vec::new();
-
+/// Every query `scope` is made of, merged by [`merge_issues`].
+async fn fetch_issues(path: &str, scope: Scope) -> Result<Merged<GitHubIssue>, ListError> {
+    let limit = ISSUE_FETCH_LIMIT.to_string();
+    let mut answers = Vec::new();
     for filter in issue_filters(scope) {
         let mut args = vec!["issue", "list"];
         args.extend_from_slice(filter);
-        args.extend_from_slice(&["--state", "open", "--limit", &limit_str, "--json"]);
+        args.extend_from_slice(&["--state", "open", "--limit", &limit, "--json"]);
         let (mut code, mut stdout, stderr) = run_gh(
             &[&args[..], &[ISSUE_FIELDS]].concat(),
             Some(Path::new(path)),
@@ -328,21 +359,59 @@ async fn fetch_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue
             )
             .await;
         }
-        if code != 0 || stdout.is_empty() {
+        answers.push((code == 0).then_some(stdout));
+    }
+    let answers: Vec<Option<&str>> = answers.iter().map(Option::as_deref).collect();
+    merge_issues(&answers)
+}
+
+/// The items of several `gh … list` answers, each listed once, newest first.
+#[derive(Debug)]
+struct Merged<T> {
+    items: Vec<T>,
+    /// One of the queries failed: there may be more.
+    incomplete: bool,
+}
+
+/// Merge several `gh … list` answers, keyed by each item's `(number,
+/// created)`. `None` is a query that exited non-zero; an answer that does
+/// not parse failed as surely. Some failing marks the list incomplete; all
+/// failing is an error, never an empty list nobody checked.
+fn merge_answers<T: serde::de::DeserializeOwned>(
+    answers: &[Option<&str>],
+    key: impl Fn(&T) -> (i64, DateTime<Utc>),
+) -> Result<Merged<T>, ListError> {
+    let mut items: Vec<T> = Vec::new();
+    let mut failed = 0;
+    for answer in answers {
+        let parsed = answer.and_then(|output| serde_json::from_str::<Vec<T>>(output).ok());
+        let Some(parsed) = parsed else {
+            failed += 1;
             continue;
-        }
-        let parsed: Vec<GitHubIssue> = serde_json::from_str(&stdout).unwrap_or_default();
-        for issue in parsed {
-            if !seen.contains(&issue.number) {
-                seen.push(issue.number);
-                issues.push(issue);
+        };
+        for item in parsed {
+            if !items.iter().any(|seen| key(seen).0 == key(&item).0) {
+                items.push(item);
             }
         }
     }
+    if failed == answers.len() {
+        return Err(ListError::Failed);
+    }
+    items.sort_by_key(|item| std::cmp::Reverse(key(item).1));
+    Ok(Merged {
+        items,
+        incomplete: failed > 0,
+    })
+}
 
-    issues.sort_by_key(|i| std::cmp::Reverse(i.created_at));
-    issues.truncate(limit);
-    issues
+/// The issues of several `gh issue list` answers — all of them: hiding
+/// blocked or filtered issues comes after, and a cap here would decide what
+/// that leaves (#76).
+fn merge_issues(answers: &[Option<&str>]) -> Result<Merged<GitHubIssue>, ListError> {
+    merge_answers(answers, |issue: &GitHubIssue| {
+        (issue.number, issue.created_at)
+    })
 }
 
 /// The open pull requests in `scope` — a review requested from me or opened
@@ -351,19 +420,10 @@ async fn fetch_issues(path: &str, limit: usize, scope: Scope) -> Vec<GitHubIssue
 ///
 /// Not cached: only Start work's `pr-review` list reads it, once per open,
 /// and a review request that arrived a minute ago should be in that list.
-pub async fn list_pull_requests(
-    path: &str,
-    scope: Scope,
-) -> Result<PullRequests, PullRequestsError> {
+pub async fn list_pull_requests(path: &str, scope: Scope) -> Result<PullRequests, ListError> {
     let (auth, viewer) = get_auth_status().await;
-    if let Some(error) = PullRequestsError::from_auth(auth) {
-        // A killed probe reads as signed out but is never cached: `gh` did
-        // not say so, and telling a signed-in user to log in would be false.
-        return Err(if auth_answered() {
-            error
-        } else {
-            PullRequestsError::Failed
-        });
+    if let Some(error) = unusable_gh(auth) {
+        return Err(error);
     }
     const JSON_FIELDS: &str = "number,title,author,isDraft,headRefName,isCrossRepository,createdAt";
     let mut answers = Vec::new();
@@ -376,6 +436,18 @@ pub async fn list_pull_requests(
     }
     let answers: Vec<Option<&str>> = answers.iter().map(Option::as_deref).collect();
     merge_pull_requests(&answers, viewer)
+}
+
+/// Why no list can be asked of a `gh` in state `auth`, if none can. A
+/// killed probe reads as signed out but is never cached: `gh` did not say
+/// so, and telling a signed-in user to log in would be false.
+fn unusable_gh(auth: AuthStatus) -> Option<ListError> {
+    let error = ListError::from_auth(auth)?;
+    Some(if auth_answered() {
+        error
+    } else {
+        ListError::Failed
+    })
 }
 
 /// Whether `gh` gave an authentication answer, which is cached once given.
@@ -394,17 +466,18 @@ pub struct PullRequests {
     pub incomplete: bool,
 }
 
-/// Why `pr-review` has no list at all. Kept apart from an empty list, so
-/// a failure never reads as "you have no PRs".
+/// Why a list from `gh` — `pr-review`'s PRs, `issue`'s issues — is not
+/// there at all. Kept apart from an empty list, so a failure never reads as
+/// "you have none".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PullRequestsError {
+pub enum ListError {
     NotInstalled,
     NotAuthenticated,
     /// Every query failed: a network error, a rate limit, a killed `gh`.
     Failed,
 }
 
-impl PullRequestsError {
+impl ListError {
     /// The error a `gh` in this state gives, if it cannot be asked at all.
     pub fn from_auth(auth: AuthStatus) -> Option<Self> {
         match auth {
@@ -414,47 +487,27 @@ impl PullRequestsError {
         }
     }
 
-    /// What the list says in place of its PRs.
-    pub fn message(self) -> &'static str {
+    /// What the list says in place of its `items`, such as "PRs".
+    pub fn message(self, items: &str) -> String {
         match self {
-            Self::NotInstalled => "gh is not installed",
-            Self::NotAuthenticated => "gh is not logged in",
-            Self::Failed => "Could not load the PRs from GitHub",
+            Self::NotInstalled => "gh is not installed".to_string(),
+            Self::NotAuthenticated => "gh is not logged in".to_string(),
+            Self::Failed => format!("Could not load the {items} from GitHub"),
         }
     }
 }
 
-/// The PRs of several `gh pr list` answers, each listed once, newest first.
-/// `None` is a query that exited non-zero; an answer that does not parse
-/// failed as surely. Some failing marks the list incomplete; all failing
-/// is an error. `viewer` is carried onto the list.
+/// The PRs of several `gh pr list` answers, as [`merge_answers`], with
+/// `viewer` carried onto the list.
 fn merge_pull_requests(
     answers: &[Option<&str>],
     viewer: Option<String>,
-) -> Result<PullRequests, PullRequestsError> {
-    let mut prs: Vec<GitHubPullRequest> = Vec::new();
-    let mut failed = 0;
-    for answer in answers {
-        let parsed =
-            answer.and_then(|output| serde_json::from_str::<Vec<GitHubPullRequest>>(output).ok());
-        let Some(parsed) = parsed else {
-            failed += 1;
-            continue;
-        };
-        for pr in parsed {
-            if !prs.iter().any(|seen| seen.number == pr.number) {
-                prs.push(pr);
-            }
-        }
-    }
-    if failed == answers.len() {
-        return Err(PullRequestsError::Failed);
-    }
-    prs.sort_by_key(|pr| std::cmp::Reverse(pr.created_at));
+) -> Result<PullRequests, ListError> {
+    let merged = merge_answers(answers, |pr: &GitHubPullRequest| (pr.number, pr.created_at))?;
     Ok(PullRequests {
-        prs,
+        prs: merged.items,
         viewer,
-        incomplete: failed > 0,
+        incomplete: merged.incomplete,
     })
 }
 
