@@ -1586,9 +1586,11 @@ impl App {
                 self.reload_detail();
                 self.report_save_error();
             }
-            AppEvent::WorktreeRemoveResult { change, outcome } => {
-                self.on_worktree_remove_result(change, outcome)
-            }
+            AppEvent::WorktreeRemoveResult {
+                change,
+                outcome,
+                branch,
+            } => self.on_worktree_remove_result(change, outcome, branch),
             AppEvent::WorktreesPruned { removals, busy } => {
                 self.on_worktrees_pruned(removals, busy)
             }
@@ -1605,6 +1607,7 @@ impl App {
         &mut self,
         change: worktree_sync::ChangeTicket,
         outcome: Result<git::RemoveOutcome, String>,
+        branch: Option<crate::prune::BranchFate>,
     ) {
         let worktree_id = change.worktree_id();
         self.worktree_sync.finish(change);
@@ -1624,6 +1627,17 @@ impl App {
                 self.sync_sidebar_index();
                 self.reload_detail();
                 self.report_save_error();
+                match branch {
+                    Some(crate::prune::BranchFate::Deleted(branch)) => self.notify(
+                        format!("Deleted '{name}' and its branch '{branch}'."),
+                        Severity::Information,
+                    ),
+                    Some(crate::prune::BranchFate::Kept { branch, why }) => self.notify(
+                        format!("Deleted '{name}'; kept branch '{branch}' — {why}."),
+                        Severity::Warning,
+                    ),
+                    None => {}
+                }
             }
             Ok(git::RemoveOutcome::Dirty(summary)) => {
                 // The name is capped so the summary — the one thing the user

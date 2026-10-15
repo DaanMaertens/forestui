@@ -238,10 +238,13 @@ pub enum AppEvent {
     /// A worktree removal attempt finished. Success is folded into state on
     /// the main loop (single-writer, same reason as [`AppEvent::WorktreeAdded`]);
     /// a dirty refusal opens the second confirmation; an error surfaces git's
-    /// message and leaves the entry in place.
+    /// message and leaves the entry in place. `branch` is what became of
+    /// the worktree's local branch once git removed it; `None` when nothing
+    /// was removed or there was no branch.
     WorktreeRemoveResult {
         change: ChangeTicket,
         outcome: Result<crate::services::git::RemoveOutcome, String>,
+        branch: Option<crate::prune::BranchFate>,
     },
     /// A prune finished: each removal it started with its ticket, the
     /// worktree's name and what came of it, plus the names of the worktrees

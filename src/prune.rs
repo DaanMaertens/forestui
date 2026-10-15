@@ -7,6 +7,10 @@
 //! the caller passes the ones it judged finished. The rest of the module is
 //! the command line's side: [`prune_forest`] judges them with the same check
 //! the App's sidebar marks come from.
+//!
+//! A Delete from the App shares the branch half: once its worktree is gone,
+//! [`delete_branch_if_pushed`] deletes the branch under the same rule, so
+//! Start work can make a fresh one under the same name.
 
 use crate::event::Severity;
 use crate::services::git;
@@ -96,6 +100,65 @@ pub async fn prune_worktree(repo_path: &str, worktree_path: &str, branch: &str) 
         None
     };
     Outcome::Removed { branch_kept }
+}
+
+/// What a Delete did with the removed worktree's local branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BranchFate {
+    Deleted(String),
+    /// `why` is a phrase: "3 unpushed commits", or git's refusal.
+    Kept {
+        branch: String,
+        why: String,
+    },
+}
+
+/// Delete `branch` unless it holds commits that are on no remote branch —
+/// prune's rule, applied after the worktree is already gone — or it is the
+/// repository's default branch. `None` when
+/// there is no such local branch, or none at all (a detached `HEAD`). Anything git cannot answer keeps the
+/// branch: a leftover branch only blocks a name, a lost one loses work.
+pub async fn delete_branch_if_pushed(repo_path: &str, branch: &str) -> Option<BranchFate> {
+    let branch_ref = format!("refs/heads/{branch}");
+    if branch.is_empty() || branch == "HEAD" || git::get_ref(repo_path, &branch_ref).await.is_none()
+    {
+        return None;
+    }
+    let kept = |why: String| {
+        Some(BranchFate::Kept {
+            branch: branch.to_string(),
+            why,
+        })
+    };
+    match git::list_remotes(repo_path).await {
+        Ok(remotes) if remotes.is_empty() => return kept(reason(&Skip::NoRemote)),
+        Ok(remotes) => {
+            let remote_default = git::remote_default_branch(repo_path, &remotes).await;
+            if is_default_branch(branch, remote_default.as_deref()) {
+                return kept("the default branch".to_string());
+            }
+        }
+        Err(error) => return kept(sentence(&error.to_string())),
+    }
+    match git::unpushed_commits(repo_path, &[&branch_ref]).await {
+        Ok(0) => {}
+        Ok(count) => return kept(reason(&Skip::Unpushed(count))),
+        Err(error) => return kept(sentence(&error.to_string())),
+    }
+    match git::delete_branch(repo_path, branch).await {
+        Ok(()) => Some(BranchFate::Deleted(branch.to_string())),
+        Err(error) => kept(sentence(&error.to_string())),
+    }
+}
+
+/// Whether `branch` is the default branch, given the remote's default as
+/// `<remote>/<branch>`. With none recorded the usual names count: a worktree
+/// made on `main` hands it back, it never takes it with it.
+fn is_default_branch(branch: &str, remote_default: Option<&str>) -> bool {
+    match remote_default.and_then(|default| default.split_once('/')) {
+        Some((_, name)) => branch == name,
+        None => matches!(branch, "main" | "master"),
+    }
 }
 
 /// A prune's outcome in words: one sentence per line, worst last.

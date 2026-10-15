@@ -32,13 +32,13 @@
                                        │  ┌────────┐ ┌──────┐ ┌──────┐
                                        │  │ Claude │ │ YOLO │ │ Opus │
                                        │  └────────┘ └──────┘ └──────┘
-                                       │
-                                       │  CLAUDE: RECENT SESSIONS
-                                       │  No sessions found
-                                       │
-                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
                                        │                                       Deleting
-                                       │  MANAGE                               'issue-298-proactive-metrics-coalesced-fire-rows-ov'…
+                                       │  CLAUDE: RECENT SESSIONS              'issue-298-proactive-metrics-coalesced-fire-rows-ov'…
+                                       │  No sessions found                    Deleted
+                                       │                                       'issue-298-proactive-metrics-coalesced-fire-rows-ov'; kept
+                                       │  ──────────────────────────────────── branch
+                                       │                                       'fix/issue-298-proactive-metrics-coalesced-fire-rows-ov' —
+                                       │  MANAGE                               no remote to push to.
                                        │  Settings for sweep-user/alpha
  a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

@@ -12,12 +12,13 @@
 
 
 
-
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
                               │   Delete Worktree                                                            │
                               │                                                                              │
-                              │  Permanently delete 'wt-a'?                                                  │
+                              │  Permanently delete 'wt-a'                                                   │
+                              │  and its local branch 'feat/wt-a'?                                           │
+                              │  The default branch, or one with unpushed commits, is kept.                  │
                               │                                                                              │
                               │                            ┌────────┐ ┌────────┐                             │
                               │                            │ Cancel │ │ Delete │                             │
@@ -26,7 +27,6 @@
                               │  y confirm · n / Esc cancel                                                  │
                               │                                                                              │
                               └──────────────────────────────────────────────────────────────────────────────┘
-
 
 
 
