@@ -321,7 +321,7 @@ pub async fn remove_worktree(repo_path: &str, worktree_path: &str) -> GitResult<
     }
 
     let lock = match worktree_entry(&repo, &wt_dir).await {
-        Some(WorktreeEntry::Locked(reason)) => Some(Lock { reason }),
+        Some(WorktreeEntry::Locked(lock)) => Some(lock),
         _ => None,
     };
     // Ask the tree itself instead of parsing stderr, whose wording is not a
@@ -453,8 +453,7 @@ async fn tree_state(dir: &Path) -> TreeState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum WorktreeEntry {
     Listed,
-    /// With the lock's reason, if it was given one.
-    Locked(Option<String>),
+    Locked(Lock),
 }
 
 /// Whether `git worktree list` knows the given directory, and whether it is
@@ -476,9 +475,11 @@ async fn worktree_entry(repo: &Path, wt_dir: &Path) -> Option<WorktreeEntry> {
             if let Some(rest) = line.strip_prefix("worktree ") {
                 path = Some(rest);
             } else if line == "locked" {
-                locked = Some(None);
+                locked = Some(Lock { reason: None });
             } else if let Some(reason) = line.strip_prefix("locked ") {
-                locked = Some(Some(reason.to_string()));
+                locked = Some(Lock {
+                    reason: Some(reason.to_string()),
+                });
             }
         }
         if let Some(p) = path {
@@ -486,7 +487,7 @@ async fn worktree_entry(repo: &Path, wt_dir: &Path) -> Option<WorktreeEntry> {
             let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
             if p == target {
                 return Some(match locked {
-                    Some(reason) => WorktreeEntry::Locked(reason),
+                    Some(lock) => WorktreeEntry::Locked(lock),
                     None => WorktreeEntry::Listed,
                 });
             }

@@ -28,8 +28,8 @@ restores the pruned entries and its next scan drops them, directories gone.
 **A Delete shares prune's branch rule, `prune::delete_branch_if_pushed`.**
 Start work always makes a fresh branch and derives the same name for the same
 issue, so a branch left behind by a Delete blocks starting that issue again.
-The order differs from prune: a Delete removes the worktree regardless (dirty
-trees have their own confirm), then deletes the branch only if nothing on it
+The order differs from prune: a Delete removes the worktree regardless (a tree
+that is dirty, locked, or whose changes cannot be listed has its own confirm), then deletes the branch only if nothing on it
 is unpushed and it is not the default branch (a worktree made on `main`
 hands it back; with no remote default recorded, `main` and `master` are
 spared) or the base branch the repository settings name (matched by its local

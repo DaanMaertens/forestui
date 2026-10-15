@@ -16,6 +16,7 @@ use crate::models::{
 use crate::picker::SearchPicker;
 use crate::prompt::{self, Template};
 use crate::repo_settings::{ConfigFile, RepoKey};
+use crate::services::git::Force;
 use crate::services::github::{IssuesResult, ListError, PullRequests};
 use crate::services::tmux::back_key;
 use crate::ui::widgets::{TextInput, is_plain_press, text_input_claims};
@@ -142,7 +143,7 @@ pub enum ConfirmAction {
     /// Second-step confirm: a plain removal was refused, for uncommitted
     /// work or a lock, and the dialog said which. The `Force` overrides
     /// exactly what was shown — a lock the user never saw stays a refusal.
-    ForceDeleteWorktree(Uuid, crate::services::git::Force),
+    ForceDeleteWorktree(Uuid, Force),
     RemoveRepository(Uuid),
     /// Prune the listed finished worktrees — exactly the ones the dialog
     /// named, not whatever is finished by the time it is confirmed.
@@ -183,12 +184,8 @@ impl ConfirmAction {
     /// button.
     pub fn confirm_label(&self) -> &'static str {
         match self {
-            ConfirmAction::ForceDeleteWorktree(_, crate::services::git::Force::Changes) => {
-                "Delete anyway"
-            }
-            ConfirmAction::ForceDeleteWorktree(_, crate::services::git::Force::ChangesAndLock) => {
-                "Unlock and delete"
-            }
+            ConfirmAction::ForceDeleteWorktree(_, Force::Changes) => "Delete anyway",
+            ConfirmAction::ForceDeleteWorktree(_, Force::ChangesAndLock) => "Unlock and delete",
             ConfirmAction::DeleteWorktree(_)
             | ConfirmAction::RemoveRepository(_)
             | ConfirmAction::DeleteClaudeSession { .. } => "Delete",

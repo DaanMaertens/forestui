@@ -81,7 +81,7 @@ fn refusal_dialog(name: &str, refusal: &git::Refusal) -> (&'static str, String) 
     let named = format!("'{display}'");
     let mut lines = Vec::new();
     // Once the lock line has named the worktree, the rest refers back to it.
-    let (title, subject, object) = match &refusal.lock {
+    let (title, subject, object, unlock) = match &refusal.lock {
         Some(lock) => {
             lines.push(match &lock.reason {
                 Some(reason) => {
@@ -92,17 +92,12 @@ fn refusal_dialog(name: &str, refusal: &git::Refusal) -> (&'static str, String) 
                 }
                 None => format!("'{display}' is locked."),
             });
-            ("Locked Worktree", "It", "it")
+            ("Locked Worktree", "It", "it", "unlock it and ")
         }
         None if matches!(refusal.changes, git::Changes::Unknown(_)) => {
-            ("Cannot List Changes", named.as_str(), named.as_str())
+            ("Cannot List Changes", named.as_str(), named.as_str(), "")
         }
-        None => ("Uncommitted Changes", named.as_str(), named.as_str()),
-    };
-    let unlock = if refusal.lock.is_some() {
-        "unlock it and "
-    } else {
-        ""
+        None => ("Uncommitted Changes", named.as_str(), named.as_str(), ""),
     };
     match &refusal.changes {
         git::Changes::None => lines.push(format!("Deleting will {unlock}remove it.")),
@@ -115,40 +110,13 @@ fn refusal_dialog(name: &str, refusal: &git::Refusal) -> (&'static str, String) 
             lines.push(format!("Could not list the changes in {object}:"));
             // The dialog does not wrap, and git's reason often leads with a
             // long path that would push the reason itself off the edge.
-            lines.extend(wrap(why, 72).into_iter().take(4));
+            lines.extend(crate::ui::wrap_words(why, 72).into_iter().take(4));
             lines.push(format!(
                 "Deleting will {unlock}discard any changes in it permanently."
             ));
         }
     }
     (title, lines.join("\n"))
-}
-
-/// Break `text` into lines of at most `width` characters, at spaces where it
-/// can and inside a word only when the word alone is longer than a line.
-fn wrap(text: &str, width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut line = String::new();
-    for word in text.split_whitespace() {
-        let mut word: Vec<char> = word.chars().collect();
-        let used = line.chars().count();
-        if used > 0 && used + 1 + word.len() > width {
-            lines.push(std::mem::take(&mut line));
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        while line.chars().count() + word.len() > width {
-            let room = width - line.chars().count();
-            line.extend(word.drain(..room));
-            lines.push(std::mem::take(&mut line));
-        }
-        line.extend(word);
-    }
-    if !line.is_empty() {
-        lines.push(line);
-    }
-    lines
 }
 
 /// One visible line in the sidebar tree.
