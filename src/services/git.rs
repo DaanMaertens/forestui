@@ -144,7 +144,7 @@ pub async fn create_worktree(
     let repo = expand(repo_path);
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| GitError(format!("Failed to create worktree parent: {e}")))?;
+            .map_err(|e| GitError(format!("cannot create its parent directory: {e}")))?;
     }
     let wt = worktree_path.to_string_lossy().to_string();
     let remotes = safe_list_remotes(repo_path).await;
@@ -195,9 +195,27 @@ pub async fn create_worktree(
     };
 
     if code != 0 {
-        return Err(GitError(format!("Failed to create worktree: {stderr}")));
+        return Err(GitError(reason(&stderr)));
     }
     Ok(())
+}
+
+/// git's reason for refusing, without its `fatal: ` and with the progress
+/// lines (`Preparing worktree …`) it writes to the same stream dropped. The
+/// caller says what failed; this says why.
+fn reason(stderr: &str) -> String {
+    let reasons: Vec<&str> = stderr
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("fatal: ")
+                .or_else(|| line.strip_prefix("error: "))
+        })
+        .collect();
+    if reasons.is_empty() {
+        stderr.trim().to_string()
+    } else {
+        reasons.join("; ")
+    }
 }
 
 /// Add a worktree on a detached `HEAD`, for something else to check a
@@ -206,13 +224,13 @@ pub async fn create_detached_worktree(repo_path: &str, worktree_path: &Path) -> 
     let repo = expand(repo_path);
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| GitError(format!("Failed to create worktree parent: {e}")))?;
+            .map_err(|e| GitError(format!("cannot create its parent directory: {e}")))?;
     }
     let wt = worktree_path.to_string_lossy().to_string();
     let (code, _out, stderr) =
         run_git(&["worktree", "add", "--detach", wt.as_str()], Some(&repo)).await?;
     if code != 0 {
-        return Err(GitError(format!("Failed to create worktree: {stderr}")));
+        return Err(GitError(reason(&stderr)));
     }
     Ok(())
 }

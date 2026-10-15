@@ -362,3 +362,35 @@ async fn a_listed_worktree_is_found_by_its_path() {
         None
     );
 }
+
+/// The App puts "Failed to create worktree:" in front; the error itself is
+/// git's reason alone, so the notification does not say it twice.
+#[tokio::test]
+async fn a_create_that_git_refuses_reports_gits_reason_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let repo_str = repo.to_string_lossy().to_string();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "--allow-empty", "-m", "init"],
+        vec!["branch", "fix/taken"],
+    ] {
+        let out = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?} failed");
+    }
+    let wt = dir.path().join("forest").join("wt1");
+    let error = create_worktree(&repo_str, &wt, "fix/taken", true, None)
+        .await
+        .expect_err("the branch exists");
+    assert_eq!(
+        error.to_string(),
+        "a branch named 'fix/taken' already exists"
+    );
+}
