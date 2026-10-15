@@ -257,6 +257,37 @@ async fn list_branches_keeps_remote_branches_but_not_remote_names() {
     assert!(!all.iter().any(|b| b.ends_with("/HEAD")));
 }
 
+/// Checking out a remote branch makes a local tracking branch, and that local
+/// name is the one the worktree records — not `origin/develop`.
+#[tokio::test]
+async fn a_remote_branch_is_checked_out_under_its_local_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let upstream = dir.path().join("upstream");
+    init_repo(&upstream);
+    git_in(&upstream, &["branch", "develop"]);
+    git_in(
+        dir.path(),
+        &["clone", "-q", &upstream.to_string_lossy(), "clone"],
+    );
+    let clone_str = dir.path().join("clone").to_string_lossy().to_string();
+
+    let wt = dir.path().join("forest").join("dev");
+    let branch = create_worktree(&clone_str, &wt, "origin/develop", false, None)
+        .await
+        .unwrap();
+    assert_eq!(branch, "develop");
+    assert_eq!(
+        get_current_branch(&wt.to_string_lossy()).await.unwrap(),
+        "develop"
+    );
+
+    let wt = dir.path().join("forest").join("fresh");
+    let branch = create_worktree(&clone_str, &wt, "feat/new", true, Some("origin/develop"))
+        .await
+        .unwrap();
+    assert_eq!(branch, "feat/new");
+}
+
 /// A session's branch, from creation to merged upstream.
 #[tokio::test]
 async fn branch_progress_follows_a_branch_into_the_default_branch() {

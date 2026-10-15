@@ -134,13 +134,17 @@ pub async fn list_branches(path: &str) -> GitResult<Vec<String>> {
 /// * `new_branch` — create `branch` fresh, optionally stemming from `base_branch`.
 /// * otherwise — check out an existing branch, creating a local tracking branch
 ///   when the given branch is a remote one, to avoid a detached HEAD.
+///
+/// Returns the branch the worktree has checked out: for a remote branch that
+/// is the local tracking branch, so the caller records `develop`, not
+/// `origin/develop`.
 pub async fn create_worktree(
     repo_path: &str,
     worktree_path: &Path,
     branch: &str,
     new_branch: bool,
     base_branch: Option<&str>,
-) -> GitResult<()> {
+) -> GitResult<String> {
     let repo = expand(repo_path);
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent)
@@ -149,6 +153,7 @@ pub async fn create_worktree(
     let wt = worktree_path.to_string_lossy().to_string();
     let remotes = safe_list_remotes(repo_path).await;
 
+    let mut checked_out = branch;
     let (code, stderr) = if new_branch {
         let mut args = vec!["worktree", "add", "-b", branch, wt.as_str()];
         if let Some(base) = base_branch {
@@ -173,6 +178,7 @@ pub async fn create_worktree(
 
         if let Some(prefix) = remote_prefix {
             let local_branch = &branch[prefix.len()..];
+            checked_out = local_branch;
             let (code, _out, stderr) = run_git(
                 &[
                     "worktree",
@@ -197,7 +203,7 @@ pub async fn create_worktree(
     if code != 0 {
         return Err(GitError(reason(&stderr)));
     }
-    Ok(())
+    Ok(checked_out.to_string())
 }
 
 /// git's reason for refusing, without its `fatal: ` and with the progress
