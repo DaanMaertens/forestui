@@ -316,3 +316,49 @@ async fn branch_progress_of_a_missing_branch_is_unknown() {
     let head = get_ref(&repo, "HEAD").await.unwrap();
     assert_eq!(branch_progress(&repo, "gone", "main", &head).await, None);
 }
+
+/// git's own record of a worktree, found by path — not the directory's
+/// `HEAD`, which in a broken tree would be an enclosing repository's.
+#[tokio::test]
+async fn a_listed_worktree_is_found_by_its_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let repo_str = repo.to_string_lossy().to_string();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "--allow-empty", "-m", "init"],
+    ] {
+        let out = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?} failed");
+    }
+    let wt = dir.path().join("forest").join("wt1");
+    create_worktree(&repo_str, &wt, "feat/x", true, None)
+        .await
+        .unwrap();
+    let wt_str = wt.to_string_lossy().to_string();
+
+    let found = listed_worktree(&repo_str, &wt_str).await.expect("listed");
+    assert_eq!(found.branch.as_deref(), Some("feat/x"));
+
+    let out = std::process::Command::new("git")
+        .args(["switch", "--detach"])
+        .current_dir(&wt)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let found = listed_worktree(&repo_str, &wt_str).await.expect("listed");
+    assert_eq!(found.branch, None, "a detached worktree has no branch");
+
+    let elsewhere = dir.path().join("forest").join("never-made");
+    assert_eq!(
+        listed_worktree(&repo_str, &elsewhere.to_string_lossy()).await,
+        None
+    );
+}

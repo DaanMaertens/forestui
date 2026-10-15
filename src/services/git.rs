@@ -443,6 +443,19 @@ pub async fn list_worktrees(repo_path: &str) -> GitResult<Vec<WorktreeInfo>> {
     Ok(parse_worktree_porcelain(&stdout))
 }
 
+/// git's entry for the worktree at `worktree_path`, or `None` when git does
+/// not list it or cannot be asked. Asking the directory itself would, in a
+/// tree git no longer knows, answer for whatever repository encloses it.
+pub async fn listed_worktree(repo_path: &str, worktree_path: &str) -> Option<WorktreeInfo> {
+    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let target = real(&expand(worktree_path));
+    list_worktrees(repo_path)
+        .await
+        .ok()?
+        .into_iter()
+        .find(|info| real(Path::new(&info.path)) == target)
+}
+
 /// Parse `git worktree list --porcelain` output.
 ///
 /// A bare repository's own entry has no `HEAD` line — just `worktree <path>`

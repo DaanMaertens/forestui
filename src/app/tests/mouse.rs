@@ -258,6 +258,7 @@ async fn clicking_confirm_delete_runs_the_deletion() {
     app.handle_event(AppEvent::WorktreeRemoveResult {
         change,
         outcome: Ok(git::RemoveOutcome::Removed),
+        branch: None,
     });
     assert!(app.state.find_worktree(worktree_id).is_none());
 }

@@ -361,3 +361,115 @@ fn a_forest_with_nothing_finished_says_so() {
     assert_eq!(quiet.lines, vec!["No finished worktrees.".to_string()]);
     assert!(!quiet.failed);
 }
+
+/// A Delete from the App: the worktree is already gone, and its branch
+/// follows only when nothing on it would be lost.
+#[tokio::test]
+async fn a_deleted_worktrees_pushed_branch_is_deleted() {
+    let fixture = Fixture::new("fix/again");
+    git_in(
+        &fixture.clone,
+        &["worktree", "remove", &fixture.worktree.to_string_lossy()],
+    );
+    assert_eq!(
+        delete_branch_if_pushed(&fixture.clone.to_string_lossy(), "fix/again").await,
+        Some(BranchFate::Deleted("fix/again".into()))
+    );
+    assert!(!branch_exists(&fixture.clone, "fix/again"));
+}
+
+#[tokio::test]
+async fn a_deleted_worktrees_unpushed_branch_is_kept_with_the_count() {
+    let fixture = Fixture::new("fix/ahead");
+    git_in(
+        &fixture.worktree,
+        &["commit", "-q", "--allow-empty", "-m", "local"],
+    );
+    git_in(
+        &fixture.worktree,
+        &["commit", "-q", "--allow-empty", "-m", "local"],
+    );
+    git_in(
+        &fixture.clone,
+        &["worktree", "remove", &fixture.worktree.to_string_lossy()],
+    );
+    assert_eq!(
+        delete_branch_if_pushed(&fixture.clone.to_string_lossy(), "fix/ahead").await,
+        Some(BranchFate::Kept {
+            branch: "fix/ahead".into(),
+            why: "2 unpushed commits".into(),
+        })
+    );
+    assert!(branch_exists(&fixture.clone, "fix/ahead"));
+}
+
+#[tokio::test]
+async fn without_a_remote_a_deleted_worktrees_branch_is_kept() {
+    let fixture = Fixture::new("fix/local");
+    git_in(
+        &fixture.clone,
+        &["worktree", "remove", &fixture.worktree.to_string_lossy()],
+    );
+    git_in(&fixture.clone, &["remote", "remove", "origin"]);
+    assert_eq!(
+        delete_branch_if_pushed(&fixture.clone.to_string_lossy(), "fix/local").await,
+        Some(BranchFate::Kept {
+            branch: "fix/local".into(),
+            why: "no remote to push to".into(),
+        })
+    );
+    assert!(branch_exists(&fixture.clone, "fix/local"));
+}
+
+/// Checked out elsewhere: git refuses, and its reason is what is reported.
+#[tokio::test]
+async fn a_branch_git_will_not_delete_is_kept_with_gits_reason() {
+    let fixture = Fixture::new("fix/held");
+    git_in(
+        &fixture.clone,
+        &["worktree", "remove", &fixture.worktree.to_string_lossy()],
+    );
+    git_in(&fixture.clone, &["switch", "-q", "fix/held"]);
+    let fate = delete_branch_if_pushed(&fixture.clone.to_string_lossy(), "fix/held").await;
+    assert!(
+        matches!(&fate, Some(BranchFate::Kept { branch, why }) if branch == "fix/held" && !why.is_empty()),
+        "got {fate:?}"
+    );
+    assert!(branch_exists(&fixture.clone, "fix/held"));
+}
+
+#[tokio::test]
+async fn a_branch_that_is_already_gone_has_no_fate() {
+    let fixture = Fixture::new("fix/gone");
+    assert_eq!(
+        delete_branch_if_pushed(&fixture.clone.to_string_lossy(), "fix/elsewhere").await,
+        None
+    );
+    assert_eq!(
+        delete_branch_if_pushed(&fixture.clone.to_string_lossy(), "").await,
+        None
+    );
+    // The state's word for a detached worktree.
+    assert_eq!(
+        delete_branch_if_pushed(&fixture.clone.to_string_lossy(), "HEAD").await,
+        None
+    );
+}
+
+/// A worktree made on the default branch hands that branch back, it does not
+/// take it: deleting `main` would be surprising, even fully pushed.
+#[tokio::test]
+async fn the_default_branch_is_kept() {
+    let fixture = Fixture::new("fix/any");
+    git_in(&fixture.clone, &["switch", "-q", "--detach"]);
+    let clone = fixture.clone.to_string_lossy().to_string();
+    let kept = Some(BranchFate::Kept {
+        branch: "main".into(),
+        why: "the default branch".into(),
+    });
+    assert_eq!(delete_branch_if_pushed(&clone, "main").await, kept);
+    // With no default recorded for the remote, the usual names are spared.
+    git_in(&fixture.clone, &["remote", "set-head", "origin", "-d"]);
+    assert_eq!(delete_branch_if_pushed(&clone, "main").await, kept);
+    assert!(branch_exists(&fixture.clone, "main"));
+}

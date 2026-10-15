@@ -21,3 +21,15 @@ repository against git, runs the same finished check, and prunes through
 so it never starts tmux. It is also the one writer of `.forestui-config.json`
 outside the main loop, tolerated because a running App heals: its next save
 restores the pruned entries and its next scan drops them, directories gone.
+
+**A Delete shares prune's branch rule, `prune::delete_branch_if_pushed`.**
+Start work always makes a fresh branch and derives the same name for the same
+issue, so a branch left behind by a Delete blocks starting that issue again.
+The order differs from prune: a Delete removes the worktree regardless (dirty
+trees have their own confirm), then deletes the branch only if nothing on it
+is unpushed and it is not the default branch (a worktree made on `main`
+hands it back; with no remote default recorded, `main` and `master` are
+spared), and keeps it — saying why in the notification — on any doubt.
+The branch comes from git's worktree list before removal, not from state, so
+a branch switched since the last scan is not the one deleted.
+Remote branches are never touched.

@@ -526,11 +526,20 @@ impl App {
         };
         let repo_path = repo.source_path.clone();
         let worktree_path = worktree.path.clone();
+        let tracked_branch = worktree.branch.clone();
         // Immediate feedback: on a large tree the round trip takes seconds and
         // the frame would otherwise be identical to the one before confirming.
         self.notify(format!("Deleting '{name}'…"), Severity::Information);
         let tx = self.tx.clone();
         tokio::spawn(async move {
+            // git's word over the state's: a branch switched since the last
+            // scan would otherwise have the wrong branch deleted. A detached
+            // worktree has none of its own; the state's is the fallback for
+            // an entry git has already forgotten.
+            let branch = match git::listed_worktree(&repo_path, &worktree_path).await {
+                Some(listed) => listed.branch.unwrap_or_default(),
+                None => tracked_branch,
+            };
             let outcome = if force {
                 git::force_remove_worktree(&repo_path, &worktree_path)
                     .await
@@ -539,7 +548,19 @@ impl App {
                 git::remove_worktree(&repo_path, &worktree_path).await
             }
             .map_err(|error| error.to_string());
-            tx.send(AppEvent::WorktreeRemoveResult { change, outcome });
+            // After the removal, not before: a branch checked out in the
+            // worktree is one git will not delete.
+            let branch_fate = match outcome {
+                Ok(git::RemoveOutcome::Removed) => {
+                    crate::prune::delete_branch_if_pushed(&repo_path, &branch).await
+                }
+                _ => None,
+            };
+            tx.send(AppEvent::WorktreeRemoveResult {
+                change,
+                outcome,
+                branch: branch_fate,
+            });
         });
     }
 
@@ -1090,9 +1111,19 @@ impl App {
                 );
                 return;
             }
+            // A detached worktree ("HEAD") has no branch of its own to go.
+            let message = match worktree.branch.as_str() {
+                "" | "HEAD" => format!("Permanently delete '{name}'?"),
+                // One line each, capped: the dialog clips rather than wraps.
+                branch => format!(
+                    "Permanently delete '{}'\nand its local branch '{}'?\nThe default branch, or one with unpushed commits, is kept.",
+                    crate::util::truncate(&name, 50),
+                    crate::util::truncate(branch, 50),
+                ),
+            };
             self.modals.push(Modal::Confirm(ConfirmModal::new(
                 "Delete Worktree",
-                format!("Permanently delete '{name}'?"),
+                message,
                 ConfirmAction::DeleteWorktree(id),
             )));
         } else if let Some(repo) = self.state.selected_repository() {

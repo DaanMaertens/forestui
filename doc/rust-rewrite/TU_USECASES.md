@@ -902,7 +902,9 @@ the file is written somewhere other than `$HOME/.config/forestui/settings.json`.
 
 **Expected:**
 - Modal title ` Delete Worktree` (destructive colour), body
-  `Permanently delete 'wt-two'?`, buttons `[ Cancel ] [ Delete ]`.
+  `Permanently delete 'wt-two'` / `and its local branch '<branch>'?` /
+  `The default branch, or one with unpushed commits, is kept.` (a detached worktree gets the
+  one-line `Permanently delete 'wt-two'?`), buttons `[ Cancel ] [ Delete ]`.
 - `Escape` dismisses with **no** deletion — the worktree is still in the sidebar and
   still on disk.
 - With a **repository** selected instead, the title is ` Remove Repository` and the
@@ -1337,8 +1339,9 @@ baseline still shows the old inert `System` cycle), `1 custom button configured`
 
 ### UC-58 — `d` opens the delete confirmation
 **Area:** Sweep | **Priority:** P0 | 🟢 EXECUTED (both builds)
-**Expected:** `Delete Worktree` and `Permanently delete 'wt-a'?` — identical
-wording in both builds. Nothing is deleted yet.
+**Expected:** `Delete Worktree` and `Permanently delete 'wt-a'` — the Rust
+build goes on to name the local branch it deletes (issue #108), the frozen
+python baseline does not. Nothing is deleted yet.
 
 ### UC-59 — `?` shows the help toast — ⬛ RETIRED
 The `?` binding was removed (issue #30); the sweep no longer captures this

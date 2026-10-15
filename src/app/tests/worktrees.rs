@@ -20,6 +20,7 @@ async fn delete_asks_for_confirmation_first() {
     app.handle_event(AppEvent::WorktreeRemoveResult {
         change,
         outcome: Ok(git::RemoveOutcome::Removed),
+        branch: None,
     });
     assert!(app.state.find_worktree(worktree_id).is_none());
 }
@@ -34,6 +35,7 @@ async fn a_dirty_worktree_gets_a_second_confirmation() {
     app.handle_event(AppEvent::WorktreeRemoveResult {
         change,
         outcome: Ok(git::RemoveOutcome::Dirty("2 modified, 1 untracked".into())),
+        branch: None,
     });
 
     let Some(Modal::Confirm(confirm)) = app.modals.last() else {
@@ -76,6 +78,7 @@ async fn a_failed_removal_keeps_the_entry_and_reports() {
     app.handle_event(AppEvent::WorktreeRemoveResult {
         change,
         outcome: Err("worktree is locked".into()),
+        branch: None,
     });
 
     assert!(app.state.find_worktree(worktree_id).is_some());
@@ -136,6 +139,7 @@ async fn quit_waits_for_an_in_flight_removal() {
     app.handle_event(AppEvent::WorktreeRemoveResult {
         change,
         outcome: Ok(git::RemoveOutcome::Removed),
+        branch: None,
     });
     assert!(app.should_quit, "the fold releases the pending quit");
 }
@@ -590,4 +594,75 @@ async fn a_scan_that_lands_late_does_not_steal_the_selection() {
         app.sessions.is_some(),
         "the pane the user was reading was reloaded out from under them"
     );
+}
+
+/// Start work makes a fresh branch under the same name the next time, so
+/// the confirm says the branch goes too, and on what condition.
+#[tokio::test]
+async fn the_delete_confirm_names_the_branch_it_deletes() {
+    let (_dir, mut app) = app_with_fixture();
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Char('d')));
+    let Some(Modal::Confirm(confirm)) = app.modals.last() else {
+        panic!("expected the delete confirm");
+    };
+    assert!(confirm.message.contains("feat/beta"), "{}", confirm.message);
+    assert!(confirm.message.contains("unpushed"), "{}", confirm.message);
+}
+
+/// A detached worktree has no branch of its own, so none is promised.
+#[tokio::test]
+async fn the_delete_confirm_of_a_detached_worktree_names_no_branch() {
+    let (_dir, mut app) = app_with_fixture();
+    app.handle_key(key(KeyCode::Down));
+    let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
+    app.state
+        .update_worktree(worktree_id, |worktree| worktree.branch = "HEAD".into());
+    app.handle_key(key(KeyCode::Char('d')));
+    let Some(Modal::Confirm(confirm)) = app.modals.last() else {
+        panic!("expected the delete confirm");
+    };
+    assert!(!confirm.message.contains("branch"), "{}", confirm.message);
+}
+
+#[tokio::test]
+async fn a_delete_that_took_the_branch_says_so() {
+    let (_dir, mut app) = app_with_fixture();
+    app.handle_key(key(KeyCode::Down));
+    let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
+    app.handle_event(AppEvent::WorktreeRemoveResult {
+        change,
+        outcome: Ok(git::RemoveOutcome::Removed),
+        branch: Some(crate::prune::BranchFate::Deleted("feat/beta".into())),
+    });
+    assert!(app.state.find_worktree(worktree_id).is_none());
+    let note = app.notifications.last().expect("a notification");
+    assert_eq!(note.text, "Deleted 'beta' and its branch 'feat/beta'.");
+    assert_eq!(note.severity, Severity::Information);
+}
+
+/// The worktree is gone either way; a kept branch is a warning, not a
+/// failed delete.
+#[tokio::test]
+async fn a_delete_that_kept_the_branch_says_why() {
+    let (_dir, mut app) = app_with_fixture();
+    app.handle_key(key(KeyCode::Down));
+    let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
+    app.handle_event(AppEvent::WorktreeRemoveResult {
+        change,
+        outcome: Ok(git::RemoveOutcome::Removed),
+        branch: Some(crate::prune::BranchFate::Kept {
+            branch: "feat/beta".into(),
+            why: "3 unpushed commits".into(),
+        }),
+    });
+    assert!(app.state.find_worktree(worktree_id).is_none());
+    let note = app.notifications.last().expect("a notification");
+    assert_eq!(
+        note.text,
+        "Deleted 'beta'; kept branch 'feat/beta' — 3 unpushed commits."
+    );
+    assert_eq!(note.severity, Severity::Warning);
 }
