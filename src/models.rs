@@ -609,6 +609,22 @@ pub struct PartialStartWork {
     pub session: PartialNaming,
     pub pr_review: PartialPrReviewNaming,
     pub session_naming: PartialSessionNaming,
+    /// What new work stems from in this repository, in place of the
+    /// remote's default branch. Only a repository's file has it: the
+    /// remote's default is the only sensible global one, and that is
+    /// already the fallback. Not in [`StartWorkSettings`] for that reason.
+    pub base_branch: Option<String>,
+}
+
+impl PartialStartWork {
+    /// The base branch this repository sets, if any. An empty value is
+    /// none, as `null` is.
+    pub fn base_branch(&self) -> Option<&str> {
+        self.base_branch
+            .as_deref()
+            .map(str::trim)
+            .filter(|branch| !branch.is_empty())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]

@@ -111,6 +111,9 @@ pub struct LinkedWorktree {
     link: WorkItemLink,
     branch: String,
     created_from: Option<String>,
+    /// The base branch it was started from, which a session's branch is
+    /// merged into once its work is done.
+    base: Option<String>,
 }
 
 /// The repository's worktrees that have a work item link. Without one a
@@ -124,6 +127,7 @@ pub fn linked(repo: &Repository) -> Vec<LinkedWorktree> {
                 link: worktree.work_item.clone()?,
                 branch: worktree.branch.clone(),
                 created_from: worktree.created_from_ref.clone(),
+                base: worktree.base_branch.clone(),
             })
         })
         .collect()
@@ -134,14 +138,19 @@ pub fn linked(repo: &Repository) -> Vec<LinkedWorktree> {
 /// `gh` missing or signed out, a branch git cannot resolve, no remote
 /// default branch — and keeps whatever mark it had.
 ///
-/// A session's branch counts as merged only when its tip is in the default
-/// branch, so a squash or rebase merge on GitHub goes unnoticed, as does a
-/// worktree from before `created_from_ref` was recorded.
+/// A session's branch counts as merged only when its tip is in the base
+/// branch it was started from — the remote's default branch for a worktree
+/// from before the base was recorded — so a squash or rebase merge on
+/// GitHub goes unnoticed, as does a worktree from before `created_from_ref`
+/// was recorded.
 pub async fn check(source: &str, linked: &[LinkedWorktree]) -> HashMap<Uuid, bool> {
     let is_session = |item: &&LinkedWorktree| matches!(item.link, WorkItemLink::Session { .. });
     let signed_in = linked.iter().any(|item| !is_session(&item))
         && github::get_auth_status().await.0 == AuthStatus::Authenticated;
-    let target = if linked.iter().any(|item| is_session(&item)) {
+    let remote_default = if linked
+        .iter()
+        .any(|item| is_session(&item) && item.base.is_none())
+    {
         let remotes = git::list_remotes(source).await.unwrap_or_default();
         git::remote_default_branch(source, &remotes).await
     } else {
@@ -159,7 +168,10 @@ pub async fn check(source: &str, linked: &[LinkedWorktree]) -> HashMap<Uuid, boo
                     .await
                     .map(Observed::State)
             }
-            WorkItemLink::Session { .. } => match (&target, &item.created_from) {
+            WorkItemLink::Session { .. } => match (
+                item.base.as_ref().or(remote_default.as_ref()),
+                &item.created_from,
+            ) {
                 (Some(target), Some(created_from)) => {
                     git::branch_progress(source, &item.branch, target, created_from)
                         .await

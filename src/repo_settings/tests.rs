@@ -190,3 +190,35 @@ fn a_repository_can_override_one_key_of_the_naming_call() {
     assert_eq!(merged.session_naming.timeout_secs, 30);
     assert!(merged.session_naming.enabled);
 }
+
+/// The base branch has no global value, so the prefilled file names it as
+/// `null`: there to be found and filled in, and setting nothing until it is.
+#[test]
+fn the_prefilled_file_names_the_base_branch_without_setting_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = ensure_settings_file(dir.path(), &global()).unwrap();
+    let file: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(file["start_work"]["base_branch"], serde_json::Value::Null);
+    assert_eq!(load(dir.path()).overrides.base_branch(), None);
+}
+
+#[test]
+fn a_repository_can_set_its_base_branch() {
+    let overrides = overrides_from(r#"{"start_work": {"base_branch": "origin/develop"}}"#);
+    assert_eq!(overrides.base_branch(), Some("origin/develop"));
+    // The rest of Start work is untouched by it.
+    assert_eq!(effective(&global(), &overrides), global());
+}
+
+#[test]
+fn an_empty_base_branch_is_none() {
+    for json in [
+        r#"{"start_work": {"base_branch": ""}}"#,
+        r#"{"start_work": {"base_branch": "  "}}"#,
+        r#"{"start_work": {"base_branch": null}}"#,
+        r#"{"start_work": {}}"#,
+    ] {
+        assert_eq!(overrides_from(json).base_branch(), None, "{json}");
+    }
+}

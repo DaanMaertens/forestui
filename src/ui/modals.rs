@@ -582,8 +582,10 @@ fn worktree_form(
     } else {
         modal.picker.match_count().min(DROPDOWN_ROWS) + 1
     };
+    // A new branch's base: label, input, hint.
+    let base = if modal.new_branch { 5 } else { 0 };
     // Repo, label, input, preview, label, toggle, input, error, gap, buttons.
-    let rect = widgets::centered_rect(WIDTH, CHROME + 18 + dropdown as u16, area);
+    let rect = widgets::centered_rect(WIDTH, CHROME + 18 + base + dropdown as u16, area);
     let mut column = dialog(frame, rect, title, theme::title());
 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
@@ -636,7 +638,22 @@ fn worktree_form(
         modal.focus,
         WorktreeForm::FOCUS_BRANCH,
     );
-    if !modal.new_branch {
+    if modal.new_branch {
+        column.line(frame, widgets::section("Base Branch"));
+        column.input(
+            frame,
+            hits,
+            &modal.base_branch,
+            modal.focus,
+            WorktreeForm::FOCUS_BASE,
+        );
+        let (hint, style) = base_hint(
+            modal.base_suggestion(),
+            modal.base_branch.value(),
+            modal.missing_base(),
+        );
+        column.text(frame, hint, style);
+    } else {
         column.text(
             frame,
             count_line(&modal.picker, Noun::new("branch", "branches")),
@@ -1183,6 +1200,25 @@ fn start_work_confirm(
     );
 }
 
+/// The row under a Base Branch input. The completion the Textual suggester
+/// used to ghost inside the input comes first — Right accepts it, so say
+/// so. With none to offer, a base branch the repository settings name but
+/// the branch list lacks is pointed out, since the field then holds a
+/// fallback. The row is always reserved, so the controls below do not jump
+/// as the user types.
+fn base_hint(suggestion: Option<String>, value: &str, missing: Option<&str>) -> (String, Style) {
+    match (suggestion, missing) {
+        (Some(suggestion), _) if suggestion != value => {
+            (format!(" {suggestion}  (→ accepts)"), theme::muted())
+        }
+        (_, Some(missing)) => (
+            format!(" Repository base branch '{missing}' not found"),
+            theme::warning(),
+        ),
+        _ => (String::new(), theme::muted()),
+    }
+}
+
 /// The branch fields of an issue or feature: the branch to create, the base
 /// it branches from with its completion hint, and Fetch beside the pull
 /// checkbox. A PR review has none of them.
@@ -1209,16 +1245,12 @@ fn branch_fields(
         modal.focus,
         StartWorkConfirmModal::FOCUS_BASE,
     );
-    // The completion the Textual suggester used to ghost inside the input.
-    // Right accepts it, so say so; the row is always reserved to stop the
-    // controls below jumping as the user types.
-    let hint = match modal.base_suggestion() {
-        Some(suggestion) if suggestion != modal.base_branch.value() => {
-            format!(" {suggestion}  (→ accepts)")
-        }
-        _ => String::new(),
-    };
-    column.text(frame, hint, theme::muted());
+    let (hint, style) = base_hint(
+        modal.base_suggestion(),
+        modal.base_branch.value(),
+        modal.missing_base(),
+    );
+    column.text(frame, hint, style);
 
     let fetch = if modal.is_fetching {
         SPINNER[modal.spinner_index % SPINNER.len()].to_string()

@@ -76,10 +76,10 @@ fn worktree_form_autofills_branch_from_name() {
     let repo = Repository::new("demo".into(), "/tmp/demo".into());
     let mut modal = WorktreeForm::new(
         &repo,
-        vec!["main".into()],
-        vec![],
+        branch_list(&["main"], &[], None, "main"),
         PathBuf::from("/forest"),
         "feat/".into(),
+        None,
     );
     for k in typed("my feature!") {
         modal.handle_key(k);
@@ -97,10 +97,10 @@ fn worktree_form_rejects_unknown_existing_branch() {
     let repo = Repository::new("demo".into(), "/tmp/demo".into());
     let mut modal = WorktreeForm::new(
         &repo,
-        vec!["main".into()],
-        vec![],
+        branch_list(&["main"], &[], None, "main"),
         PathBuf::from("/forest"),
         "feat/".into(),
+        None,
     );
     modal.name.set_value("wt");
     modal.new_branch = false;
@@ -684,4 +684,201 @@ fn picking_another_key_in_settings_forgets_the_accepted_binding() {
         panic!("Save submits");
     };
     assert_eq!(saved.back_key_accepted, None);
+}
+
+const DEVELOP: [&str; 4] = ["develop", "main", "origin/develop", "origin/main"];
+
+/// The repository settings' base branch wins over the remote's default when
+/// the branch list has it; one it lacks is reported, and the default used.
+#[test]
+fn the_repository_base_branch_is_the_prefill_when_it_exists() {
+    let list = branch_list(&DEVELOP, &["origin"], Some("origin/main"), "main");
+    assert_eq!(initial_base_branch(&list, None), "origin/main");
+    assert_eq!(
+        initial_base_branch(&list, Some("origin/develop")),
+        "origin/develop"
+    );
+    assert_eq!(initial_base_branch(&list, Some("develop")), "develop");
+    assert_eq!(missing_base_branch(&list, Some("origin/develop")), None);
+
+    assert_eq!(
+        initial_base_branch(&list, Some("origin/develp")),
+        "origin/main"
+    );
+    assert_eq!(
+        missing_base_branch(&list, Some("origin/develp")),
+        Some("origin/develp")
+    );
+    assert_eq!(missing_base_branch(&list, None), None);
+}
+
+fn confirm_on(list: BranchList, configured: Option<&str>) -> StartWorkConfirmModal {
+    StartWorkConfirmModal::new(
+        &Repository::new("demo".into(), "/tmp/demo".into()),
+        WorkItem::Session {
+            prompt: "tidy up".into(),
+        },
+        WorktreeNames {
+            worktree: "tidy-up".into(),
+            branch: "feat/tidy-up".into(),
+        },
+        String::new(),
+        list,
+        PathBuf::from("/forest"),
+        configured.map(str::to_string),
+    )
+}
+
+#[test]
+fn start_work_prefills_the_repository_base_branch_and_keeps_it_editable() {
+    let list = branch_list(&DEVELOP, &["origin"], Some("origin/main"), "main");
+    let mut modal = confirm_on(list, Some("origin/develop"));
+    assert_eq!(modal.base_branch.value(), "origin/develop");
+    assert_eq!(modal.missing_base(), None);
+
+    // A one-off base is still the user's to type.
+    modal.base_branch.set_value("main");
+    let ModalResult::WorktreeForWorkItem { base_branch, .. } = modal.launch() else {
+        panic!("a session launches a work item worktree");
+    };
+    assert_eq!(base_branch.as_deref(), Some("main"));
+}
+
+#[test]
+fn start_work_falls_back_when_the_repository_base_branch_is_missing() {
+    let list = branch_list(
+        &["main", "origin/main"],
+        &["origin"],
+        Some("origin/main"),
+        "main",
+    );
+    let modal = confirm_on(list, Some("origin/develop"));
+    assert_eq!(modal.base_branch.value(), "origin/main");
+    assert_eq!(modal.missing_base(), Some("origin/develop"));
+    assert!(
+        modal.can_launch(),
+        "a missing base branch never blocks Start work"
+    );
+}
+
+/// A fetch that brings the base branch in switches to it, unless the user
+/// typed a base of their own.
+#[test]
+fn a_fetch_that_brings_the_base_branch_in_switches_to_it() {
+    let before = branch_list(
+        &["main", "origin/main"],
+        &["origin"],
+        Some("origin/main"),
+        "main",
+    );
+    let after = branch_list(&DEVELOP, &["origin"], Some("origin/main"), "main");
+
+    let mut modal = confirm_on(before.clone(), Some("origin/develop"));
+    modal.update_branches(after.clone());
+    assert_eq!(modal.base_branch.value(), "origin/develop");
+    assert_eq!(modal.missing_base(), None);
+
+    let mut typed = confirm_on(before, Some("origin/develop"));
+    typed.base_branch.set_value("main");
+    typed.update_branches(after);
+    assert_eq!(typed.base_branch.value(), "main");
+}
+
+fn plain_form(list: BranchList, configured: Option<&str>) -> WorktreeForm {
+    let mut form = WorktreeForm::new(
+        &Repository::new("demo".into(), "/tmp/demo".into()),
+        list,
+        PathBuf::from("/forest"),
+        "feat/".into(),
+        configured.map(str::to_string),
+    );
+    form.name.set_value("wt");
+    form.branch.set_value("feat/wt");
+    form
+}
+
+fn created_base(outcome: ModalOutcome) -> Option<String> {
+    let ModalOutcome::Submit(ModalResult::WorktreeCreated { base_branch, .. }) = outcome else {
+        panic!("expected a created worktree, got {outcome:?}");
+    };
+    base_branch
+}
+
+#[test]
+fn a_plain_worktrees_new_branch_stems_from_the_base_field() {
+    let list = branch_list(&DEVELOP, &["origin"], Some("origin/main"), "main");
+
+    let mut configured = plain_form(list.clone(), Some("origin/develop"));
+    assert_eq!(configured.base_branch.value(), "origin/develop");
+    configured.focus = configured.create_index();
+    assert_eq!(
+        created_base(configured.handle_key(key(KeyCode::Enter))).as_deref(),
+        Some("origin/develop")
+    );
+
+    // Without the setting, the same default as Start work.
+    let mut unset = plain_form(list.clone(), None);
+    assert_eq!(unset.base_branch.value(), "origin/main");
+
+    // Emptied, it stems from HEAD, as a plain worktree used to.
+    unset.base_branch.set_value("");
+    unset.focus = unset.create_index();
+    assert_eq!(created_base(unset.handle_key(key(KeyCode::Enter))), None);
+
+    // An existing branch has no base to stem from.
+    let mut existing = plain_form(list, Some("origin/develop"));
+    existing.new_branch = false;
+    existing.picker.set_query("develop");
+    existing.focus = existing.create_index();
+    assert_eq!(created_base(existing.handle_key(key(KeyCode::Enter))), None);
+}
+
+#[test]
+fn a_plain_worktrees_base_must_be_a_branch() {
+    let list = branch_list(&DEVELOP, &["origin"], Some("origin/main"), "main");
+    let mut form = plain_form(list, None);
+    form.focus = WorktreeForm::FOCUS_BASE;
+    form.base_branch.set_value("origin/devel");
+    assert!(!form.can_create());
+
+    // Right takes the completion, as on Start work's confirm screen.
+    form.handle_key(key(KeyCode::Right));
+    assert_eq!(form.base_branch.value(), "origin/develop");
+    assert!(form.can_create());
+
+    form.base_branch.set_value("nope");
+    form.focus = form.create_index();
+    assert!(matches!(
+        form.handle_key(key(KeyCode::Enter)),
+        ModalOutcome::None
+    ));
+    assert!(form.error.contains("Base branch 'nope' does not exist"));
+}
+
+#[test]
+fn a_plain_worktree_says_when_the_base_branch_is_missing() {
+    let list = branch_list(
+        &["main", "origin/main"],
+        &["origin"],
+        Some("origin/main"),
+        "main",
+    );
+    let form = plain_form(list, Some("origin/develop"));
+    assert_eq!(form.base_branch.value(), "origin/main");
+    assert_eq!(form.missing_base(), Some("origin/develop"));
+}
+
+/// The hint says "→ accepts": Right at the end of the field takes the
+/// completion, while Right inside the text still moves the cursor.
+#[test]
+fn right_at_the_end_of_start_works_base_takes_the_completion() {
+    let list = branch_list(&DEVELOP, &["origin"], Some("origin/main"), "main");
+    let mut modal = confirm_on(list, None);
+    modal.focus = StartWorkConfirmModal::FOCUS_BASE;
+    modal.base_branch.set_value("origin/devel");
+    modal.handle_key(key(KeyCode::Left));
+    modal.handle_key(key(KeyCode::Right));
+    assert_eq!(modal.base_branch.value(), "origin/devel");
+    modal.handle_key(key(KeyCode::Right));
+    assert_eq!(modal.base_branch.value(), "origin/develop");
 }

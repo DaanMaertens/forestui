@@ -359,3 +359,98 @@ async fn a_repository_overrides_the_name_suggestion() {
     on_github(&mut app, &path);
     assert!(app.session_name_call(&path, "Dark mode").is_none());
 }
+
+/// A repository whose settings set `base_branch` to `base`.
+fn with_base_branch(repos: &ReposDir, app: &mut App, path: &str, base: &str) {
+    repos.write(
+        "settings.json",
+        &format!(r#"{{"start_work": {{"base_branch": "{base}"}}}}"#),
+    );
+    on_github(app, path);
+    assert_eq!(app.base_branch_for(path).as_deref(), Some(base));
+}
+
+/// Start work's `worktree` step, its branches loaded.
+fn open_plain_form(app: &mut App) {
+    app.handle_key(key(KeyCode::Char('s')));
+    highlight_mode(app, crate::work::WorkMode::Worktree);
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_event(AppEvent::Branches {
+        repo_id: app.state.repositories()[0].id,
+        list: crate::event::BranchList {
+            branches: vec!["main".into(), "origin/main".into(), "origin/release".into()],
+            remotes: vec!["origin".into()],
+            remote_default: Some("origin/main".into()),
+            current_branch: "main".into(),
+        },
+        target: crate::event::BranchTarget::StartWorkWorktree,
+    });
+}
+
+fn plain_base(app: &App) -> String {
+    start_work(app)
+        .worktree
+        .as_deref()
+        .expect("branches loaded")
+        .base_branch
+        .value()
+        .to_string()
+}
+
+#[tokio::test]
+async fn a_plain_worktree_stems_from_the_repository_base_branch() {
+    let repos = ReposDir::new();
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    with_base_branch(&repos, &mut app, &path, "origin/release");
+
+    open_plain_form(&mut app);
+    assert_eq!(plain_base(&app), "origin/release");
+    let screen = rendered(&mut app);
+    assert!(screen.contains("Base Branch"), "{screen}");
+    assert!(!screen.contains("not found"), "{screen}");
+}
+
+#[tokio::test]
+async fn a_missing_repository_base_branch_is_pointed_out_in_the_form() {
+    let repos = ReposDir::new();
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    with_base_branch(&repos, &mut app, &path, "origin/develop");
+
+    open_plain_form(&mut app);
+    assert_eq!(plain_base(&app), "origin/main");
+    let screen = rendered(&mut app);
+    assert!(
+        screen.contains("Repository base branch 'origin/develop' not found"),
+        "{screen}"
+    );
+}
+
+/// Delete keeps the base branch too, so its confirm says so — only for a
+/// repository that has one.
+#[tokio::test]
+async fn delete_names_the_base_branch_only_when_one_is_set() {
+    let repos = ReposDir::new();
+    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    app.handle_key(key(KeyCode::Down));
+    let confirm_text = |app: &mut App| {
+        app.handle_key(key(KeyCode::Char('d')));
+        let Some(Modal::Confirm(confirm)) = app.modals.pop() else {
+            panic!("Delete asks first");
+        };
+        confirm.message
+    };
+
+    let plain = confirm_text(&mut app);
+    assert!(
+        plain.ends_with("The default branch, or one with unpushed commits, is kept."),
+        "{plain}"
+    );
+
+    with_base_branch(&repos, &mut app, &path, "origin/develop");
+    let with_base = confirm_text(&mut app);
+    assert!(
+        with_base
+            .ends_with("The default and base branches, or one with unpushed commits, are kept."),
+        "{with_base}"
+    );
+}
