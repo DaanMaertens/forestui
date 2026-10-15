@@ -12,12 +12,13 @@
 
 
 
-
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
                               │   Delete Worktree                                                            │
                               │                                                                              │
-                              │  Permanently delete 'issue-298-proactive-metrics-coalesced-fire-rows-ov'?    │
+                              │  Permanently delete 'issue-298-proactive-metrics-coalesced-fire-rows-ov'     │
+                              │  and its local branch 'fix/issue-298-proactive-metrics-coalesced-fire-row..  │
+                              │  The default branch, or one with unpushed commits, is kept.                  │
                               │                                                                              │
                               │                            ┌────────┐ ┌────────┐                             │
                               │                            │ Cancel │ │ Delete │                             │
@@ -26,7 +27,6 @@
                               │  y confirm · n / Esc cancel                                                  │
                               │                                                                              │
                               └──────────────────────────────────────────────────────────────────────────────┘
-
 
 
 
