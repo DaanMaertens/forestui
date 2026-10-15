@@ -51,6 +51,13 @@ tmux session when started outside one, via `std::env::current_exe()` — so a
 `cargo run` build re-launches itself rather than whatever `forestui` is on
 `PATH`.
 
+A quit (`q`, Ctrl-C, or Enter on a crash report) detaches the terminal that
+quit, back to the shell forestui started from, while the Claude windows keep
+running — but only from a forest session (`cli::is_forest_session`); inside a
+session the user made the terminal stays attached. tmux does not say which
+client sent a key, so the most recently active client in the forest is the
+one detached.
+
 Each module opens with a `//!` line saying what it owns; `ls src/` plus those
 headers is the map.
 

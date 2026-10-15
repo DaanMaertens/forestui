@@ -876,3 +876,34 @@ fn the_server_is_the_socket_and_pid_of_tmux_env() {
     assert_eq!(server_of(""), None);
     assert_eq!(server_of("no-commas"), None);
 }
+
+fn in_forest(session: &str) -> bool {
+    crate::cli::is_forest_session(session, "forestui-work")
+}
+
+/// tmux does not say which client sent the quit key, but pressing it made
+/// that client the most recently active one in the forest.
+#[test]
+fn the_quitting_client_is_the_most_recently_active_in_the_forest() {
+    let clients = "100\t/dev/pts/1\tforestui-work\n\
+                   500\t/dev/pts/2\tforestui-work-77\n\
+                   300\t/dev/pts/3\tforestui-work-88\n";
+    assert_eq!(
+        client_to_detach(clients, in_forest).as_deref(),
+        Some("/dev/pts/2")
+    );
+}
+
+/// A client in a session the user made is never detached, however recent
+/// its activity.
+#[test]
+fn a_client_outside_the_forest_is_never_detached() {
+    let clients = "100\t/dev/pts/1\tforestui-work-77\n900\t/dev/pts/2\tmain\n";
+    assert_eq!(
+        client_to_detach(clients, in_forest).as_deref(),
+        Some("/dev/pts/1")
+    );
+    assert_eq!(client_to_detach("900\t/dev/pts/2\tmain\n", in_forest), None);
+    assert_eq!(client_to_detach("", in_forest), None);
+    assert_eq!(client_to_detach("garbage\n", in_forest), None);
+}
