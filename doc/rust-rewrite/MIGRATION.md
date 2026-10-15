@@ -207,7 +207,7 @@ modules are stubs totalling 18 lines.
 | `btn-custom-<prefix>-<session_id>` id parsing | Fixed | Replaced by typed `Action::ResumeCustom { button, session }` (`src/app.rs:75`), removing the ambiguity when a prefix contains `-` (`repository_detail.py:267-278`) |
 | Per-session controls: Resume, YOLO, one per custom button | Identical set and order | `src/app.rs:337-343` ↔ `repository_detail.py:322-345` |
 | Sessions capped at 5 | Identical | `SESSION_LIMIT = 5` (`src/app.rs:18`) ↔ `claude_session.py:34` default + `[:5]` slice |
-| Issues: 10 fetched | Identical | `ISSUE_LIMIT = 10` (`src/app.rs:19`) ↔ `github.py:101` |
+| Issues fetched | Changed | `ISSUE_FETCH_LIMIT = 100` per `gh` call, no cap after the merge (`src/services/github.rs`), so hiding blocked issues cannot empty the list (#76) ↔ `github.py:101` |
 | Issues: how many get a "Create WT" control | Changed | Rust exposes all 10 (`src/app.rs:374-377`); Python rendered `issues[:5]` (`repository_detail.py:429`) |
 | Rename via two inline fields, pre-filled, `Enter` submits | Changed | Now `DetailItem::Field` entries edited in place, `Esc` restores the stored values (`src/app.rs:653-714`); Python used Textual `Input`s (`worktree_detail.py:234-244`) |
 | Rename does `fs::rename` → `git worktree repair` → Claude session migration → state update | Identical | `src/app.rs:1137-1170` ↔ `app.py:608-636` |

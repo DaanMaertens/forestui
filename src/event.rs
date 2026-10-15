@@ -7,7 +7,7 @@
 
 use crate::app::finished::FinishedTicket;
 use crate::app::worktree_sync::{ChangeTicket, CreateTicket, ScanTicket};
-use crate::models::{ClaudeSession, GitHubIssue, Worktree};
+use crate::models::{ClaudeSession, Worktree};
 use crate::services::github::AuthStatus;
 use chrono::{DateTime, Utc};
 use ratatui::crossterm::event::{self, Event};
@@ -118,10 +118,11 @@ pub enum AppEvent {
     /// `scope` is the one they were listed for: a repository's own settings
     /// can change it while the fetch runs, and the list is then not the one
     /// wanted.
+    /// `issues` is an error when `gh` could not list them.
     Issues {
         path: String,
         scope: crate::models::Scope,
-        issues: Vec<GitHubIssue>,
+        issues: crate::services::github::IssuesResult,
     },
     /// Start work's `pr-review` list finished loading: the open PRs in
     /// `scope`, and the login `gh` is authenticated as, which decides each
@@ -129,10 +130,7 @@ pub enum AppEvent {
     PullRequests {
         path: String,
         scope: crate::models::Scope,
-        result: Result<
-            crate::services::github::PullRequests,
-            crate::services::github::PullRequestsError,
-        >,
+        result: Result<crate::services::github::PullRequests, crate::services::github::ListError>,
     },
     /// `gh` was asked which GitHub repository a checkout resolves to:
     /// `repo` keys its repository settings, and without one only a

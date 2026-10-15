@@ -502,3 +502,30 @@ async fn clicking_the_footer_runs_the_binding() {
         "clicking `a` in the footer did not open Add Repository"
     );
 }
+
+/// The wheel browses Start work's item list like Up/Down, stopping at
+/// either end, without picking anything.
+#[tokio::test]
+async fn the_wheel_moves_the_start_work_selection() {
+    use ratatui::crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+    let (_dir, mut app, _) = app_with_issues((1..=3).map(|n| open_issue(n, "Issue")).collect());
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    let notch = |kind| MouseEvent {
+        kind,
+        column: 60,
+        row: 20,
+        modifiers: KeyModifiers::NONE,
+    };
+    let selected = |app: &App| start_work(app).picker.as_ref().map(|p| p.selected_index());
+
+    app.handle_mouse(notch(MouseEventKind::ScrollDown));
+    assert_eq!(selected(&app), Some(1));
+    for _ in 0..5 {
+        app.handle_mouse(notch(MouseEventKind::ScrollDown));
+    }
+    assert_eq!(selected(&app), Some(2), "stops at the last row");
+    app.handle_mouse(notch(MouseEventKind::ScrollUp));
+    assert_eq!(selected(&app), Some(1));
+    assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Item);
+}

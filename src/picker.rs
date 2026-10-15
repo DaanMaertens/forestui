@@ -5,7 +5,8 @@ use crate::fuzzy::{self, Searchable};
 use crate::ui::widgets::TextInput;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-/// The most entries a picker lists for any one query.
+/// The most entries a picker lists for any one query, unless it is made
+/// [`SearchPicker::unlimited`].
 const MAX_RESULTS: usize = 50;
 
 #[derive(Debug)]
@@ -17,6 +18,8 @@ pub struct SearchPicker<T> {
     matches: Vec<usize>,
     /// Position into `matches`, not into `items`.
     selected_index: usize,
+    /// The most entries `matches` holds.
+    limit: usize,
 }
 
 impl<T: Searchable> SearchPicker<T> {
@@ -26,9 +29,18 @@ impl<T: Searchable> SearchPicker<T> {
             query: TextInput::new("").with_placeholder(placeholder),
             matches: Vec::new(),
             selected_index: 0,
+            limit: MAX_RESULTS,
         };
         picker.refresh();
         picker
+    }
+
+    /// List every matching entry rather than the best [`MAX_RESULTS`], for a
+    /// list meant to be browsed to its end, not only searched.
+    pub fn unlimited(mut self) -> Self {
+        self.limit = usize::MAX;
+        self.refresh();
+        self
     }
 
     /// Apply a text-editing key to the query. Returns whether it was used.
@@ -46,16 +58,21 @@ impl<T: Searchable> SearchPicker<T> {
     pub fn move_selection(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Up => {
-                self.selected_index = self.selected_index.saturating_sub(1);
+                self.step(-1);
                 true
             }
             KeyCode::Down => {
-                let last = self.matches.len().saturating_sub(1);
-                self.selected_index = (self.selected_index + 1).min(last);
+                self.step(1);
                 true
             }
             _ => false,
         }
+    }
+
+    /// Move the selection `delta` rows, stopping at either end.
+    pub fn step(&mut self, delta: isize) {
+        let last = self.matches.len().saturating_sub(1);
+        self.selected_index = self.selected_index.saturating_add_signed(delta).min(last);
     }
 
     /// Select a clicked row. The click was resolved against the last drawn
@@ -109,7 +126,7 @@ impl<T: Searchable> SearchPicker<T> {
 
     /// Match again and put the selection back on the best match.
     fn refresh(&mut self) {
-        self.matches = fuzzy::fuzzy_match(self.query.value(), &self.items, MAX_RESULTS)
+        self.matches = fuzzy::fuzzy_match(self.query.value(), &self.items, self.limit)
             .into_iter()
             .map(|(i, _score)| i)
             .collect();

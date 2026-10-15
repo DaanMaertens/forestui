@@ -304,14 +304,11 @@ fn choose_pr_review(app: &mut App) {
 /// no PRs".
 #[tokio::test]
 async fn a_failed_pull_request_list_says_so_rather_than_empty() {
-    use crate::services::github::PullRequestsError;
+    use crate::services::github::ListError;
     for (error, said) in [
-        (PullRequestsError::NotAuthenticated, "gh is not logged in"),
-        (PullRequestsError::NotInstalled, "gh is not installed"),
-        (
-            PullRequestsError::Failed,
-            "Could not load the PRs from GitHub",
-        ),
+        (ListError::NotAuthenticated, "gh is not logged in"),
+        (ListError::NotInstalled, "gh is not installed"),
+        (ListError::Failed, "Could not load the PRs from GitHub"),
     ] {
         let (_dir, mut app, path) = app_with_issues(Vec::new());
         choose_pr_review(&mut app);

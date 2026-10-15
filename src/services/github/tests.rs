@@ -52,18 +52,18 @@ fn peek_reports_freshness_without_io() {
         cache.generation,
         "/repo/fresh",
         Scope::Mine,
-        std::slice::from_ref(&issue),
+        &Ok(vec![issue.clone()]),
         true,
     );
     let (issues, fresh) = cache.peek("/repo/fresh", Scope::Mine).expect("cached");
-    assert_eq!(issues.len(), 1);
+    assert_eq!(issues.map(|i| i.len()), Ok(1));
     assert!(fresh);
 
     let old = Utc::now() - chrono::Duration::seconds(CACHE_TTL_SECONDS + 10);
     cache.entries.insert(
         ("/repo/stale".into(), Scope::Mine),
         Cached {
-            issues: vec![issue],
+            issues: Ok(vec![issue]),
             fetched_at: old,
         },
     );
@@ -86,14 +86,20 @@ fn an_invalidation_fences_out_older_fetches() {
     let mut cache = IssueCache::default();
     let before = cache.generation;
     cache.invalidate("/repo/fenced");
-    cache.store_if_current(before, "/repo/fenced", Scope::Mine, &[], true);
+    cache.store_if_current(before, "/repo/fenced", Scope::Mine, &Ok(Vec::new()), true);
     assert!(
         cache.peek("/repo/fenced", Scope::Mine).is_none(),
         "a pre-invalidation fetch must not repopulate the cache"
     );
 
     // A fetch that started after the invalidation stores normally.
-    cache.store_if_current(cache.generation, "/repo/fenced", Scope::Mine, &[], true);
+    cache.store_if_current(
+        cache.generation,
+        "/repo/fenced",
+        Scope::Mine,
+        &Ok(Vec::new()),
+        true,
+    );
     assert!(cache.peek("/repo/fenced", Scope::Mine).is_some());
 }
 
@@ -102,9 +108,15 @@ fn an_invalidation_fences_out_older_fetches() {
 #[test]
 fn empty_answers_are_cached_as_already_stale() {
     let mut cache = IssueCache::default();
-    cache.store_if_current(cache.generation, "/repo/negative", Scope::Mine, &[], false);
+    cache.store_if_current(
+        cache.generation,
+        "/repo/negative",
+        Scope::Mine,
+        &Ok(Vec::new()),
+        false,
+    );
     let (issues, fresh) = cache.peek("/repo/negative", Scope::Mine).expect("cached");
-    assert!(issues.is_empty());
+    assert!(issues.is_ok_and(|i| i.is_empty()));
     assert!(!fresh, "a negative answer must not count as fresh");
 }
 
@@ -183,7 +195,7 @@ fn one_failed_pull_request_query_marks_the_list_incomplete() {
 fn every_pull_request_query_failing_is_an_error() {
     assert_eq!(
         merge_pull_requests(&[None, Some("not json")], None).map(|prs| prs.prs.len()),
-        Err(PullRequestsError::Failed)
+        Err(ListError::Failed)
     );
 }
 
@@ -201,19 +213,16 @@ fn an_empty_pull_request_answer_is_an_empty_list() {
 #[test]
 fn an_unusable_gh_is_its_own_error() {
     assert_eq!(
-        PullRequestsError::from_auth(AuthStatus::NotAuthenticated),
-        Some(PullRequestsError::NotAuthenticated)
+        ListError::from_auth(AuthStatus::NotAuthenticated),
+        Some(ListError::NotAuthenticated)
     );
     assert_eq!(
-        PullRequestsError::from_auth(AuthStatus::NotInstalled),
-        Some(PullRequestsError::NotInstalled)
+        ListError::from_auth(AuthStatus::NotInstalled),
+        Some(ListError::NotInstalled)
     );
+    assert_eq!(ListError::from_auth(AuthStatus::Authenticated), None);
     assert_eq!(
-        PullRequestsError::from_auth(AuthStatus::Authenticated),
-        None
-    );
-    assert_eq!(
-        PullRequestsError::NotAuthenticated.message(),
+        ListError::NotAuthenticated.message("PRs"),
         "gh is not logged in"
     );
 }
@@ -223,11 +232,23 @@ fn an_unusable_gh_is_its_own_error() {
 #[test]
 fn the_cache_answers_only_for_the_scope_it_was_fetched_for() {
     let mut cache = IssueCache::default();
-    cache.store_if_current(cache.generation, "/repo/scoped", Scope::Mine, &[], true);
+    cache.store_if_current(
+        cache.generation,
+        "/repo/scoped",
+        Scope::Mine,
+        &Ok(Vec::new()),
+        true,
+    );
     assert!(cache.peek("/repo/scoped", Scope::Mine).is_some());
     assert!(cache.peek("/repo/scoped", Scope::All).is_none());
 
-    cache.store_if_current(cache.generation, "/repo/scoped", Scope::All, &[], true);
+    cache.store_if_current(
+        cache.generation,
+        "/repo/scoped",
+        Scope::All,
+        &Ok(Vec::new()),
+        true,
+    );
     assert!(cache.peek("/repo/scoped", Scope::All).is_some());
 }
 
@@ -237,8 +258,20 @@ fn the_cache_answers_only_for_the_scope_it_was_fetched_for() {
 #[test]
 fn the_cache_holds_both_scopes_of_a_path() {
     let mut cache = IssueCache::default();
-    cache.store_if_current(cache.generation, "/repo/both", Scope::Mine, &[], true);
-    cache.store_if_current(cache.generation, "/repo/both", Scope::All, &[], true);
+    cache.store_if_current(
+        cache.generation,
+        "/repo/both",
+        Scope::Mine,
+        &Ok(Vec::new()),
+        true,
+    );
+    cache.store_if_current(
+        cache.generation,
+        "/repo/both",
+        Scope::All,
+        &Ok(Vec::new()),
+        true,
+    );
     assert!(cache.peek("/repo/both", Scope::Mine).is_some());
     assert!(cache.peek("/repo/both", Scope::All).is_some());
 
@@ -309,4 +342,104 @@ fn an_unreadable_item_state_is_unknown() {
     assert_eq!(parse_item_state("not json"), None);
     assert_eq!(parse_item_state(r#"{"state":"DRAFT"}"#), None);
     assert_eq!(parse_item_state(r#"{"number":4}"#), None);
+}
+
+/// `gh issue list` JSON for open issues numbered `numbers`, the higher
+/// number the newer.
+fn issue_answer(numbers: impl IntoIterator<Item = i64>) -> String {
+    let issues: Vec<serde_json::Value> = numbers
+        .into_iter()
+        .map(|n| {
+            serde_json::json!({
+                "number": n,
+                "title": format!("Issue {n}"),
+                "createdAt": format!("2026-01-01T00:{:02}:00Z", n % 60),
+            })
+        })
+        .collect();
+    serde_json::Value::Array(issues).to_string()
+}
+
+/// Nothing is cut after the merge: an older issue stays in the list however
+/// many newer ones there are, so hiding the blocked ones afterwards cannot
+/// leave it out (#76).
+#[test]
+fn merged_issues_are_not_capped() {
+    let assigned = issue_answer(30..45);
+    let authored = issue_answer([1, 2, 40, 41]);
+    let issues = merge_issues(&[Some(&assigned), Some(&authored)]).expect("answered");
+    assert!(!issues.incomplete);
+    let numbers: Vec<i64> = issues.items.iter().map(|i| i.number).collect();
+    let mut expected: Vec<i64> = (30..45).rev().collect();
+    expected.extend([2, 1]);
+    assert_eq!(numbers, expected, "each once, newest first, none dropped");
+}
+
+/// Every `gh issue list` failing is a failure, not "no open issues".
+#[test]
+fn every_issue_query_failing_is_an_error() {
+    assert_eq!(
+        merge_issues(&[None, Some("not json")]).map(|i| i.items.len()),
+        Err(ListError::Failed)
+    );
+    assert_eq!(
+        merge_issues(&[None]).map(|i| i.items.len()),
+        Err(ListError::Failed)
+    );
+}
+
+/// One failing query leaves the other's issues, marked incomplete; an empty
+/// answer is an answer.
+#[test]
+fn issue_answers_partial_and_empty() {
+    let ok = issue_answer([7]);
+    let issues = merge_issues(&[Some(""), Some(&ok)]).expect("one answered");
+    assert_eq!(issues.items.len(), 1);
+    assert!(issues.incomplete);
+
+    let issues = merge_issues(&[Some("[]"), Some("[]")]).expect("answered");
+    assert!(issues.items.is_empty());
+    assert!(!issues.incomplete);
+}
+
+/// The fetch asks for a page large enough that the cap does not decide what
+/// is listed.
+#[test]
+fn issues_are_fetched_a_full_page_at_a_time() {
+    assert_eq!(ISSUE_FETCH_LIMIT, 100);
+}
+
+/// A failed fetch is cached only as already stale, so the next visit asks
+/// again, and it never replaces a list that did load.
+#[test]
+fn a_failed_issue_fetch_is_never_fresh_and_never_replaces_a_list() {
+    let mut cache = IssueCache::default();
+    cache.store_if_current(
+        cache.generation,
+        "/repo/failed",
+        Scope::Mine,
+        &Err(ListError::Failed),
+        true,
+    );
+    let (result, fresh) = cache.peek("/repo/failed", Scope::Mine).expect("cached");
+    assert_eq!(result.map(|i| i.len()), Err(ListError::Failed));
+    assert!(!fresh, "a failure must be re-checked on the next visit");
+
+    cache.store_if_current(
+        cache.generation,
+        "/repo/loaded",
+        Scope::Mine,
+        &Ok(Vec::new()),
+        false,
+    );
+    cache.store_if_current(
+        cache.generation,
+        "/repo/loaded",
+        Scope::Mine,
+        &Err(ListError::Failed),
+        false,
+    );
+    let (result, fresh) = cache.peek("/repo/loaded", Scope::Mine).expect("cached");
+    assert!(result.is_ok(), "the list that loaded is kept");
+    assert!(!fresh);
 }

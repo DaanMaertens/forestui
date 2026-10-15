@@ -143,3 +143,18 @@ async fn the_issue_list_counts_every_hidden_issue() {
     let screen = rendered(&mut app);
     assert!(screen.contains("3 blocked hidden"), "{screen}");
 }
+
+/// More newer blocked issues than the old page of ten leave an older
+/// unblocked one listed, and the count says how many were hidden (#76).
+#[tokio::test]
+async fn older_unblocked_issues_survive_many_newer_blocked_ones() {
+    forget_saved_settings();
+    let mut issues: Vec<_> = (10..22).map(|n| blocked_issue(n, "Waits", &[9])).collect();
+    issues.push(open_issue(3, "Old but free"));
+    let (_dir, mut app, _) = app_with_issues(issues);
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(listed(&app), vec![3]);
+    let screen = rendered(&mut app);
+    assert!(screen.contains("12 blocked hidden"), "{screen}");
+}
