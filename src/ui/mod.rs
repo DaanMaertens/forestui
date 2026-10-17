@@ -235,7 +235,7 @@ fn draw_notifications(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// Break text into lines of at most `width` characters, on word boundaries
 /// where possible.
-fn wrap_words(text: &str, width: usize) -> Vec<String> {
+pub(crate) fn wrap_words(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return Vec::new();
     }

@@ -34,7 +34,10 @@ async fn a_dirty_worktree_gets_a_second_confirmation() {
     let change = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
     app.handle_event(AppEvent::WorktreeRemoveResult {
         change,
-        outcome: Ok(git::RemoveOutcome::Dirty("2 modified, 1 untracked".into())),
+        outcome: Ok(git::RemoveOutcome::Refused(git::Refusal {
+            changes: git::Changes::Uncommitted("2 modified, 1 untracked".into()),
+            lock: None,
+        })),
         branch: None,
     });
 
@@ -45,7 +48,8 @@ async fn a_dirty_worktree_gets_a_second_confirmation() {
     assert_eq!(confirm.action.confirm_label(), "Delete anyway");
     assert!(matches!(
         confirm.action,
-        crate::modal::ConfirmAction::ForceDeleteWorktree(id) if id == worktree_id
+        crate::modal::ConfirmAction::ForceDeleteWorktree(id, git::Force::Changes)
+            if id == worktree_id
     ));
     // Nothing destroyed, nothing dropped from state.
     assert!(app.state.find_worktree(worktree_id).is_some());
@@ -66,6 +70,108 @@ async fn a_dirty_worktree_gets_a_second_confirmation() {
     // The forced removal is now in flight; the entry waits for the fold.
     assert!(app.worktree_sync.is_removing(worktree_id));
     assert!(app.state.find_worktree(worktree_id).is_some());
+}
+
+/// The confirm a background `Refused` result opens for the selected worktree.
+fn confirm_after_refusal(refusal: git::Refusal) -> crate::modal::ConfirmModal {
+    let (_dir, mut app) = app_with_fixture();
+    app.handle_key(key(KeyCode::Down));
+    let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
+    let change = begun(&mut app, worktree_id, WorktreeSync::begin_removal);
+    app.handle_event(AppEvent::WorktreeRemoveResult {
+        change,
+        outcome: Ok(git::RemoveOutcome::Refused(refusal)),
+        branch: None,
+    });
+    // Nothing destroyed, nothing dropped from state.
+    assert!(app.state.find_worktree(worktree_id).is_some());
+    match app.modals.pop() {
+        Some(Modal::Confirm(confirm)) => confirm,
+        _ => panic!("a refusal must offer to delete anyway, not end in an error"),
+    }
+}
+
+#[tokio::test]
+async fn a_worktree_whose_changes_cannot_be_listed_offers_delete_anyway() {
+    let confirm = confirm_after_refusal(git::Refusal {
+        changes: git::Changes::Unknown("index file smaller than expected".into()),
+        lock: None,
+    });
+    assert!(
+        confirm.message.contains("Could not list"),
+        "{}",
+        confirm.message
+    );
+    assert!(confirm.message.contains("index file smaller than expected"));
+    assert_eq!(confirm.action.confirm_label(), "Delete anyway");
+    assert!(matches!(
+        confirm.action,
+        crate::modal::ConfirmAction::ForceDeleteWorktree(_, git::Force::Changes)
+    ));
+}
+
+#[tokio::test]
+async fn a_locked_worktree_offers_to_unlock_and_delete() {
+    let confirm = confirm_after_refusal(git::Refusal {
+        changes: git::Changes::Uncommitted("1 untracked".into()),
+        lock: Some(git::Lock {
+            reason: Some("claude agent a1 (pid 42)".into()),
+        }),
+    });
+    assert!(confirm.message.contains("claude agent a1 (pid 42)"));
+    assert!(confirm.message.contains("1 untracked"));
+    assert_eq!(confirm.action.confirm_label(), "Unlock and delete");
+    assert!(matches!(
+        confirm.action,
+        crate::modal::ConfirmAction::ForceDeleteWorktree(_, git::Force::ChangesAndLock)
+    ));
+}
+
+#[tokio::test]
+async fn a_locked_worktree_whose_directory_is_gone_says_only_its_record_goes() {
+    let confirm = confirm_after_refusal(git::Refusal {
+        changes: git::Changes::DirectoryGone,
+        lock: Some(git::Lock { reason: None }),
+    });
+    // Its files are out of reach (an unmounted drive, say): deleting drops
+    // git's record and touches nothing on disk, and the dialog must not
+    // claim otherwise.
+    assert!(
+        confirm.message.contains("directory is not there"),
+        "{}",
+        confirm.message
+    );
+    assert!(
+        confirm.message.contains("git's record"),
+        "{}",
+        confirm.message
+    );
+    assert_eq!(confirm.action.confirm_label(), "Unlock and delete");
+}
+
+#[test]
+fn a_long_git_reason_wraps_inside_the_dialog_instead_of_clipping() {
+    let why = format!("{}: index file smaller than expected", "/x".repeat(60));
+    let confirm = delete::refusal_confirm(
+        Uuid::new_v4(),
+        "wt",
+        &git::Refusal {
+            changes: git::Changes::Unknown(why),
+            lock: None,
+        },
+    );
+    let message = &confirm.message;
+    assert!(
+        message.lines().all(|line| line.chars().count() <= 72),
+        "{message}"
+    );
+    // Nothing of the reason is lost, and its words are not split.
+    assert!(
+        message
+            .replace('\n', " ")
+            .contains("index file smaller than expected"),
+        "{message}"
+    );
 }
 
 #[tokio::test]

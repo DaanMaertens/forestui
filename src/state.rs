@@ -6,6 +6,7 @@
 use crate::models::{AppStateData, Repository, Selection, WorkItemLink, Worktree};
 use crate::services::git::WorktreeInfo;
 use crate::services::settings::get_forest_path;
+use crate::util::resolve_path;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -24,39 +25,6 @@ impl WorktreeReconcile {
     fn is_empty(&self) -> bool {
         self.added.is_empty() && self.removed.is_empty() && self.branch_updated.is_empty()
     }
-}
-
-/// The form git output and config entries can be compared in: `~` expanded,
-/// symlinks resolved. Git records the fully resolved spelling, the config
-/// records whatever the user typed; comparing raw strings would re-import
-/// every tracked worktree under its other spelling.
-///
-/// When the path itself is gone — a deleted worktree is exactly what the
-/// prune check feeds through here — resolving via the deepest existing
-/// ancestor keeps the two spellings equal. Falling back to the unresolved
-/// path instead made a symlinked forest compare a config entry against
-/// git's resolved listing as *different* locations, and prune a row git
-/// still tracked.
-fn resolve(path: &str) -> PathBuf {
-    let expanded = crate::util::expanduser(path);
-    if let Ok(resolved) = std::fs::canonicalize(&expanded) {
-        return resolved;
-    }
-    // Walk up to the deepest ancestor that still resolves and re-append the
-    // missing components, so a deleted subtree keeps its resolved spelling.
-    let mut missing = Vec::new();
-    let mut current = expanded.as_path();
-    while let (Some(parent), Some(name)) = (current.parent(), current.file_name()) {
-        missing.push(name);
-        if let Ok(resolved) = std::fs::canonicalize(parent) {
-            return missing
-                .iter()
-                .rev()
-                .fold(resolved, |path, part| path.join(part));
-        }
-        current = parent;
-    }
-    expanded
 }
 
 pub struct AppState {
@@ -182,8 +150,8 @@ impl AppState {
             // flow's entry wins — it carries the user's chosen name and base
             // branch — but the scan's must go, or the sidebar shows the same
             // worktree twice.
-            let resolved = resolve(&worktree.path);
-            repo.worktrees.retain(|w| resolve(&w.path) != resolved);
+            let resolved = resolve_path(&worktree.path);
+            repo.worktrees.retain(|w| resolve_path(&w.path) != resolved);
             repo.worktrees.push(worktree);
             self.save();
         }
@@ -222,13 +190,13 @@ impl AppState {
             .iter()
             .filter(|r| r.id != repo_id)
             .flat_map(|r| {
-                std::iter::once(resolve(&r.source_path))
-                    .chain(r.worktrees.iter().map(|w| resolve(&w.path)))
+                std::iter::once(resolve_path(&r.source_path))
+                    .chain(r.worktrees.iter().map(|w| resolve_path(&w.path)))
             })
             .collect();
 
         let repo = self.repositories.iter_mut().find(|r| r.id == repo_id)?;
-        let source = resolve(&repo.source_path);
+        let source = resolve_path(&repo.source_path);
 
         // Drop the main checkout: it is the repository row, not a worktree.
         // Git prints it first — the parser keeps a bare repository's entry
@@ -240,7 +208,7 @@ impl AppState {
             .iter()
             .enumerate()
             .filter(|(index, _)| *index != 0)
-            .map(|(_, info)| (resolve(&info.path), info))
+            .map(|(_, info)| (resolve_path(&info.path), info))
             .filter(|(resolved, _)| *resolved != source)
             .collect();
         let listed_by_path: std::collections::HashMap<&PathBuf, &WorktreeInfo> =
@@ -254,7 +222,7 @@ impl AppState {
         let tracked: std::collections::HashMap<Uuid, PathBuf> = repo
             .worktrees
             .iter()
-            .map(|w| (w.id, resolve(&w.path)))
+            .map(|w| (w.id, resolve_path(&w.path)))
             .collect();
 
         let mut removed_ids = Vec::new();
