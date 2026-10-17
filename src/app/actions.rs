@@ -510,68 +510,6 @@ impl App {
         }
     }
 
-    /// Run a worktree removal in the background. The entry leaves state only
-    /// when git has actually removed the worktree — the fold decides, so a
-    /// refusal can stop with everything intact. `force` is `None` for a plain
-    /// removal, and what to override once the user has confirmed a refusal.
-    fn spawn_worktree_removal(&mut self, worktree_id: Uuid, force: Option<git::Force>) {
-        let Some((repo, worktree)) = self.state.find_worktree(worktree_id) else {
-            return;
-        };
-        let name = worktree.name.clone();
-        // A second confirm on the same worktree while git is still running
-        // would race a duplicate removal and stack a second destructive modal;
-        // a rename still running would be moving the tree out from under it.
-        let Some(change) = self.worktree_sync.begin_removal(repo.id, worktree_id) else {
-            self.refuse_busy(&name);
-            return;
-        };
-        let repo_path = repo.source_path.clone();
-        let worktree_path = worktree.path.clone();
-        let tracked_branch = worktree.branch.clone();
-        // Read here, not in the task: the main loop owns the settings.
-        let base_branch = self.base_branch_for(&repo_path);
-        // Immediate feedback: on a large tree the round trip takes seconds and
-        // the frame would otherwise be identical to the one before confirming.
-        self.notify(format!("Deleting '{name}'…"), Severity::Information);
-        let tx = self.tx.clone();
-        tokio::spawn(async move {
-            // git's word over the state's: a branch switched since the last
-            // scan would otherwise have the wrong branch deleted. A detached
-            // worktree has none of its own; the state's is the fallback for
-            // an entry git has already forgotten.
-            let branch = match git::listed_worktree(&repo_path, &worktree_path).await {
-                Some(listed) => listed.branch.unwrap_or_default(),
-                None => tracked_branch,
-            };
-            let outcome = match force {
-                Some(force) => git::force_remove_worktree(&repo_path, &worktree_path, force)
-                    .await
-                    .map(|()| git::RemoveOutcome::Removed),
-                None => git::remove_worktree(&repo_path, &worktree_path).await,
-            }
-            .map_err(|error| error.to_string());
-            // After the removal, not before: a branch checked out in the
-            // worktree is one git will not delete.
-            let branch_fate = match outcome {
-                Ok(git::RemoveOutcome::Removed) => {
-                    crate::prune::delete_branch_if_pushed(
-                        &repo_path,
-                        &branch,
-                        base_branch.as_deref(),
-                    )
-                    .await
-                }
-                _ => None,
-            };
-            tx.send(AppEvent::WorktreeRemoveResult {
-                change,
-                outcome,
-                branch: branch_fate,
-            });
-        });
-    }
-
     /// Ask before pruning, naming every worktree that would go.
     fn action_prune_finished(&mut self) {
         let Some(repo_id) = self.state.selection.repository_id else {
@@ -1707,7 +1645,7 @@ impl App {
 
     /// A worktree takes one change at a time. A refusal says why: otherwise
     /// Enter in a rename field, or "y" on a delete confirm, would look dead.
-    fn refuse_busy(&mut self, name: &str) {
+    pub(super) fn refuse_busy(&mut self, name: &str) {
         self.notify(
             format!("'{name}' is still being changed; try again when it finishes"),
             Severity::Information,

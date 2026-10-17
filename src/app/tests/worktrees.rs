@@ -73,7 +73,7 @@ async fn a_dirty_worktree_gets_a_second_confirmation() {
 }
 
 /// The confirm a background `Refused` result opens for the selected worktree.
-fn refusal_confirm(refusal: git::Refusal) -> crate::modal::ConfirmModal {
+fn confirm_after_refusal(refusal: git::Refusal) -> crate::modal::ConfirmModal {
     let (_dir, mut app) = app_with_fixture();
     app.handle_key(key(KeyCode::Down));
     let worktree_id = app.state.selection.worktree_id.expect("worktree selected");
@@ -93,7 +93,7 @@ fn refusal_confirm(refusal: git::Refusal) -> crate::modal::ConfirmModal {
 
 #[tokio::test]
 async fn a_worktree_whose_changes_cannot_be_listed_offers_delete_anyway() {
-    let confirm = refusal_confirm(git::Refusal {
+    let confirm = confirm_after_refusal(git::Refusal {
         changes: git::Changes::Unknown("index file smaller than expected".into()),
         lock: None,
     });
@@ -112,7 +112,7 @@ async fn a_worktree_whose_changes_cannot_be_listed_offers_delete_anyway() {
 
 #[tokio::test]
 async fn a_locked_worktree_offers_to_unlock_and_delete() {
-    let confirm = refusal_confirm(git::Refusal {
+    let confirm = confirm_after_refusal(git::Refusal {
         changes: git::Changes::Uncommitted("1 untracked".into()),
         lock: Some(git::Lock {
             reason: Some("claude agent a1 (pid 42)".into()),
@@ -130,13 +130,15 @@ async fn a_locked_worktree_offers_to_unlock_and_delete() {
 #[test]
 fn a_long_git_reason_wraps_inside_the_dialog_instead_of_clipping() {
     let why = format!("{}: index file smaller than expected", "/x".repeat(60));
-    let (_, message) = refusal_dialog(
+    let confirm = delete::refusal_confirm(
+        Uuid::new_v4(),
         "wt",
         &git::Refusal {
             changes: git::Changes::Unknown(why),
             lock: None,
         },
     );
+    let message = &confirm.message;
     assert!(
         message.lines().all(|line| line.chars().count() <= 72),
         "{message}"

@@ -7,6 +7,7 @@
 //! contains.
 
 mod actions;
+mod delete;
 pub mod detail;
 pub mod finished;
 mod keys;
@@ -69,54 +70,6 @@ fn informative_branch(branch: &str, name: &str, prefix: &str) -> Option<String> 
         return None;
     }
     Some(branch.to_string())
-}
-
-/// Title and message for the confirm a refused Delete opens: what deleting
-/// anyway would discard, and the lock it would break. Every refusal gets one —
-/// a flat "could not delete" would leave the user no way forward from the UI.
-fn refusal_dialog(name: &str, refusal: &git::Refusal) -> (&'static str, String) {
-    // The name is capped so what matters — what would be lost — never clips
-    // off the dialog edge.
-    let display = crate::util::truncate(name, 40);
-    let named = format!("'{display}'");
-    let mut lines = Vec::new();
-    // Once the lock line has named the worktree, the rest refers back to it.
-    let (title, subject, object, unlock) = match &refusal.lock {
-        Some(lock) => {
-            lines.push(match &lock.reason {
-                Some(reason) => {
-                    format!(
-                        "'{display}' is locked: {}",
-                        crate::util::truncate(reason, 40)
-                    )
-                }
-                None => format!("'{display}' is locked."),
-            });
-            ("Locked Worktree", "It", "it", "unlock it and ")
-        }
-        None if matches!(refusal.changes, git::Changes::Unknown(_)) => {
-            ("Cannot List Changes", named.as_str(), named.as_str(), "")
-        }
-        None => ("Uncommitted Changes", named.as_str(), named.as_str(), ""),
-    };
-    match &refusal.changes {
-        git::Changes::None => lines.push(format!("Deleting will {unlock}remove it.")),
-        git::Changes::Uncommitted(summary) => {
-            lines.push(format!("{subject} has uncommitted changes:"));
-            lines.push(summary.clone());
-            lines.push(format!("Deleting will {unlock}discard them permanently."));
-        }
-        git::Changes::Unknown(why) => {
-            lines.push(format!("Could not list the changes in {object}:"));
-            // The dialog does not wrap, and git's reason often leads with a
-            // long path that would push the reason itself off the edge.
-            lines.extend(crate::ui::wrap_words(why, 72).into_iter().take(4));
-            lines.push(format!(
-                "Deleting will {unlock}discard any changes in it permanently."
-            ));
-        }
-    }
-    (title, lines.join("\n"))
 }
 
 /// One visible line in the sidebar tree.
@@ -1644,70 +1597,6 @@ impl App {
             AppEvent::WorktreeRenameAborted { change } => self.worktree_sync.finish(change),
             AppEvent::WorktreeAddFailed { create } => self.worktree_sync.finish_create(create),
             AppEvent::ReloadDetail => self.reload_detail(),
-        }
-    }
-
-    /// Fold a finished removal attempt. State changes only here — the confirm
-    /// handler just spawns git, so a dirty refusal arrives with the entry (and
-    /// the user's uncommitted work) fully intact.
-    fn on_worktree_remove_result(
-        &mut self,
-        change: worktree_sync::ChangeTicket,
-        outcome: Result<git::RemoveOutcome, String>,
-        branch: Option<crate::prune::BranchFate>,
-    ) {
-        let worktree_id = change.worktree_id();
-        self.worktree_sync.finish(change);
-        // A quit that waited on this removal can go through now.
-        if self.quit_pending && !self.worktree_sync.any_removal_running() {
-            self.should_quit = true;
-        }
-        // The entry may have been removed by other means while git ran.
-        let Some((_, worktree)) = self.state.find_worktree(worktree_id) else {
-            return;
-        };
-        let name = worktree.name.clone();
-        match outcome {
-            Ok(git::RemoveOutcome::Removed) => {
-                self.state.remove_worktree(worktree_id);
-                self.rebuild_rows();
-                self.sync_sidebar_index();
-                self.reload_detail();
-                self.report_save_error();
-                match branch {
-                    Some(crate::prune::BranchFate::Deleted(branch)) => self.notify(
-                        format!("Deleted '{name}' and its branch '{branch}'."),
-                        Severity::Information,
-                    ),
-                    Some(crate::prune::BranchFate::Kept { branch, why }) => self.notify(
-                        format!("Deleted '{name}'; kept branch '{branch}' — {why}."),
-                        Severity::Warning,
-                    ),
-                    None => {}
-                }
-            }
-            Ok(git::RemoveOutcome::Refused(refusal)) => {
-                let (title, message) = refusal_dialog(&name, &refusal);
-                self.modals.push(Modal::Confirm(
-                    crate::modal::ConfirmModal::new(
-                        title,
-                        message,
-                        crate::modal::ConfirmAction::ForceDeleteWorktree(
-                            worktree_id,
-                            refusal.force(),
-                        ),
-                    )
-                    // Pushed by a background event, not a user action — a
-                    // keystroke already in the queue must not confirm it.
-                    .with_arm_delay(),
-                ));
-            }
-            Err(error) => {
-                self.notify(
-                    format!("Could not delete '{name}': {error}"),
-                    Severity::Error,
-                );
-            }
         }
     }
 
