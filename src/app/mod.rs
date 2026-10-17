@@ -7,6 +7,7 @@
 //! contains.
 
 mod actions;
+mod delete;
 pub mod detail;
 pub mod finished;
 mod keys;
@@ -1596,71 +1597,6 @@ impl App {
             AppEvent::WorktreeRenameAborted { change } => self.worktree_sync.finish(change),
             AppEvent::WorktreeAddFailed { create } => self.worktree_sync.finish_create(create),
             AppEvent::ReloadDetail => self.reload_detail(),
-        }
-    }
-
-    /// Fold a finished removal attempt. State changes only here — the confirm
-    /// handler just spawns git, so a dirty refusal arrives with the entry (and
-    /// the user's uncommitted work) fully intact.
-    fn on_worktree_remove_result(
-        &mut self,
-        change: worktree_sync::ChangeTicket,
-        outcome: Result<git::RemoveOutcome, String>,
-        branch: Option<crate::prune::BranchFate>,
-    ) {
-        let worktree_id = change.worktree_id();
-        self.worktree_sync.finish(change);
-        // A quit that waited on this removal can go through now.
-        if self.quit_pending && !self.worktree_sync.any_removal_running() {
-            self.should_quit = true;
-        }
-        // The entry may have been removed by other means while git ran.
-        let Some((_, worktree)) = self.state.find_worktree(worktree_id) else {
-            return;
-        };
-        let name = worktree.name.clone();
-        match outcome {
-            Ok(git::RemoveOutcome::Removed) => {
-                self.state.remove_worktree(worktree_id);
-                self.rebuild_rows();
-                self.sync_sidebar_index();
-                self.reload_detail();
-                self.report_save_error();
-                match branch {
-                    Some(crate::prune::BranchFate::Deleted(branch)) => self.notify(
-                        format!("Deleted '{name}' and its branch '{branch}'."),
-                        Severity::Information,
-                    ),
-                    Some(crate::prune::BranchFate::Kept { branch, why }) => self.notify(
-                        format!("Deleted '{name}'; kept branch '{branch}' — {why}."),
-                        Severity::Warning,
-                    ),
-                    None => {}
-                }
-            }
-            Ok(git::RemoveOutcome::Dirty(summary)) => {
-                // The name is capped so the summary — the one thing the user
-                // needs before confirming — never clips off the dialog edge.
-                let display = crate::util::truncate(&name, 40);
-                self.modals.push(Modal::Confirm(
-                    crate::modal::ConfirmModal::new(
-                        "Uncommitted Changes",
-                        format!(
-                            "'{display}' has uncommitted changes:\n{summary}\nDeleting will discard them permanently."
-                        ),
-                        crate::modal::ConfirmAction::ForceDeleteWorktree(worktree_id),
-                    )
-                    // Pushed by a background event, not a user action — a
-                    // keystroke already in the queue must not confirm it.
-                    .with_arm_delay(),
-                ));
-            }
-            Err(error) => {
-                self.notify(
-                    format!("Could not delete '{name}': {error}"),
-                    Severity::Error,
-                );
-            }
         }
     }
 

@@ -151,39 +151,149 @@ async fn a_dirty_worktree_is_refused_with_a_summary_not_destroyed() {
         .unwrap();
     assert_eq!(
         outcome,
-        RemoveOutcome::Dirty("1 modified, 1 untracked".into())
+        RemoveOutcome::Refused(Refusal {
+            changes: Changes::Uncommitted("1 modified, 1 untracked".into()),
+            lock: None,
+        })
     );
     // The refusal left the work in place.
     assert!(wt.join("scratch.txt").exists());
 
-    force_remove_worktree(&repo_str, &wt.to_string_lossy())
+    force_remove_worktree(&repo_str, &wt.to_string_lossy(), Force::Changes)
         .await
         .unwrap();
     assert!(!wt.exists());
 }
 
 #[tokio::test]
-async fn a_locked_worktree_is_refused_with_an_unlock_hint() {
+async fn a_locked_worktree_is_refused_with_its_lock_and_its_changes() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
     init_repo(&repo);
     let repo_str = repo.to_string_lossy().to_string();
 
     let wt = dir.path().join("wt-locked");
+    let wt_str = wt.to_string_lossy().to_string();
     create_worktree(&repo_str, &wt, "feat/locked", true, None)
         .await
         .unwrap();
-    git_in(&repo, &["worktree", "lock", &wt.to_string_lossy()]);
-
-    // Even a *dirty* locked tree must not reach the "Delete anyway"
-    // prompt: git wants `--force --force` for locks, which the app never
-    // passes, so confirming would fail with an unrelated lock error.
+    git_in(&repo, &["worktree", "lock", "--reason", "in use", &wt_str]);
     std::fs::write(wt.join("scratch.txt"), "untracked").unwrap();
-    let error = remove_worktree(&repo_str, &wt.to_string_lossy())
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("locked"), "got: {error}");
+
+    let outcome = remove_worktree(&repo_str, &wt_str).await.unwrap();
+    let RemoveOutcome::Refused(refusal) = outcome else {
+        panic!("a locked tree must be refused, got {outcome:?}");
+    };
+    assert_eq!(
+        refusal,
+        Refusal {
+            changes: Changes::Uncommitted("1 untracked".into()),
+            lock: Some(Lock {
+                reason: Some("in use".into()),
+            }),
+        }
+    );
+    assert_eq!(refusal.force(), Force::ChangesAndLock);
+
+    // Forcing past the changes alone stops at the lock.
+    assert!(
+        force_remove_worktree(&repo_str, &wt_str, Force::Changes)
+            .await
+            .is_err()
+    );
     assert!(wt.join("scratch.txt").exists());
+
+    force_remove_worktree(&repo_str, &wt_str, refusal.force())
+        .await
+        .unwrap();
+    assert!(!wt.exists());
+}
+
+#[tokio::test]
+async fn a_clean_locked_worktree_is_refused_for_its_lock_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    init_repo(&repo);
+    let repo_str = repo.to_string_lossy().to_string();
+
+    let wt = dir.path().join("wt-locked");
+    let wt_str = wt.to_string_lossy().to_string();
+    create_worktree(&repo_str, &wt, "feat/locked", true, None)
+        .await
+        .unwrap();
+    git_in(&repo, &["worktree", "lock", &wt_str]);
+
+    let outcome = remove_worktree(&repo_str, &wt_str).await.unwrap();
+    assert_eq!(
+        outcome,
+        RemoveOutcome::Refused(Refusal {
+            changes: Changes::None,
+            lock: Some(Lock { reason: None }),
+        })
+    );
+    assert!(wt.exists());
+}
+
+#[tokio::test]
+async fn a_locked_worktree_on_a_missing_directory_is_refused_as_gone_not_clean() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    init_repo(&repo);
+    let repo_str = repo.to_string_lossy().to_string();
+
+    let wt = dir.path().join("wt-unmounted");
+    let wt_str = wt.to_string_lossy().to_string();
+    create_worktree(&repo_str, &wt, "feat/unmounted", true, None)
+        .await
+        .unwrap();
+    git_in(&repo, &["worktree", "lock", &wt_str]);
+    // A tree on a drive that is not mounted: git keeps its record, the
+    // files are elsewhere.
+    std::fs::remove_dir_all(&wt).unwrap();
+
+    let outcome = remove_worktree(&repo_str, &wt_str).await.unwrap();
+    let RemoveOutcome::Refused(refusal) = outcome else {
+        panic!("a locked entry must be refused, got {outcome:?}");
+    };
+    assert_eq!(refusal.changes, Changes::DirectoryGone);
+
+    force_remove_worktree(&repo_str, &wt_str, refusal.force())
+        .await
+        .unwrap();
+    assert_eq!(list_worktrees(&repo_str).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_worktree_whose_status_cannot_be_read_is_refused_not_forced() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    init_repo(&repo);
+    let repo_str = repo.to_string_lossy().to_string();
+
+    let wt = dir.path().join("wt-corrupt");
+    let wt_str = wt.to_string_lossy().to_string();
+    create_worktree(&repo_str, &wt, "feat/corrupt", true, None)
+        .await
+        .unwrap();
+    std::fs::write(wt.join("scratch.txt"), "untracked").unwrap();
+    // A corrupt index makes both git's own clean check and `git status` fail.
+    std::fs::write(repo.join(".git/worktrees/wt-corrupt/index"), "garbage").unwrap();
+
+    let outcome = remove_worktree(&repo_str, &wt_str).await.unwrap();
+    let RemoveOutcome::Refused(refusal) = outcome else {
+        panic!("an unreadable tree must be refused, got {outcome:?}");
+    };
+    assert!(
+        matches!(&refusal.changes, Changes::Unknown(why) if why.contains("index")),
+        "got {refusal:?}"
+    );
+    assert_eq!(refusal.lock, None);
+    assert!(wt.join("scratch.txt").exists());
+
+    force_remove_worktree(&repo_str, &wt_str, refusal.force())
+        .await
+        .unwrap();
+    assert!(!wt.exists());
 }
 
 #[tokio::test]

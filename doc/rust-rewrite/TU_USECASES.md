@@ -1426,6 +1426,13 @@ After `d` then `y`, the directory is gone, the config entry is gone, and
 first: a second `Uncommitted Changes` confirm names `1 untracked`, and the
 file is still there. That confirm comes from a background result, so it arms
 after a short delay; `y` once it has armed deletes as above.
+**Locked:** after `git worktree lock --reason "<why>"` (with an untracked
+file), `d` then `y` opens a `Locked Worktree` confirm naming `<why>` and
+`1 untracked`, with an `Unlock and delete` button that removes it.
+**Status unreadable:** with a corrupt index (garbage written to
+`.git/worktrees/<name>/index`), `d` then `y` opens a `Cannot List Changes`
+confirm carrying git's reason, wrapped, with `Delete anyway`. Neither case
+ends in a `Could not delete` error. 🟢 EXECUTED (Rust) by hand.
 **Automated as:** the sweep deletes beta's `issue-298…` worktree (clean) and
 alpha's `wt-a-renamed` (dirty), capturing `UC-72-delete-confirm`,
 `UC-72-deleted` and `UC-72-dirty-confirm`. Removal runs in the background, so
