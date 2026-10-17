@@ -235,6 +235,35 @@ async fn a_clean_locked_worktree_is_refused_for_its_lock_alone() {
 }
 
 #[tokio::test]
+async fn a_locked_worktree_on_a_missing_directory_is_refused_as_gone_not_clean() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    init_repo(&repo);
+    let repo_str = repo.to_string_lossy().to_string();
+
+    let wt = dir.path().join("wt-unmounted");
+    let wt_str = wt.to_string_lossy().to_string();
+    create_worktree(&repo_str, &wt, "feat/unmounted", true, None)
+        .await
+        .unwrap();
+    git_in(&repo, &["worktree", "lock", &wt_str]);
+    // A tree on a drive that is not mounted: git keeps its record, the
+    // files are elsewhere.
+    std::fs::remove_dir_all(&wt).unwrap();
+
+    let outcome = remove_worktree(&repo_str, &wt_str).await.unwrap();
+    let RemoveOutcome::Refused(refusal) = outcome else {
+        panic!("a locked entry must be refused, got {outcome:?}");
+    };
+    assert_eq!(refusal.changes, Changes::DirectoryGone);
+
+    force_remove_worktree(&repo_str, &wt_str, refusal.force())
+        .await
+        .unwrap();
+    assert_eq!(list_worktrees(&repo_str).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn a_worktree_whose_status_cannot_be_read_is_refused_not_forced() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");

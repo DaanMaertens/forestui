@@ -164,6 +164,10 @@ pub(super) fn refusal_confirm(
     };
     match &refusal.changes {
         git::Changes::None => lines.push(format!("Deleting will {unlock}remove it.")),
+        git::Changes::DirectoryGone => {
+            lines.push("The directory is not there; nothing on disk is touched.".to_string());
+            lines.push(format!("Deleting will {unlock}remove git's record of it."));
+        }
         git::Changes::Uncommitted(summary) => {
             lines.push(format!("{subject} has uncommitted changes:"));
             lines.push(summary.clone());

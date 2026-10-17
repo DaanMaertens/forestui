@@ -273,8 +273,11 @@ impl Refusal {
 /// What a refused tree holds that removing it would discard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Changes {
-    /// Nothing: the tree is clean, or its directory is already gone.
+    /// Nothing: the tree is clean.
     None,
+    /// The directory is not there — deleted, or on a drive that is not
+    /// mounted — so removing drops only git's record of it.
+    DirectoryGone,
     /// Summary like "3 modified, 2 untracked".
     Uncommitted(String),
     /// `git status` failed (dubious ownership, corrupt index, …), so what
@@ -333,9 +336,9 @@ pub async fn remove_worktree(repo_path: &str, worktree_path: &str) -> GitResult<
             TreeState::Unreadable(why) => Changes::Unknown(reason(&why)),
         }
     } else {
-        Changes::None
+        Changes::DirectoryGone
     };
-    if lock.is_some() || changes != Changes::None {
+    if lock.is_some() || matches!(changes, Changes::Uncommitted(_) | Changes::Unknown(_)) {
         return Ok(RemoveOutcome::Refused(Refusal { changes, lock }));
     }
     force_remove_worktree(repo_path, worktree_path, Force::Changes).await?;

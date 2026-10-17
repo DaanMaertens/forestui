@@ -127,6 +127,28 @@ async fn a_locked_worktree_offers_to_unlock_and_delete() {
     ));
 }
 
+#[tokio::test]
+async fn a_locked_worktree_whose_directory_is_gone_says_only_its_record_goes() {
+    let confirm = confirm_after_refusal(git::Refusal {
+        changes: git::Changes::DirectoryGone,
+        lock: Some(git::Lock { reason: None }),
+    });
+    // Its files are out of reach (an unmounted drive, say): deleting drops
+    // git's record and touches nothing on disk, and the dialog must not
+    // claim otherwise.
+    assert!(
+        confirm.message.contains("directory is not there"),
+        "{}",
+        confirm.message
+    );
+    assert!(
+        confirm.message.contains("git's record"),
+        "{}",
+        confirm.message
+    );
+    assert_eq!(confirm.action.confirm_label(), "Unlock and delete");
+}
+
 #[test]
 fn a_long_git_reason_wraps_inside_the_dialog_instead_of_clipping() {
     let why = format!("{}: index file smaller than expected", "/x".repeat(60));

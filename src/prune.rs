@@ -100,7 +100,9 @@ pub async fn prune_worktree(repo_path: &str, worktree_path: &str, branch: &str) 
                     git::Changes::Unknown(why) => {
                         Outcome::Failed(format!("cannot verify the worktree is clean: {why}"))
                     }
-                    git::Changes::None => Outcome::Failed("git refused to remove it".to_string()),
+                    git::Changes::None | git::Changes::DirectoryGone => {
+                        Outcome::Failed("git refused to remove it".to_string())
+                    }
                 }
             };
         }
