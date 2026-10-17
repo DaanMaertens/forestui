@@ -30,6 +30,40 @@ pub fn expand_and_resolve(path: &str) -> PathBuf {
     std::fs::canonicalize(&expanded).unwrap_or(expanded)
 }
 
+/// The form git output and config entries can be compared in: `~` expanded,
+/// symlinks resolved. Git records the fully resolved spelling, the config
+/// records whatever the user typed; comparing raw strings would re-import
+/// every tracked worktree under its other spelling.
+///
+/// When the path itself is gone — a deleted worktree is exactly what the
+/// reconcile's prune check and a removal's lookup of git's entry feed through
+/// here — resolving via the deepest existing
+/// ancestor keeps the two spellings equal. Falling back to the unresolved
+/// path instead made a symlinked forest compare a config entry against
+/// git's resolved listing as *different* locations, and prune a row git
+/// still tracked.
+pub fn resolve_path(path: &str) -> PathBuf {
+    let expanded = expanduser(path);
+    if let Ok(resolved) = std::fs::canonicalize(&expanded) {
+        return resolved;
+    }
+    // Walk up to the deepest ancestor that still resolves and re-append the
+    // missing components, so a deleted subtree keeps its resolved spelling.
+    let mut missing = Vec::new();
+    let mut current = expanded.as_path();
+    while let (Some(parent), Some(name)) = (current.parent(), current.file_name()) {
+        missing.push(name);
+        if let Ok(resolved) = std::fs::canonicalize(parent) {
+            return missing
+                .iter()
+                .rev()
+                .fold(resolved, |path, part| path.join(part));
+        }
+        current = parent;
+    }
+    expanded
+}
+
 /// Convert text to a safe slug for tmux session names.
 pub fn slugify(text: &str) -> String {
     let lowered = text.to_lowercase();

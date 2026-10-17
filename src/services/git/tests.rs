@@ -263,6 +263,45 @@ async fn a_locked_worktree_on_a_missing_directory_is_refused_as_gone_not_clean()
     assert_eq!(list_worktrees(&repo_str).await.unwrap().len(), 1);
 }
 
+/// git records a worktree by its resolved path. Reached through a symlink
+/// (macOS's temp dir, a symlinked forest), a missing directory can no longer
+/// be resolved — and must still be recognised as git's entry, or its lock is
+/// missed and a failed force reads as "already gone".
+#[cfg(unix)]
+#[tokio::test]
+async fn a_missing_worktree_reached_through_a_symlink_is_still_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let repo = link.join("repo");
+    init_repo(&repo);
+    let repo_str = repo.to_string_lossy().to_string();
+
+    let wt = link.join("wt");
+    let wt_str = wt.to_string_lossy().to_string();
+    create_worktree(&repo_str, &wt, "feat/linked", true, None)
+        .await
+        .unwrap();
+    git_in(&repo, &["worktree", "lock", &wt_str]);
+    std::fs::remove_dir_all(&wt).unwrap();
+
+    let outcome = remove_worktree(&repo_str, &wt_str).await.unwrap();
+    let RemoveOutcome::Refused(refusal) = outcome else {
+        panic!("the lock must be seen through the symlink, got {outcome:?}");
+    };
+    assert!(refusal.lock.is_some());
+    // Without the lock forced, git still lists it: that is a failure, not
+    // "nothing left to remove".
+    assert!(
+        force_remove_worktree(&repo_str, &wt_str, Force::Changes)
+            .await
+            .is_err()
+    );
+    assert_eq!(list_worktrees(&repo_str).await.unwrap().len(), 2);
+}
+
 #[tokio::test]
 async fn a_worktree_whose_status_cannot_be_read_is_refused_not_forced() {
     let dir = tempfile::tempdir().unwrap();

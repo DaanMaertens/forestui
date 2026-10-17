@@ -469,7 +469,7 @@ async fn worktree_entry(repo: &Path, wt_dir: &Path) -> Option<WorktreeEntry> {
     if code != 0 {
         return None;
     }
-    let target = std::fs::canonicalize(wt_dir).unwrap_or_else(|_| wt_dir.to_path_buf());
+    let target = crate::util::resolve_path(&wt_dir.to_string_lossy());
     for block in stdout.split("\n\n") {
         let mut path: Option<&str> = None;
         let mut locked = None;
@@ -485,15 +485,13 @@ async fn worktree_entry(repo: &Path, wt_dir: &Path) -> Option<WorktreeEntry> {
                 });
             }
         }
-        if let Some(p) = path {
-            let p = Path::new(p);
-            let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-            if p == target {
-                return Some(match locked {
-                    Some(lock) => WorktreeEntry::Locked(lock),
-                    None => WorktreeEntry::Listed,
-                });
-            }
+        if let Some(p) = path
+            && crate::util::resolve_path(p) == target
+        {
+            return Some(match locked {
+                Some(lock) => WorktreeEntry::Locked(lock),
+                None => WorktreeEntry::Listed,
+            });
         }
     }
     None
@@ -532,13 +530,12 @@ pub async fn list_worktrees(repo_path: &str) -> GitResult<Vec<WorktreeInfo>> {
 /// not list it or cannot be asked. Asking the directory itself would, in a
 /// tree git no longer knows, answer for whatever repository encloses it.
 pub async fn listed_worktree(repo_path: &str, worktree_path: &str) -> Option<WorktreeInfo> {
-    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let target = real(&expand(worktree_path));
+    let target = crate::util::resolve_path(worktree_path);
     list_worktrees(repo_path)
         .await
         .ok()?
         .into_iter()
-        .find(|info| real(Path::new(&info.path)) == target)
+        .find(|info| crate::util::resolve_path(&info.path) == target)
 }
 
 /// Parse `git worktree list --porcelain` output.
