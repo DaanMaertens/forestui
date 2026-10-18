@@ -231,12 +231,12 @@ impl App {
                 let repo_id = flow.repo_id;
                 self.start_work_on_pull_request(repo_id, *item);
             }
-            ModalEffect::ConfirmSession { prompt } => {
+            ModalEffect::ConfirmSession { prompt, names } => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
                     return;
                 };
                 let repo_id = flow.repo_id;
-                self.start_session(repo_id, prompt);
+                self.start_session(repo_id, prompt, names);
             }
             ModalEffect::LaunchSession => self.launch_session(),
             ModalEffect::OpenWorktree(worktree_id) => {
@@ -781,15 +781,10 @@ impl App {
     /// Its link is never looked up — a prompt is not an identity, and the
     /// same words may well mean new work. What can collide is the names,
     /// and those are checked on Launch, once they are final.
-    fn start_session(&mut self, repo_id: Uuid, prompt: String) {
-        let Some(repo) = self.state.find_repository(repo_id) else {
+    fn start_session(&mut self, repo_id: Uuid, prompt: String, names: work::WorktreeNames) {
+        if self.state.find_repository(repo_id).is_none() {
             return;
-        };
-        let start_work = self.start_work_for(&repo.source_path);
-        let now = crate::modal::local_now();
-        let Some(names) = work::session_names(&start_work, now, &prompt) else {
-            return;
-        };
+        }
         self.pending_start = Some(PendingStart {
             item: WorkItem::Session { prompt },
             names,

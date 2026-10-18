@@ -101,7 +101,8 @@ const fn field(
     }
 }
 
-const LISTING: (&str, &str) = ("", "");
+/// A field whose section has no row labels.
+const NO_ROW: (&str, &str) = ("", "");
 const ISSUE: (&str, &str) = ("issue", NUMBER_SLUG);
 const FEATURE: (&str, &str) = ("feature", NUMBER_SLUG);
 const SESSION: (&str, &str) = ("session", SLUG);
@@ -116,14 +117,14 @@ pub const FIELDS: [Field; 16] = {
     use Kind::*;
     use Section::*;
     type M = StartWorkSettingsModal;
-    const UNSET: Field = field(&[], Text, Listing, LISTING, 0, "");
+    const UNSET: Field = field(&[], Text, Listing, NO_ROW, 0, "");
     let mut fields = [UNSET; 16];
-    fields[M::FOCUS_SCOPE] = field(&["scope"], Scope, Listing, LISTING, 0, "Default scope");
+    fields[M::FOCUS_SCOPE] = field(&["scope"], Scope, Listing, NO_ROW, 0, "Default scope");
     fields[M::FOCUS_FEATURE_LABELS] = field(
         &["feature_labels"],
         List,
         Listing,
-        LISTING,
+        NO_ROW,
         1,
         "Feature labels, comma-separated",
     );
@@ -180,7 +181,7 @@ pub const FIELDS: [Field; 16] = {
         &["session_naming", "enabled"],
         Toggle,
         Suggestion,
-        LISTING,
+        NO_ROW,
         0,
         "Suggest names",
     );
@@ -188,7 +189,7 @@ pub const FIELDS: [Field; 16] = {
         &["session_naming", "model"],
         Text,
         Suggestion,
-        LISTING,
+        NO_ROW,
         1,
         "Model",
     );
@@ -196,7 +197,7 @@ pub const FIELDS: [Field; 16] = {
         &["session_naming", "timeout_secs"],
         Count,
         Suggestion,
-        LISTING,
+        NO_ROW,
         2,
         "Timeout, seconds",
     );
@@ -204,11 +205,21 @@ pub const FIELDS: [Field; 16] = {
         &["session_naming", "allowed_tools"],
         List,
         Suggestion,
-        LISTING,
+        NO_ROW,
         3,
         "Allowed tools, comma-separated",
     );
     fields
+};
+
+// A `FOCUS_*` constant without its row would leave an unset field, with no
+// path to read or write, silently in the ring.
+const _: () = {
+    let mut i = 0;
+    while i < FIELDS.len() {
+        assert!(!FIELDS[i].path.is_empty(), "a FIELDS row is unset");
+        i += 1;
+    }
 };
 
 /// A field as the dialog holds it.
@@ -314,9 +325,15 @@ impl StartWorkSettingsModal {
                     let index = shown.and_then(|v| choice_index(field.kind, &v));
                     return FieldState::Choice(index);
                 }
-                let placeholder = match target {
-                    Target::Global => String::new(),
-                    Target::Repository { .. } => lookup(&inherited, field).unwrap_or_default(),
+                // An empty field inherits, so an empty value the file sets
+                // by hand would read as inherited; the placeholder says it
+                // is not. It stays in the file unless the field is edited.
+                let placeholder = match (&target, shown.as_deref()) {
+                    (Target::Global, _) => String::new(),
+                    (Target::Repository { .. }, Some("")) => {
+                        "(set empty in settings.json)".to_string()
+                    }
+                    (Target::Repository { .. }, _) => lookup(&inherited, field).unwrap_or_default(),
                 };
                 FieldState::Text(
                     TextInput::new(shown.unwrap_or_default()).with_placeholder(placeholder),
@@ -350,8 +367,9 @@ impl StartWorkSettingsModal {
     fn value(&self, index: usize) -> Option<String> {
         match (&self.fields[index], FIELDS[index].kind) {
             (FieldState::Text(input), _) => {
+                // Blank is empty: spaces alone are no override.
                 let value = input.value();
-                (!value.is_empty() || !self.is_repository()).then(|| value.to_string())
+                (!value.trim().is_empty() || !self.is_repository()).then(|| value.to_string())
             }
             (FieldState::Choice(choice), kind) => choice
                 .and_then(|i| kind.choices().get(i))

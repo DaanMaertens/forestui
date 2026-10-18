@@ -80,7 +80,12 @@ pub enum ModalEffect {
     ConfirmPullRequest(Box<WorkItem>),
     /// Start work was given a session prompt: open the confirm screen for
     /// it.
-    ConfirmSession { prompt: String },
+    /// `names` as the prompt step had them when Enter was pressed, so a
+    /// timestamp name is the one that was on screen.
+    ConfirmSession {
+        prompt: String,
+        names: WorktreeNames,
+    },
     /// Launch on a session's confirm screen. Its names were typed or
     /// suggested rather than derived from a work item, so they may be
     /// taken: the App checks them against the repository first and asks the
@@ -1479,10 +1484,12 @@ impl StartWorkModal {
                         // A pattern that names nothing goes nowhere; the
                         // field stays up to say so by not moving.
                         let prompt = self.typed_prompt();
-                        if work::session_names(&self.start_work, local_now(), &prompt).is_none() {
+                        let now = util::local_now();
+                        let Some(names) = work::session_names(&self.start_work, now, &prompt)
+                        else {
                             return ModalOutcome::None;
-                        }
-                        return ModalOutcome::Effect(ModalEffect::ConfirmSession { prompt });
+                        };
+                        return ModalOutcome::Effect(ModalEffect::ConfirmSession { prompt, names });
                     }
                 }
                 StartWorkStep::Clash | StartWorkStep::Worktree => {}
@@ -1934,11 +1941,6 @@ impl StartWorkConfirmModal {
             yolo: self.yolo,
         }
     }
-}
-
-/// The local wall clock, for names made from the time.
-pub fn local_now() -> chrono::NaiveDateTime {
-    chrono::Local::now().naive_local()
 }
 
 /// What a new branch stems from unless the user changes it: the base branch

@@ -34,7 +34,6 @@ pub enum BranchTarget {
     RefetchOpenModal,
 }
 
-/// A repository's branches, as one load saw them.
 /// How the Claude a new worktree was created for starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeStart {
@@ -45,6 +44,7 @@ pub struct ClaudeStart {
     pub yolo: bool,
 }
 
+/// A repository's branches, as one load saw them.
 #[derive(Debug, Clone, Default)]
 pub struct BranchList {
     /// Local and remote branches; remote ones keep their `<remote>/`.

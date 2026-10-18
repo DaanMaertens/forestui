@@ -277,6 +277,10 @@ impl App {
         key: RepoKey,
         changes: Vec<repo_settings::OverrideChange>,
     ) {
+        // Saved untouched: the file stays exactly as the user left it.
+        if changes.is_empty() {
+            return;
+        }
         let dir = key.dir(&settings_service::repos_dir());
         if let Err(error) = repo_settings::save_overrides(&dir, &changes) {
             self.notify(

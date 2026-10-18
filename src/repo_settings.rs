@@ -209,7 +209,10 @@ pub type OverrideChange = (&'static [&'static str], Option<Value>);
 
 /// `raw`, the settings file as it is (`None` for no file), with `changes`
 /// made to its `start_work` section and every other key left as it was. A
-/// section left with nothing in it is removed. `Ok(None)` when there is
+/// section left with nothing in it is removed. Keys come back sorted: the
+/// file goes through a `Value`, and keeping the user's order would mean
+/// `serde_json`'s `preserve_order`, which changes every JSON write forestui
+/// makes. `Ok(None)` when there is
 /// nothing to write: no file, and nothing to put in one.
 pub fn apply_overrides(
     raw: Option<&str>,

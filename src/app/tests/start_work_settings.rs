@@ -394,6 +394,8 @@ async fn typing_overrides_and_clearing_inherits() {
     assert_eq!(changes[0].0, ["issue", "branch_prefix"]);
     retype(&mut app, Dialog::FOCUS_ISSUE_PREFIX, "");
     assert!(dialog(&app).changes().is_empty());
+    retype(&mut app, Dialog::FOCUS_ISSUE_PREFIX, "   ");
+    assert!(dialog(&app).changes().is_empty(), "spaces are no override");
 
     focus(&mut app, Dialog::FOCUS_SCOPE);
     let mut seen = Vec::new();
@@ -485,6 +487,10 @@ async fn an_untouched_empty_override_stays_in_the_file() {
     repos.write("settings.json", r#"{"start_work": {"feature_labels": []}}"#);
     let (_dir, mut app, path) = app_with_issues(Vec::new());
     open_repository(&mut app, &path);
+    assert!(
+        rendered(&mut app).contains("(set empty in settings.json)"),
+        "an empty override does not pass for inherited"
+    );
     retype(&mut app, Dialog::FOCUS_NAMING_MODEL, "opus");
     save(&mut app);
 

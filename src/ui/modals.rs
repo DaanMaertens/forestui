@@ -968,7 +968,7 @@ fn start_work_prompt(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits
     );
     // What Enter would create, so the names are no surprise on the confirm
     // screen — and why Enter does nothing while there are none.
-    let now = crate::modal::local_now();
+    let now = util::local_now();
     let names = match work::session_names(&modal.start_work, now, modal.prompt.value()) {
         Some(names) => format!("Worktree: {}", names.worktree),
         None => "The session name pattern fills to nothing".to_string(),
