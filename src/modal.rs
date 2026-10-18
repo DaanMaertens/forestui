@@ -27,6 +27,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
+mod start_work_settings;
+pub use start_work_settings::{
+    FIELDS as START_WORK_FIELDS, FieldState, Kind as FieldKind, Section as FieldSection,
+    StartWorkSettingsModal, Target as StartWorkTarget,
+};
+
 pub const EDITORS: [(&str, &str); 10] = [
     ("VS Code", "code"),
     ("Cursor", "cursor"),
@@ -101,6 +107,9 @@ pub enum ModalEffect {
     /// Open one of a repository's settings files in an editor, writing it
     /// from the global version first if it has no file yet.
     EditRepositoryFile(RepoKey, ConfigFile),
+    /// Open the Start Work Settings dialog for a repository's overrides,
+    /// read from its settings file.
+    RepositoryStartWorkSettings(RepoKey),
 }
 
 /// What the integration dialog can do, given what is currently on disk.
@@ -236,6 +245,16 @@ pub enum ModalResult {
         yolo: bool,
     },
     SettingsSaved(Box<Settings>),
+    /// The global Start Work Settings dialog saved: these replace the
+    /// global Start work settings.
+    StartWorkSettingsSaved(Box<StartWorkSettings>),
+    /// A repository's Start Work Settings dialog saved: write these keys of
+    /// its `start_work` section — `None` removes one, inheriting again — and
+    /// leave every other key in the file as it is.
+    RepositoryStartWorkSaved {
+        key: RepoKey,
+        changes: Vec<crate::repo_settings::OverrideChange>,
+    },
     CustomButtonsSaved(Vec<CustomClaudeButton>),
     CustomButtonSaved(Box<CustomClaudeButton>),
     /// The theme picker committed a slug; the Settings modal underneath
@@ -283,6 +302,7 @@ pub enum Modal {
     EditButton(Box<EditButtonModal>),
     ThemePicker(ThemePickerModal),
     PromptTemplates(PromptTemplatesModal),
+    StartWorkSettings(Box<StartWorkSettingsModal>),
     ClaudeIntegration(ClaudeIntegrationModal),
     Confirm(ConfirmModal),
     RenameSession(RenameSessionModal),
@@ -312,6 +332,7 @@ impl Modal {
             Modal::EditButton(m) => m.handle_key(key),
             Modal::ThemePicker(m) => m.handle_key(key),
             Modal::PromptTemplates(m) => m.handle_key(key),
+            Modal::StartWorkSettings(m) => m.handle_key(key),
             Modal::ClaudeIntegration(m) => m.handle_key(key),
             Modal::Confirm(m) => m.handle_key(key),
             Modal::RenameSession(m) => m.handle_key(key),
@@ -333,6 +354,11 @@ impl Modal {
             }
             (Modal::Settings(parent), ModalResult::ThemeChosen(slug)) => {
                 parent.theme_slug = slug;
+            }
+            // Saved already; the dialog carries the new values so its own
+            // Save does not put the old ones back.
+            (Modal::Settings(parent), ModalResult::StartWorkSettingsSaved(start_work)) => {
+                parent.start_work = (**start_work).clone();
             }
             (Modal::Settings(parent), ModalResult::BackKeyPicked(key)) => {
                 parent.back_key = key.clone();
@@ -358,6 +384,7 @@ impl Modal {
             Modal::EditButton(m) => m.focus = index.min(EditButtonModal::FIELDS - 1),
             Modal::ThemePicker(m) => m.select(index),
             Modal::PromptTemplates(m) => m.select(index),
+            Modal::StartWorkSettings(m) => m.set_focus(index),
             Modal::ClaudeIntegration(m) => m.set_focus(index),
             Modal::CustomButtons(m) => {
                 if !m.buttons.is_empty() {
@@ -1976,8 +2003,9 @@ pub struct SettingsModal {
     /// it was answered for, so picking another key here drops it.
     back_key_accepted: Option<String>,
     opened_with_back_key: String,
-    /// Not edited here; carried through so saving the dialog keeps it.
-    start_work: StartWorkSettings,
+    /// Edited in its own dialog, which saves on its own; carried through so
+    /// saving this one keeps it.
+    pub start_work: StartWorkSettings,
     /// Not edited here either: the toggles live where the issues are listed.
     show_blocked_issues: bool,
     issue_filter: IssueFilter,
@@ -1997,13 +2025,14 @@ impl SettingsModal {
     pub const FOCUS_PREFIX: usize = 1;
     pub const FOCUS_THEME: usize = 2;
     pub const FOCUS_MANAGE: usize = 3;
-    pub const FOCUS_TEMPLATES: usize = 4;
-    pub const FOCUS_BACK_KEY: usize = 5;
-    pub const FOCUS_BACK_KEY_CHANGE: usize = 6;
-    pub const FOCUS_INTEGRATION: usize = 7;
-    pub const FOCUS_REMOTE_CONTROL: usize = 8;
-    pub const FOCUS_SAVE: usize = 9;
-    pub const FOCUS_CANCEL: usize = 10;
+    pub const FOCUS_START_WORK: usize = 4;
+    pub const FOCUS_TEMPLATES: usize = 5;
+    pub const FOCUS_BACK_KEY: usize = 6;
+    pub const FOCUS_BACK_KEY_CHANGE: usize = 7;
+    pub const FOCUS_INTEGRATION: usize = 8;
+    pub const FOCUS_REMOTE_CONTROL: usize = 9;
+    pub const FOCUS_SAVE: usize = 10;
+    pub const FOCUS_CANCEL: usize = 11;
     pub const FIELDS: usize = Self::FOCUS_CANCEL + 1;
 
     pub fn new(settings: &Settings) -> Self {
@@ -2123,6 +2152,11 @@ impl SettingsModal {
             (Self::FOCUS_TEMPLATES, KeyCode::Enter) => ModalOutcome::Push(Box::new(
                 Modal::PromptTemplates(PromptTemplatesModal::new()),
             )),
+            (Self::FOCUS_START_WORK, KeyCode::Enter) => {
+                ModalOutcome::Push(Box::new(Modal::StartWorkSettings(Box::new(
+                    StartWorkSettingsModal::global(&self.start_work),
+                ))))
+            }
             (Self::FOCUS_CANCEL, KeyCode::Enter) => self.close_without_saving(),
             (_, KeyCode::Enter) => {
                 ModalOutcome::Submit(ModalResult::SettingsSaved(Box::new(self.to_settings())))
@@ -2241,8 +2275,8 @@ impl PromptTemplatesModal {
     /// The files listed, in order. Only a repository lists a settings file:
     /// the global `settings.json` is the app's to write — every Settings
     /// save and checkbox toggle rewrites it — so an editor open on it would
-    /// race those writes, and its `start_work` section is edited by hand
-    /// with forestui closed.
+    /// race those writes, and its `start_work` section has a dialog of its
+    /// own. A repository's row opens that dialog too, for its overrides.
     pub fn rows(&self) -> Vec<ConfigFile> {
         let settings = self.repo.as_ref().map(|_| ConfigFile::Settings);
         settings
@@ -2272,6 +2306,10 @@ impl PromptTemplatesModal {
             KeyCode::End => self.select(len - 1),
             KeyCode::Enter => {
                 let effect = match (&self.repo, self.selected()) {
+                    // Edited in the dialog, which keeps the editor a button away.
+                    (Some(repo), ConfigFile::Settings) => {
+                        ModalEffect::RepositoryStartWorkSettings(repo.clone())
+                    }
                     (Some(repo), file) => ModalEffect::EditRepositoryFile(repo.clone(), file),
                     (None, ConfigFile::Template(template)) => ModalEffect::EditTemplate(template),
                     (None, ConfigFile::Settings) => return ModalOutcome::None,

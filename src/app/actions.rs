@@ -274,6 +274,9 @@ impl App {
             ModalEffect::ListScope(path) => self.list_for_flow(&path),
             ModalEffect::EditTemplate(template) => self.edit_template(template),
             ModalEffect::EditRepositoryFile(key, file) => self.edit_repository_file(key, file),
+            ModalEffect::RepositoryStartWorkSettings(key) => {
+                self.open_repository_start_work_settings(key)
+            }
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
                 let tx = self.tx.clone();
@@ -349,6 +352,12 @@ impl App {
                 if back_key_moved {
                     self.apply_back_key();
                 }
+            }
+            ModalResult::StartWorkSettingsSaved(start_work) => {
+                self.save_global_start_work(*start_work)
+            }
+            ModalResult::RepositoryStartWorkSaved { key, changes } => {
+                self.save_repository_start_work(key, changes)
             }
             ModalResult::BackKeyAnswered(answer) => self.answer_back_key(answer),
             // The picker already applied the theme live and `receive_child`

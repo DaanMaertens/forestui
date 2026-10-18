@@ -394,8 +394,18 @@ settings and templates for that repository alone, in
 `~/.config/forestui/repos/<owner>/<name>/` (a `settings.json` read only for
 its `start_work` section, plus a `prompts/` directory). Nothing is written
 inside a checkout. The key is the `owner/name` that `gh` resolves for the
-clone (see `gh repo set-default`). Each file is created from the global
+clone (see `gh repo set-default`). Each template is created from the global
 version on first use.
+
+Its **Start work settings** row opens the Start Work Settings dialog for
+that repository. Every field there either inherits the global value, shown
+dimmed in an empty field, or overrides it: type to override, clear the field
+to inherit again, and cycle a toggle through **Inherit** and its values.
+Saving writes only the overridden keys and keeps everything else in the
+file; a file that does not parse is never written over. **Edit
+settings.json...** opens the file itself, written from the global settings
+if it does not exist yet. An explicitly empty override, such as
+`"feature_labels": []`, can only be written in the file.
 
 ### Pruning finished worktrees
 
@@ -474,7 +484,9 @@ Settings are stored in `~/.config/forestui/settings.json`:
 
 Press `S` in the app to open the settings modal.
 
-`start_work` configures Start work (`s`) and is edited in the file:
+`start_work` configures Start work (`s`). Settings → **Start Work
+Settings...** edits every key below except `bug_labels`, so the file rarely
+needs touching:
 
 - `scope` — `mine` lists issues assigned to or opened by you and PRs with a
   review requested from you or opened by you; `all` lists every open one.

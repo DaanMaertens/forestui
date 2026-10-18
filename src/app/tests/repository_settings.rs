@@ -1,47 +1,5 @@
 use super::*;
 
-/// This test thread's repository settings directory, removed again on drop
-/// so a file written by one test cannot reach another run.
-struct ReposDir(PathBuf);
-
-impl ReposDir {
-    fn new() -> Self {
-        let dir = settings_service::repos_dir();
-        let _ = std::fs::remove_dir_all(&dir);
-        Self(dir)
-    }
-
-    /// The directory of the repository every test here resolves to.
-    fn repo(&self) -> PathBuf {
-        test_key().dir(&self.0)
-    }
-
-    fn write(&self, relative: &str, contents: &str) {
-        let path = self.repo().join(relative);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, contents).unwrap();
-    }
-}
-
-impl Drop for ReposDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_key() -> crate::repo_settings::RepoKey {
-    crate::repo_settings::RepoKey::new("octo", "demo").unwrap()
-}
-
-/// What the probe reports for a checkout that resolves to `octo/demo`.
-fn on_github(app: &mut App, path: &str) {
-    app.handle_event(AppEvent::GitHubChecked {
-        path: path.to_string(),
-        repo: Some(test_key()),
-        for_start_work: false,
-    });
-}
-
 fn repository_settings_control(app: &App) -> (usize, bool) {
     let items = detail::items(&detail::content(app));
     let index = items
@@ -108,6 +66,11 @@ async fn repository_settings_prefill_the_chosen_file_outside_the_checkout() {
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(template_picker(&app).selected(), ConfigFile::Settings);
     app.handle_key(key(KeyCode::Enter));
+    // The row opens the dialog; its Edit settings.json... is the editor.
+    if let Some(modal) = app.modals.last_mut() {
+        modal.set_focus(crate::modal::StartWorkSettingsModal::FOCUS_EDIT_FILE);
+    }
+    app.handle_key(key(KeyCode::Enter));
 
     let written = repos.repo().join("settings.json");
     let loaded = crate::repo_settings::load(&repos.repo());
@@ -121,6 +84,7 @@ async fn repository_settings_prefill_the_chosen_file_outside_the_checkout() {
 
     // A template is pre-filled from the global one, here the built-in
     // default, and lands in the repository's own prompts directory.
+    app.handle_key(key(KeyCode::Esc));
     app.handle_key(key(KeyCode::Down));
     assert_eq!(
         template_picker(&app).selected(),

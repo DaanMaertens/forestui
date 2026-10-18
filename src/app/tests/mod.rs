@@ -24,6 +24,7 @@ mod session_states;
 mod sessions;
 mod start_work;
 mod start_work_scope;
+mod start_work_settings;
 mod update_notice;
 mod worktrees;
 
@@ -352,4 +353,46 @@ fn template_picker(app: &App) -> &crate::modal::PromptTemplatesModal {
         Some(Modal::PromptTemplates(picker)) => picker,
         other => panic!("the template picker expected, found {other:?}"),
     }
+}
+
+/// This test thread's repository settings directory, removed again on drop
+/// so a file written by one test cannot reach another run.
+struct ReposDir(PathBuf);
+
+impl ReposDir {
+    fn new() -> Self {
+        let dir = crate::services::settings::repos_dir();
+        let _ = std::fs::remove_dir_all(&dir);
+        Self(dir)
+    }
+
+    /// The directory of the repository every test here resolves to.
+    fn repo(&self) -> PathBuf {
+        test_key().dir(&self.0)
+    }
+
+    fn write(&self, relative: &str, contents: &str) {
+        let path = self.repo().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+}
+
+impl Drop for ReposDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn test_key() -> crate::repo_settings::RepoKey {
+    crate::repo_settings::RepoKey::new("octo", "demo").unwrap()
+}
+
+/// What the probe reports for a checkout that resolves to `octo/demo`.
+fn on_github(app: &mut App, path: &str) {
+    app.handle_event(AppEvent::GitHubChecked {
+        path: path.to_string(),
+        repo: Some(test_key()),
+        for_start_work: false,
+    });
 }

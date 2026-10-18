@@ -43,6 +43,13 @@
 2. Update `SettingsModal` in `src/modal.rs` and its rendering in `src/ui/modals.rs`
 3. Settings are persisted to `~/.config/forestui/settings.json`
 
+A Start work setting goes in the Start Work Settings dialog instead
+(`src/modal/start_work_settings.rs`): add a `FOCUS_*` constant and a row in
+`FIELDS` giving its path in the `start_work` section, its kind and its grid
+slot. Loading, the inherited placeholder, validation, the global save and a
+repository's overrides all follow from that row, in both of the dialog's
+modes.
+
 Start work settings and prompt templates can also be overridden per
 repository, under `~/.config/forestui/repos/<owner>/<name>/` (a
 `settings.json` read only for its `start_work` section, plus a `prompts/`

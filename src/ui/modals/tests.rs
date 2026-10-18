@@ -197,6 +197,20 @@ fn every_modal() -> Vec<(Modal, &'static str)> {
             "Prompt Templates",
         ),
         (
+            Modal::StartWorkSettings(Box::new(crate::modal::StartWorkSettingsModal::global(
+                &Settings::default().start_work,
+            ))),
+            "Start Work Settings",
+        ),
+        (
+            Modal::StartWorkSettings(Box::new(crate::modal::StartWorkSettingsModal::repository(
+                crate::repo_settings::RepoKey::new("octo", "demo").unwrap(),
+                &Settings::default().start_work,
+                Err("settings.json does not parse".into()),
+            ))),
+            "Start Work Settings: octo/demo",
+        ),
+        (
             Modal::Confirm(ConfirmModal::new(
                 "Delete Worktree",
                 "This cannot be undone.",
@@ -411,6 +425,10 @@ fn clicking_a_modal_control_maps_to_its_focus_index() {
         ("feat/", SettingsModal::FOCUS_PREFIX),
         ("│ Forest Dark… │", SettingsModal::FOCUS_THEME),
         ("│ Manage Custom Buttons... │", SettingsModal::FOCUS_MANAGE),
+        (
+            "│ Start Work Settings... │",
+            SettingsModal::FOCUS_START_WORK,
+        ),
         (
             "│ Edit Prompt Templates... │",
             SettingsModal::FOCUS_TEMPLATES,
