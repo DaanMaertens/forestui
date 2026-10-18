@@ -795,6 +795,9 @@ pub fn claude_command_line(
     // ahead of it can take it as its own. Line breaks and tabs become spaces
     // here rather than being stripped by `single_line` below, so a template's
     // paragraphs do not run their words together.
+    //
+    // A blank prompt is none: an empty positional would hand Claude an empty
+    // message to answer.
     if let Some(prompt) = launch.first_prompt {
         let flat = prompt
             .split(char::is_control)
@@ -802,7 +805,9 @@ pub fn claude_command_line(
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
             .join(" ");
-        cmd.push_str(&format!(" {}", sh_quote(&flat)));
+        if !flat.is_empty() {
+            cmd.push_str(&format!(" {}", sh_quote(&flat)));
+        }
     }
     single_line(&cmd)
 }

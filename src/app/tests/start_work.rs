@@ -409,8 +409,8 @@ async fn launch_submits_what_the_confirm_screen_shows() {
     assert_eq!(branch, "fix/issue-42-fix-login-bug");
     assert!(pull_first);
     assert_eq!(base_branch.as_deref(), Some("origin/main"));
-    assert_eq!(first_prompt, shown);
-    assert!(first_prompt.contains("`issue-42-fix-login-bug-2`"));
+    assert_eq!(first_prompt.as_deref(), Some(shown.as_str()));
+    assert!(shown.contains("`issue-42-fix-login-bug-2`"));
 }
 
 /// Edit prompt hands the text to an editor; what comes back is what
@@ -440,7 +440,10 @@ async fn an_edited_prompt_is_what_launches() {
     else {
         panic!("a launch from the issue expected");
     };
-    assert_eq!(first_prompt, "Only fix the login bug.\n\nNothing else.");
+    assert_eq!(
+        first_prompt.as_deref(),
+        Some("Only fix the login bug.\n\nNothing else.")
+    );
 
     // The built-in template is what a fresh confirm screen fills again.
     app.modals.clear();

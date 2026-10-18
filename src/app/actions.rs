@@ -7,7 +7,7 @@
 
 use super::{Action, App, Field, PendingJump, PendingStart};
 use crate::event::Severity;
-use crate::event::{AppEvent, BranchList, BranchTarget, EventTx};
+use crate::event::{AppEvent, BranchList, BranchTarget, ClaudeStart, EventTx};
 use crate::modal::{BackKeyAnswer, IntegrationAction, ModalOutcome};
 use crate::modal::{
     Clash, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult, PromptTemplatesModal,
@@ -27,7 +27,7 @@ use uuid::Uuid;
 /// first message Claude is started with once it exists.
 struct WorkStart {
     link: WorkItemLink,
-    first_prompt: String,
+    first_prompt: Option<String>,
     /// Start that Claude with the built-in YOLO flag.
     yolo: bool,
 }
@@ -777,7 +777,8 @@ impl App {
             return;
         };
         let start_work = self.start_work_for(&repo.source_path);
-        let Some(names) = work::session_names(&start_work, &prompt) else {
+        let now = crate::modal::local_now();
+        let Some(names) = work::session_names(&start_work, now, &prompt) else {
             return;
         };
         self.pending_start = Some(PendingStart {
@@ -1711,17 +1712,17 @@ impl App {
                     };
                 let mut worktree =
                     Worktree::new(name, branch, worktree_path.to_string_lossy().to_string());
-                let (yolo, first_prompt) = start
-                    .map(|start| {
-                        worktree.work_item = Some(start.link);
-                        (start.yolo, Some(start.first_prompt))
-                    })
-                    .unwrap_or_default();
+                let claude = start.map(|start| {
+                    worktree.work_item = Some(start.link);
+                    ClaudeStart {
+                        first_prompt: start.first_prompt,
+                        yolo: start.yolo,
+                    }
+                });
                 tx.send(AppEvent::WorktreeAdded {
                     create,
                     worktree: Box::new(worktree),
-                    first_prompt,
-                    yolo,
+                    claude,
                 });
             });
             return;
@@ -1771,16 +1772,18 @@ impl App {
             );
             worktree.base_branch = base;
             worktree.created_from_ref = base_ref;
-            let yolo = start.as_ref().is_some_and(|start| start.yolo);
-            let (work_item, first_prompt) =
-                start.map(|start| (start.link, start.first_prompt)).unzip();
-            worktree.work_item = work_item;
+            let claude = start.map(|start| {
+                worktree.work_item = Some(start.link);
+                ClaudeStart {
+                    first_prompt: start.first_prompt,
+                    yolo: start.yolo,
+                }
+            });
 
             tx.send(AppEvent::WorktreeAdded {
                 create,
                 worktree: Box::new(worktree),
-                first_prompt,
-                yolo,
+                claude,
             });
         });
     }

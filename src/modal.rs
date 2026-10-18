@@ -229,8 +229,9 @@ pub enum ModalResult {
         branch: String,
         pull_first: bool,
         base_branch: Option<String>,
-        /// The prompt as the confirm screen showed it.
-        first_prompt: String,
+        /// The prompt as the confirm screen showed it; `None` for a blank
+        /// session prompt, which starts Claude with no first message.
+        first_prompt: Option<String>,
         /// Start Claude with the built-in YOLO flag.
         yolo: bool,
     },
@@ -1448,10 +1449,10 @@ impl StartWorkModal {
                         return ModalOutcome::None;
                     }
                     if key.code == KeyCode::Enter {
-                        // Words with nothing to name a worktree after go
-                        // nowhere; the field stays up to say so by not moving.
+                        // A pattern that names nothing goes nowhere; the
+                        // field stays up to say so by not moving.
                         let prompt = self.typed_prompt();
-                        if work::session_names(&self.start_work, &prompt).is_none() {
+                        if work::session_names(&self.start_work, local_now(), &prompt).is_none() {
                             return ModalOutcome::None;
                         }
                         return ModalOutcome::Effect(ModalEffect::ConfirmSession { prompt });
@@ -1727,6 +1728,19 @@ impl StartWorkConfirmModal {
         )
     }
 
+    /// What Claude is started with: [`Self::prompt`], except for a blank
+    /// session prompt left unedited, which starts Claude with nothing — a
+    /// `session.md` wraps a prompt, and there is none to wrap.
+    pub fn first_prompt(&self) -> Option<String> {
+        if self.edited_prompt.is_none()
+            && let WorkItem::Session { prompt } = &self.item
+            && prompt.trim().is_empty()
+        {
+            return None;
+        }
+        Some(self.prompt()).filter(|prompt| !prompt.trim().is_empty())
+    }
+
     /// The inline suggestion shown after the typed base branch.
     pub fn base_suggestion(&self) -> Option<String> {
         let value = self.base_branch.value();
@@ -1889,10 +1903,15 @@ impl StartWorkConfirmModal {
             branch: names.branch,
             pull_first: self.pull_first && !review,
             base_branch: (!base.is_empty() && !review).then_some(base),
-            first_prompt: self.prompt(),
+            first_prompt: self.first_prompt(),
             yolo: self.yolo,
         }
     }
+}
+
+/// The local wall clock, for names made from the time.
+pub fn local_now() -> chrono::NaiveDateTime {
+    chrono::Local::now().naive_local()
 }
 
 /// What a new branch stems from unless the user changes it: the base branch

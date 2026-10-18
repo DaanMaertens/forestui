@@ -252,15 +252,30 @@ pub fn title_slug(title: &str) -> String {
 /// be cut off mid-word by the cap anyway.
 const SESSION_WORDS: usize = 6;
 
+/// How a session with nothing to name it after is named instead: the
+/// minute it was started, which is unique enough and sorts.
+const SESSION_TIMESTAMP: &str = "%Y%m%d-%H%M";
+
 /// Name the worktree and branch for a session, by the `session` naming —
 /// `session-<slug>` on `session/<slug>` by default — from the prompt's first
-/// words. `None` when they hold nothing a name can be made of, or the
-/// pattern fills to nothing: a bare prefix would be shared by every such
-/// prompt. A pattern without `{slug}` names them all alike too; the clash
-/// question is what catches that.
-pub fn session_names(settings: &StartWorkSettings, prompt: &str) -> Option<WorktreeNames> {
+/// words, or from `now` when they hold nothing a name can be made of: a
+/// blank prompt is a fresh worktree to talk to Claude in, and still needs a
+/// name of its own. `None` only when the pattern fills to nothing: a bare
+/// prefix would be shared by every session. A pattern without `{slug}`
+/// names them all alike too; the clash question is what catches that.
+pub fn session_names(
+    settings: &StartWorkSettings,
+    now: chrono::NaiveDateTime,
+    prompt: &str,
+) -> Option<WorktreeNames> {
     let first_words: Vec<&str> = prompt.split_whitespace().take(SESSION_WORDS).collect();
-    session_names_for_slug(settings, &title_slug(&first_words.join(" ")))
+    let slug = title_slug(&first_words.join(" "));
+    let slug = if slug.is_empty() {
+        now.format(SESSION_TIMESTAMP).to_string()
+    } else {
+        slug
+    };
+    session_names_for_slug(settings, &slug)
 }
 
 /// Name the worktree and branch for a session from a name suggestion's

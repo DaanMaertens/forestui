@@ -965,9 +965,10 @@ fn start_work_prompt(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits
     );
     // What Enter would create, so the names are no surprise on the confirm
     // screen — and why Enter does nothing while there are none.
-    let names = match work::session_names(&modal.start_work, modal.prompt.value()) {
+    let now = crate::modal::local_now();
+    let names = match work::session_names(&modal.start_work, now, modal.prompt.value()) {
         Some(names) => format!("Worktree: {}", names.worktree),
-        None => "Type a few words to name the worktree after".to_string(),
+        None => "The session name pattern fills to nothing".to_string(),
     };
     column.text(frame, names, theme::muted());
     column.text(
@@ -1058,8 +1059,12 @@ fn start_work_confirm(
     let room = (area.height.saturating_mul(95) / 100)
         .saturating_sub(body)
         .max(MIN_PROMPT_ROWS) as usize;
-    let mut prompt: Vec<String> = modal
-        .prompt()
+    // A blank session prompt starts Claude with nothing; saying so beats an
+    // empty box that reads like a prompt failed to fill.
+    let text = modal
+        .first_prompt()
+        .unwrap_or_else(|| "No first prompt: Claude starts ready to talk to.".to_string());
+    let mut prompt: Vec<String> = text
         .lines()
         .flat_map(|line| {
             let wrapped = super::wrap_words(line, width);

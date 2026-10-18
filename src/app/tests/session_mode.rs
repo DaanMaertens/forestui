@@ -146,16 +146,6 @@ async fn an_old_free_feature_template_is_not_used() {
     assert_eq!(confirm_screen(&app).prompt(), "Dark mode\n");
 }
 
-/// A prompt with nothing to name a worktree after cannot be confirmed.
-#[tokio::test]
-async fn an_unnameable_prompt_goes_nowhere() {
-    let (_dir, mut app, _) = app_with_issues(Vec::new());
-    type_session_prompt(&mut app, "???");
-
-    assert!(app.pending_start.is_none());
-    assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Prompt);
-}
-
 /// Esc and Back from the prompt both return to the mode step, with
 /// `session` still highlighted.
 #[tokio::test]
@@ -554,15 +544,145 @@ async fn a_disabled_suggestion_makes_no_call() {
 /// Nothing is spent on a blank prompt.
 #[tokio::test]
 async fn a_blank_prompt_makes_no_call() {
-    let (_dir, mut app, path) = app_with_issues(Vec::new());
+    let (_dir, app, path) = app_with_issues(Vec::new());
     assert!(app.session_name_call(&path, "  \n ").is_none());
-    type_session_prompt(&mut app, "   ");
-    assert!(app.pending_start.is_none());
+}
+
+/// Whether `name` is `<prefix>` then a `YYYYMMDD-HHMM` timestamp.
+fn is_timestamped(name: &str, prefix: &str) -> bool {
+    let Some(stamp) = name.strip_prefix(prefix) else {
+        return false;
+    };
+    let (date, time) = stamp.split_once('-').unwrap_or_default();
+    date.len() == 8
+        && time.len() == 4
+        && date.chars().chain(time.chars()).all(|c| c.is_ascii_digit())
+}
+
+/// A blank prompt is a fresh worktree to talk to Claude in: the confirm
+/// screen opens with a timestamp name, through the session naming, that
+/// can still be edited — and no suggestion is asked for nothing.
+#[tokio::test]
+async fn a_blank_prompt_confirms_with_timestamp_names() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    confirm_session(&mut app, "   ");
+
+    let confirm = confirm_screen(&app);
     assert!(
-        !app.modals
-            .iter()
-            .any(|m| matches!(m, Modal::StartWorkConfirm(_)))
+        is_timestamped(confirm.name.value(), "session-"),
+        "{}",
+        confirm.name.value()
     );
+    assert!(
+        is_timestamped(confirm.branch.value(), "session/"),
+        "{}",
+        confirm.branch.value()
+    );
+    assert!(confirm.name_request.is_none(), "no call for a blank prompt");
+    let screen = rendered(&mut app);
+    assert!(screen.contains("No first prompt"), "{screen}");
+
+    if let Some(modal) = app.modals.last_mut() {
+        modal.set_focus(crate::modal::StartWorkConfirmModal::FOCUS_NAME);
+    }
+    type_text(&mut app, "x");
+    assert!(confirm_screen(&app).name.value().ends_with('x'));
+}
+
+/// Words with nothing to slug still get a name, so Enter never stalls.
+#[tokio::test]
+async fn an_unnameable_prompt_gets_timestamp_names() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    confirm_session(&mut app, "???");
+
+    let confirm = confirm_screen(&app);
+    assert!(is_timestamped(confirm.name.value(), "session-"));
+    assert_eq!(confirm.prompt(), "???\n");
+}
+
+/// A blank prompt launches with no first prompt at all — never an empty
+/// one — and links the worktree to the empty prompt.
+#[tokio::test]
+async fn a_blank_prompt_launches_with_no_first_prompt() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    confirm_session(&mut app, "");
+
+    let crate::modal::ModalResult::WorktreeForWorkItem {
+        link, first_prompt, ..
+    } = confirm_screen(&app).launch()
+    else {
+        panic!("a launch expected");
+    };
+    assert_eq!(first_prompt, None);
+    assert_eq!(
+        link,
+        WorkItemLink::Session {
+            prompt: String::new()
+        }
+    );
+}
+
+/// A blank prompt with a standing-instructions `session.md` still starts
+/// Claude with nothing: the template wraps a prompt, and there is none.
+#[tokio::test]
+async fn a_blank_prompt_ignores_a_session_template() {
+    let prompts = PromptsDir::new();
+    prompts.write(
+        crate::prompt::Template::Session,
+        b"You are in {worktree}.\n\n{body}",
+    );
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    confirm_session(&mut app, "");
+
+    let crate::modal::ModalResult::WorktreeForWorkItem { first_prompt, .. } =
+        confirm_screen(&app).launch()
+    else {
+        panic!("a launch expected");
+    };
+    assert_eq!(first_prompt, None);
+}
+
+/// Claude starts in the new worktree even with no first prompt; before,
+/// only a prompt started it.
+#[tokio::test]
+async fn a_created_worktree_starts_claude_without_a_first_prompt() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    let repo_id = app.state.repositories()[0].id;
+    let worktree = crate::models::Worktree::new(
+        "session-20261011-1432".into(),
+        "session/20261011-1432".into(),
+        "/tmp/session-20261011-1432".into(),
+    );
+    let create = app.worktree_sync.begin_create(repo_id);
+    app.handle_event(AppEvent::WorktreeAdded {
+        create,
+        worktree: Box::new(worktree),
+        claude: Some(crate::event::ClaudeStart {
+            first_prompt: None,
+            yolo: false,
+        }),
+    });
+
+    // The test build has no tmux, so the attempt is what shows.
+    assert_eq!(
+        app.notifications.last().map(|n| n.text.as_str()),
+        Some("Failed to create Claude window")
+    );
+}
+
+/// Timestamp names clash like any others.
+#[tokio::test]
+async fn a_taken_timestamp_name_asks_what_to_do() {
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    confirm_session(&mut app, "");
+    let name = confirm_screen(&app).name.value().to_string();
+    take_slug(&mut app, &name);
+    launch(&mut app);
+
+    let flow = start_work(&app);
+    assert_eq!(flow.step, crate::modal::StartWorkStep::Clash);
+    let clash = flow.clash.as_ref().expect("a clash");
+    assert_eq!(clash.copy.worktree, format!("{name}-2"));
 }
 
 /// The call sends the `session-name` template, a global override if there

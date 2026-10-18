@@ -35,6 +35,16 @@ pub enum BranchTarget {
 }
 
 /// A repository's branches, as one load saw them.
+/// How the Claude a new worktree was created for starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeStart {
+    /// Its first message; none for a blank session prompt, which starts
+    /// Claude ready to be talked to.
+    pub first_prompt: Option<String>,
+    /// The built-in YOLO flag.
+    pub yolo: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct BranchList {
     /// Local and remote branches; remote ones keep their `<remote>/`.
@@ -165,11 +175,9 @@ pub enum AppEvent {
     WorktreeAdded {
         create: CreateTicket,
         worktree: Box<Worktree>,
-        /// Start Claude in the new worktree with this as its first message.
-        /// Launched by the fold, so a result it drops starts nothing.
-        first_prompt: Option<String>,
-        /// That launch uses the built-in YOLO flag.
-        yolo: bool,
+        /// Start Claude in the new worktree. Launched by the fold, so a
+        /// result it drops starts nothing.
+        claude: Option<ClaudeStart>,
     },
     /// A create task ended without a worktree. The error itself was already
     /// notified; this hands the ticket back so the create stops holding back

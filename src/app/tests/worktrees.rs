@@ -280,8 +280,7 @@ async fn a_created_worktree_is_folded_into_state_and_selected() {
     app.handle_event(AppEvent::WorktreeAdded {
         create,
         worktree: Box::new(worktree),
-        first_prompt: None,
-        yolo: false,
+        claude: None,
     });
 
     assert!(app.state.find_worktree(worktree_id).is_some());
@@ -321,8 +320,7 @@ async fn a_created_worktrees_work_item_link_survives_scans_and_renames() {
     app.handle_event(AppEvent::WorktreeAdded {
         create,
         worktree: Box::new(worktree),
-        first_prompt: None,
-        yolo: false,
+        claude: None,
     });
     let link = |app: &App| {
         app.state
@@ -377,8 +375,7 @@ async fn a_worktree_that_could_not_be_saved_is_not_announced_as_created() {
     app.handle_event(AppEvent::WorktreeAdded {
         create,
         worktree: Box::new(worktree),
-        first_prompt: None,
-        yolo: false,
+        claude: None,
     });
 
     let last = app.notifications.last().expect("a toast");
@@ -415,8 +412,7 @@ async fn a_worktree_for_a_removed_repository_is_dropped() {
     app.handle_event(AppEvent::WorktreeAdded {
         create,
         worktree: Box::new(worktree),
-        first_prompt: None,
-        yolo: false,
+        claude: None,
     });
 
     assert!(app.state.find_worktree(worktree_id).is_none());

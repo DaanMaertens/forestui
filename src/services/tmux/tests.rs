@@ -292,6 +292,23 @@ fn a_first_prompt_is_quoted_flattened_and_last() {
     );
 }
 
+/// A blank first prompt is no first prompt: Claude must never be handed
+/// an empty positional argument to answer.
+#[test]
+fn a_blank_first_prompt_adds_nothing() {
+    for blank in ["", "  ", "\n\t\r\n"] {
+        let launch = ClaudeLaunch {
+            first_prompt: Some(blank),
+            ..ClaudeLaunch::default()
+        };
+        assert_eq!(
+            claude_command_line(&launch, "session-1", Some("id-1")),
+            "claude -n 'session-1' --session-id 'id-1'",
+            "{blank:?}"
+        );
+    }
+}
+
 /// Start work's yolo toggle: the YOLO flag leads, the prompt still ends
 /// the line, and the up arrow resumes in YOLO without the prompt.
 #[test]

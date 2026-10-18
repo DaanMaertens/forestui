@@ -327,7 +327,10 @@ work in three steps:
    reads the whole prompt in the background and suggests a better name. The
    suggestion replaces both names when it arrives, unless you have edited
    either one already; a failed or slow call just leaves the first-words
-   names. You can launch at any time. If the names on screen are taken when
+   names. You can launch at any time. Leave the prompt blank for a fresh
+   worktree named for the minute it was started (`session-20261011-1432`),
+   with Claude running in it and no first prompt, ready to talk to. If the
+   names on screen are taken when
    you launch, forestui asks whether to open the existing worktree, create a
    copy, or edit the name.
 3. **Confirm** the worktree name, branch, base branch (with **Pull repo
