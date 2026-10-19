@@ -14,7 +14,7 @@
 
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
-                              │   Start Work: Session                                                        │
+                              │   Start Work: Single Session                                                 │
                               │                                                                              │
                               │  in beta                                                                     │
                               │  A worktree named 'session-caching-spike' already exists.                    │

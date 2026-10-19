@@ -902,8 +902,8 @@ fi
 
 # --- UC-103: Start work for a session ------------------------------------------
 #
-# Rust only, after UC-101. `session` goes from the mode step straight to the
-# prompt; the prompt's first words name the worktree until the name
+# Rust only, after UC-101. `single session` goes from the mode step straight
+# to the prompt; the prompt's first words name the worktree until the name
 # suggestion (the stub's `caching-spike`) replaces them. The prompt is the
 # whole first prompt (the `session` template is `{body}`), and is what the
 # worktree's link records, under the free-text feature's wire format. Nothing
@@ -915,8 +915,8 @@ if [ "$LABEL" = "rust" ]; then
   await "Repository: beta"
   press s; await "Work Mode"; sleep 0.8
   capture UC-103 session-mode
-  assert UC-103 session-listed "yes" \
-    "$(screen_has 'session +A Claude session for anything else')"
+  assert UC-103 single-session-listed "yes" \
+    "$(screen_has 'single session +A Claude session for anything else')"
   press Down Enter; await "Prompt"; sleep 0.8
   type_ "Try a quick spike on caching"; sleep 0.5
   await "Worktree: session-try-a-quick-spike-on-caching"
@@ -928,7 +928,7 @@ if [ "$LABEL" = "rust" ]; then
   await "session/caching-spike" 15000; sleep 0.8
   capture UC-103 session-confirm
   assert UC-103 suggestion-stopped-spinning "no" "$(screen_has 'suggesting a name')"
-  assert UC-103 titled-as-session "yes" "$(screen_has 'Start Work: Session')"
+  assert UC-103 titled-as-single-session "yes" "$(screen_has 'Start Work: Single Session')"
   assert UC-103 prompt-carries-the-prompt "yes" "$(screen_has 'Try a quick spike on caching')"
   assert UC-103 prompt-reads-no-issue "no" "$(screen_has 'gh issue view')"
   assert UC-103 prompt-asks-for-no-plan "no" "$(screen_has 'approved the plan')"

@@ -6,7 +6,7 @@
 
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
-                              │   Start Work: Session                                                        │
+                              │   Start Work: Single Session                                                 │
                               │                                                                              │
                               │  Try a quick spike on caching                                                │
                               │  Worktree Name                                                               │
