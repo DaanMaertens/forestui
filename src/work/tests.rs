@@ -123,9 +123,12 @@ fn a_feature_label_makes_an_issue_a_feature() {
 /// The mode step offers the kinds of work, with no separate `feature`:
 /// every issue is under `issue`.
 #[test]
-fn the_mode_step_lists_issue_session_pr_review_worktree() {
+fn the_mode_step_lists_issue_single_session_pr_review_worktree() {
     let labels: Vec<_> = WorkMode::ALL.iter().map(|m| m.label()).collect();
-    assert_eq!(labels, vec!["issue", "session", "pr-review", "worktree"]);
+    assert_eq!(
+        labels,
+        vec!["issue", "single session", "pr-review", "worktree"]
+    );
 }
 
 /// `issue` lists every issue, feature or not, in its own order.

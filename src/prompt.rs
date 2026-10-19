@@ -76,9 +76,9 @@ impl Template {
         match self {
             Template::Issue => "Issue",
             Template::Feature => "Feature",
-            Template::Session => "Session",
-            Template::SessionBlank => "Session, blank prompt",
-            Template::SessionName => "Session name suggestion",
+            Template::Session => "Single session",
+            Template::SessionBlank => "Single session, blank prompt",
+            Template::SessionName => "Single session name suggestion",
             Template::PrReviewOthers => "Review someone else's PR",
             Template::PrReviewOwn => "Review my own PR",
         }

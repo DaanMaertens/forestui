@@ -16,23 +16,23 @@ fn session(prompt: &str) -> crate::work::WorkItem {
     }
 }
 
-/// `session` is listed between `issue` and `pr-review`, with what it is
-/// for.
+/// `single session` is listed between `issue` and `pr-review`, with what
+/// it is for.
 #[tokio::test]
-async fn the_mode_step_lists_session() {
+async fn the_mode_step_lists_single_session() {
     let (_dir, mut app, _) = app_with_issues(Vec::new());
     app.handle_key(key(KeyCode::Char('s')));
 
     assert_eq!(
         crate::work::WorkMode::ALL.map(crate::work::WorkMode::label),
-        ["issue", "session", "pr-review", "worktree"]
+        ["issue", "single session", "pr-review", "worktree"]
     );
     let screen = rendered(&mut app);
     assert!(
-        screen.contains("session    A Claude session for anything else"),
+        screen.contains("single session  A Claude session for anything else"),
         "{screen}"
     );
-    let session = screen.find("session    ").expect("listed");
+    let session = screen.find("single session  ").expect("listed");
     let review = screen.find("pr-review").expect("listed");
     assert!(session < review, "{screen}");
 }
@@ -71,7 +71,7 @@ async fn a_session_confirms_with_its_own_names_and_prompt() {
     assert_eq!(confirm.branch.value(), "session/why-is-the-sidebar-so-slow");
     assert_eq!(confirm.prompt(), "Why is the sidebar so slow today?\n");
     let screen = rendered(&mut app);
-    assert!(screen.contains("Start Work: Session"), "{screen}");
+    assert!(screen.contains("Start Work: Single Session"), "{screen}");
 
     // Launch links the worktree to the prompt, not to any issue.
     let crate::modal::ModalResult::WorktreeForWorkItem { link, name, .. } =
@@ -194,7 +194,7 @@ async fn a_taken_slug_asks_what_to_do_on_launch() {
     assert_eq!(app.state.repositories()[0].worktrees.len(), worktrees);
     let screen = rendered(&mut app);
     for choice in [
-        "Start Work: Session",
+        "Start Work: Single Session",
         "Open existing",
         "Create copy",
         "Edit name",
@@ -326,7 +326,11 @@ async fn a_repository_without_github_offers_only_session_and_worktree() {
     }
     assert_eq!(start_work(&app).mode, crate::work::WorkMode::Session);
     let screen = rendered(&mut app);
-    assert!(screen.contains("(needs GitHub)"), "{screen}");
+    let issue = screen
+        .lines()
+        .find(|line| line.contains("issue "))
+        .expect("listed");
+    assert!(issue.contains("(needs GitHub)"), "{screen}");
 
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(start_work(&app).step, crate::modal::StartWorkStep::Prompt);

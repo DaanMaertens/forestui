@@ -751,7 +751,7 @@ fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         } else {
             theme::primary()
         };
-        let mut text = format!(" {:<11}{}", mode.label(), mode.description());
+        let mut text = format!(" {:<16}{}", mode.label(), mode.description());
         if !enabled {
             text.push_str("  (needs GitHub)");
         }
@@ -812,8 +812,8 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
     let (section, loading, empty, noun, items) = match modal.mode {
-        // `session` has a prompt and `worktree` a form, not an item list,
-        // so neither lands here.
+        // `single session` has a prompt and `worktree` a form, not an item
+        // list, so neither lands here.
         WorkMode::Issue | WorkMode::Session | WorkMode::Worktree => {
             let (empty, noun) = issue_words(modal.filter);
             ("Issue", " Loading issues...", empty, noun, "issues")
@@ -950,7 +950,7 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     column.controls(frame, hits, controls, true);
 }
 
-const SESSION_TITLE: &str = "Start Work: Session";
+const SESSION_TITLE: &str = "Start Work: Single Session";
 
 fn start_work_prompt(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: &mut Hits) {
     // Repo, label, input, names, local note, gap, hint, buttons.
@@ -971,7 +971,7 @@ fn start_work_prompt(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits
     let now = util::local_now();
     let names = match work::session_names(&modal.start_work, now, modal.prompt.value()) {
         Some(names) => format!("Worktree: {}", names.worktree),
-        None => "The session name pattern fills to nothing".to_string(),
+        None => "The single session name pattern fills to nothing".to_string(),
     };
     column.text(frame, names, theme::muted());
     column.text(

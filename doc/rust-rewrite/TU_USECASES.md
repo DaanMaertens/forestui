@@ -1652,7 +1652,7 @@ being diffed stops short of the content the case exists to compare.
 `Enter` (tick `Not just mine`) → `Space` (untick it) → `Shift+Tab` twice →
 type `metrics` → `Enter` (issue #298) → `Enter` (Launch, from the focused name
 field).
-**Expected:** the mode step lists `issue`, `session`, `pr-review` and
+**Expected:** the mode step lists `issue`, `single session`, `pr-review` and
 `worktree`, all enabled (`pr-review` is UC-104). The item step lists `#326`,
 `#298` and the `enhancement`-labelled `#77` (UC-100), but not `#412`, which is
 neither assigned to nor opened by the user. Ticking
@@ -1707,16 +1707,16 @@ appears in the config, or the window does not switch.
 ### UC-103 — Start work for a session
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
 **Steps:** after UC-101, click beta's sidebar row, `s` → `Down` `Enter`
-(mode `session`) → type `Try a quick spike on caching` → `Enter`, wait for
+(mode `single session`) → type `Try a quick spike on caching` → `Enter`, wait for
 the suggested name → `Enter` (Launch). Then the same again up to the
 suggested name, `Enter` (Launch), and `Escape` three times. The sweep's
 `claude` stub answers the name suggestion (`claude -p`) with `caching-spike`
 after two seconds.
-**Expected:** the mode step lists `issue`, `session`, `pr-review`,
-`worktree`, with `session` described as `A Claude session for anything else`.
-`session` opens the prompt step directly, which previews
+**Expected:** the mode step lists `issue`, `single session`, `pr-review`,
+`worktree`, with `single session` described as `A Claude session for anything
+else`. `single session` opens the prompt step directly, which previews
 `Worktree: session-try-a-quick-spike-on-caching`. The confirm screen is titled
-`Start Work: Session` and opens at once with those first-words names and
+`Start Work: Single Session` and opens at once with those first-words names and
 `Worktree Name  | suggesting a name…` turning; when the suggestion lands the
 spinner stops and the screen names the worktree `session-caching-spike` on
 `session/caching-spike`. Its prompt is the typed prompt alone: no
@@ -1736,9 +1736,9 @@ names (`session-20261018-1839`) and launching Claude with no first prompt
 or with a `session-blank.md` the user wrote,
 the session naming, `session.md` and
 `session-name.md` overrides, and that a repository without a GitHub remote
-offers only `session` and `worktree`, with the rest greyed out as
+offers only `single session` and `worktree`, with the rest greyed out as
 `(needs GitHub)`, are unit-tested.
-**Fails if:** `session` is missing or misplaced, a list stands between it and
+**Fails if:** `single session` is missing or misplaced, a list stands between it and
 the prompt, the confirm screen waits for the suggestion or shows no spinner,
 the suggestion never replaces the names, the worktree or branch is named
 otherwise, the prompt points at an issue or asks for a plan, the link is

@@ -105,7 +105,7 @@ const fn field(
 const NO_ROW: (&str, &str) = ("", "");
 const ISSUE: (&str, &str) = ("issue", NUMBER_SLUG);
 const FEATURE: (&str, &str) = ("feature", NUMBER_SLUG);
-const SESSION: (&str, &str) = ("session", SLUG);
+const SESSION: (&str, &str) = ("single session", SLUG);
 const PR_REVIEW: (&str, &str) = ("pr-review", NUMBER_SLUG);
 const PREFIX: &str = "Branch prefix";
 const NAME: &str = "Worktree name";

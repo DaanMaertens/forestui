@@ -333,7 +333,10 @@ fn the_session_name_template_asks_for_a_kebab_case_name_for_the_prompt() {
 #[test]
 fn the_blank_session_template_ships_empty() {
     assert_eq!(Template::SessionBlank.file_name(), "session-blank.md");
-    assert_eq!(Template::SessionBlank.label(), "Session, blank prompt");
+    assert_eq!(
+        Template::SessionBlank.label(),
+        "Single session, blank prompt"
+    );
     assert_eq!(SESSION_BLANK_TEMPLATE, "");
 }
 

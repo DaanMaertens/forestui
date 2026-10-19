@@ -310,7 +310,7 @@ work in three steps:
 
 ![Start work's issue picker, with one blocked issue hidden](doc/screenshot_start_work.png)
 
-1. **Pick a work mode**: `issue`, `session`, `pr-review` or `worktree`.
+1. **Pick a work mode**: `issue`, `single session`, `pr-review` or `worktree`.
    `issue` lists every open issue. One carrying a feature label
    (`enhancement` by default) starts as a feature, with the `feature`
    naming (`feat-<n>-<slug>` on `feat/<n>-<slug>`) and the plan-first `feature.md` prompt;
@@ -319,7 +319,7 @@ work in three steps:
 2. **Pick a work item** from a fuzzy-searchable list. By default it holds
    only your items: issues assigned to or opened by you, PRs with a review
    requested from you or opened by you. Tick **Not just mine** to list every
-   open one for this pick. The `session` mode has no list: you type a
+   open one for this pick. The `single session` mode has no list: you type a
    **session prompt** instead, for a Claude session that is not about an
    issue or a PR. It stays local and never creates a GitHub issue.
    The confirm screen opens straight away with names made from the prompt's
@@ -501,7 +501,8 @@ needs touching:
   listed together under `issue`.
 - `bug_labels` — an issue carrying any of these (case-insensitive) is a
   bug for the issue filter. It does not change how the issue starts.
-- Per kind of work (`issue`, `feature`, `session`, `pr_review`), the
+- Per kind of work (`issue`, `feature`, `session` for a single session,
+  `pr_review`), the
   worktree is named by `name_pattern` with `{number}` and `{slug}` (from the
   title, or a session prompt's first six words) filled in, and the branch is
   `branch_prefix` followed by `branch_pattern`, filled the same way. The
