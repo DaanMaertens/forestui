@@ -11,8 +11,8 @@ use crate::fuzzy::{self, Searchable};
 use crate::modal::{
     AddRepositoryModal, BackKeyModal, BackKeyStep, ClaudeIntegrationModal, ConfirmModal,
     CustomButtonsModal, EDITORS, EditButtonModal, Modal, PromptTemplatesModal, RenameSessionModal,
-    SPINNER, SettingsModal, StartWorkConfirmModal, StartWorkModal, StartWorkStep, ThemePickerModal,
-    WorktreeForm,
+    SPINNER, SettingsModal, StartWorkConfirmModal, StartWorkModal, StartWorkStep, SubIssueParent,
+    ThemePickerModal, WorktreeForm,
 };
 use crate::models::{IssueFilter, Scope};
 use crate::picker::SearchPicker;
@@ -20,7 +20,7 @@ use crate::services::tmux::back_key;
 use crate::theme;
 use crate::ui::widgets::{self, BUTTON_HEIGHT, TextInput};
 use crate::util::{self, Noun};
-use crate::work::{self, ItemEntry, WorkItem, WorkMode};
+use crate::work::{self, ItemEntry, ParentWorktree, WorkItem, WorkMode};
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Modifier, Style};
@@ -902,6 +902,12 @@ fn start_work_item(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
                             .push(Span::styled("  draft", marker(theme::muted())));
                     }
                     if let ItemEntry::Issue(entry) = entry
+                        && let Some(parent) = work::parent_marker(&entry.issue)
+                    {
+                        line.spans
+                            .push(Span::styled(format!("  {parent}"), marker(theme::muted())));
+                    }
+                    if let ItemEntry::Issue(entry) = entry
                         && let Some(blocked) = work::blocked_marker(&entry.issue)
                     {
                         line.spans.push(Span::styled(
@@ -1051,6 +1057,14 @@ const MIN_PROMPT_ROWS: u16 = 3;
 /// labelled fields with a hint each, fetch and pull on one row, the prompt's
 /// label, gap, buttons.
 const CONFIRM_BODY: u16 = CHROME + 23;
+/// The row "Branch from #n" adds, for a sub-issue whose parent can be
+/// branched from.
+const PARENT_ROW: u16 = 3;
+/// The longest parent branch the toggle names before it is cut with `…`, so
+/// the toggle and the worktree picker beside it fit the dialog.
+const PARENT_BRANCH_CHARS: usize = 32;
+/// The same for the parent worktree the picker names.
+const PARENT_WORKTREE_CHARS: usize = 20;
 /// The same for a PR review: the PR, the review kind with its line of
 /// explanation, the name field and its path, the branch `gh pr checkout`
 /// will check out, the prompt's label, gap, buttons.
@@ -1068,6 +1082,8 @@ fn start_work_confirm(
     // it whole; a longer prompt ends in `…`. The 95% is `centered_rect`'s cap.
     let body = if modal.is_review() {
         REVIEW_CONFIRM_BODY
+    } else if modal.parent.is_some() {
+        CONFIRM_BODY + PARENT_ROW
     } else {
         CONFIRM_BODY
     };
@@ -1268,11 +1284,14 @@ fn branch_fields(
         modal.focus,
         StartWorkConfirmModal::FOCUS_BASE,
     );
-    let (hint, style) = base_hint(
-        modal.base_suggestion(),
-        modal.base_branch.value(),
-        modal.missing_base(),
-    );
+    let (hint, style) = match modal.branching_parent() {
+        Some(parent) => parent_hint(parent),
+        None => base_hint(
+            modal.base_suggestion(),
+            modal.base_branch.value(),
+            modal.missing_base(),
+        ),
+    };
     column.text(frame, hint, style);
 
     let fetch = if modal.is_fetching {
@@ -1299,6 +1318,83 @@ fn branch_fields(
         ],
         false,
     );
+
+    if let Some(parent) = &modal.parent {
+        column.controls(frame, hits, parent_controls(modal, parent), false);
+    }
+}
+
+/// `text` cut to `max` characters, ending in `…` when cut.
+fn shortened(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let kept: String = text.chars().take(max.saturating_sub(1)).collect();
+    format!("{kept}…")
+}
+
+/// "Branch from #n (its branch)", and beside it, when the parent has
+/// several worktrees, which one.
+fn parent_controls(modal: &StartWorkConfirmModal, parent: &SubIssueParent) -> Vec<Control> {
+    let label = match parent.worktree.branch() {
+        Some(branch) => format!(
+            "Branch from #{} ({})",
+            parent.number,
+            shortened(branch, PARENT_BRANCH_CHARS)
+        ),
+        None => format!("Branch from #{}", parent.number),
+    };
+    let mut controls = vec![checkbox(
+        &label,
+        parent.on,
+        modal.focus == StartWorkConfirmModal::FOCUS_PARENT,
+        StartWorkConfirmModal::FOCUS_PARENT,
+    )];
+    if parent.on && parent.worktree.is_choice() {
+        let picked = parent
+            .worktree
+            .chosen()
+            .map_or("pick a worktree", |chosen| chosen.name.as_str());
+        controls.push(cycle(
+            &shortened(picked, PARENT_WORKTREE_CHARS),
+            modal.focus == StartWorkConfirmModal::FOCUS_PARENT_PICK,
+            StartWorkConfirmModal::FOCUS_PARENT_PICK,
+        ));
+    }
+    controls
+}
+
+/// The row under the base field while the parent's branch holds it: where
+/// that branch comes from, and what Launch does to get it.
+fn parent_hint(parent: &SubIssueParent) -> (String, Style) {
+    match &parent.worktree {
+        ParentWorktree::Create(names) => (
+            format!(
+                " also creates {} for #{}",
+                shortened(&names.branch, PARENT_BRANCH_CHARS),
+                parent.number
+            ),
+            theme::warning(),
+        ),
+        ParentWorktree::Existing { candidates, .. } => match parent.worktree.chosen() {
+            Some(chosen) => (
+                format!(
+                    " #{}'s branch, in worktree '{}'",
+                    parent.number,
+                    shortened(&chosen.name, PARENT_BRANCH_CHARS)
+                ),
+                theme::muted(),
+            ),
+            None => (
+                format!(
+                    " #{} has {} worktrees: pick one to branch from",
+                    parent.number,
+                    candidates.len()
+                ),
+                theme::warning(),
+            ),
+        },
+    }
 }
 
 // ------------------------------------------------------------------ Settings

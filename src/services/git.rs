@@ -733,6 +733,21 @@ pub async fn pull(path: &str) -> GitResult<()> {
     Ok(())
 }
 
+/// Fast-forward the current branch to its upstream, and nothing more: a
+/// diverged branch, or a change of its own in the way, fails rather than
+/// being merged over.
+pub async fn pull_fast_forward(path: &str) -> GitResult<()> {
+    let dir = expand(path);
+    let (code, _out, stderr) = run_git(&["pull", "--ff-only"], Some(&dir)).await?;
+    if code != 0 {
+        // The last line is git's verdict; the hints above it suggest merges
+        // and rebases this pull deliberately never does.
+        let reason = stderr.lines().last().unwrap_or("git pull failed").trim();
+        return Err(GitError(format!("Failed to pull: {reason}")));
+    }
+    Ok(())
+}
+
 /// Whether the current branch has a remote tracking branch.
 pub async fn has_remote_tracking(path: &str) -> GitResult<bool> {
     let dir = expand(path);

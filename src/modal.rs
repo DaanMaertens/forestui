@@ -248,6 +248,9 @@ pub enum ModalResult {
         first_prompt: Option<String>,
         /// Start Claude with the built-in YOLO flag.
         yolo: bool,
+        /// The parent issue a sub-issue's branch stems from, when the
+        /// confirm screen's toggle is on; `base_branch` is then its branch.
+        parent: Option<ParentLaunch>,
     },
     SettingsSaved(Box<Settings>),
     /// The global Start Work Settings dialog saved: these replace the
@@ -1069,6 +1072,14 @@ impl StartWorkModal {
         self.focus = Self::FOCUS_OPEN;
     }
 
+    /// Issue `number`, if the loaded list holds it.
+    pub fn loaded_issue(&self, number: i64) -> Option<&GitHubIssue> {
+        match &self.issues {
+            Some(Ok(issues)) => issues.iter().find(|issue| issue.number == number),
+            _ => None,
+        }
+    }
+
     /// The session prompt as it would be recorded: trimmed, so stray spaces
     /// do not make two links for the same words.
     fn typed_prompt(&self) -> String {
@@ -1563,6 +1574,42 @@ impl StartWorkModal {
     }
 }
 
+/// A sub-issue's parent issue, as its confirm screen offers to branch from it.
+#[derive(Debug)]
+pub struct SubIssueParent {
+    pub number: i64,
+    /// "Branch from #n": on by default, the user's to turn off.
+    pub on: bool,
+    pub worktree: work::ParentWorktree,
+    /// The `sub-issue` template as resolved when the screen opened.
+    template: String,
+    /// The base field as it was before the toggle took it over, put back
+    /// when it is turned off.
+    other_base: String,
+}
+
+/// The parent issue a sub-issue's worktree branches from, as Launch hands
+/// it over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParentLaunch {
+    pub number: i64,
+    pub branch: String,
+    pub source: ParentSource,
+}
+
+/// Where the parent's branch comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParentSource {
+    /// Its worktree, fast-forwarded first when the screen pulls first.
+    Existing { path: String },
+    /// No worktree yet: one is created first under `names`, branching from
+    /// the base the screen would otherwise have used.
+    Create {
+        names: WorktreeNames,
+        base_branch: Option<String>,
+    },
+}
+
 /// Start work's confirm screen: the worktree a work item will start in, the
 /// base it branches from, and the prompt Claude will be started with.
 /// Always opened over Start work's item step, which dismissing returns to.
@@ -1603,6 +1650,9 @@ pub struct StartWorkConfirmModal {
     /// names are theirs and a suggestion never replaces them — even if the
     /// edit was typed back to what it was.
     names_edited: bool,
+    /// The parent issue of a sub-issue, when it can be branched from: open,
+    /// and in this repository.
+    pub parent: Option<SubIssueParent>,
     /// One of the `FOCUS_*` constants; see [`StartWorkConfirmModal`].
     pub focus: usize,
 }
@@ -1618,32 +1668,89 @@ impl StartWorkConfirmModal {
     pub const FOCUS_YOLO: usize = 6;
     pub const FOCUS_LAUNCH: usize = 7;
     pub const FOCUS_CANCEL: usize = 8;
+    /// "Branch from #n", only for a sub-issue whose parent can be branched
+    /// from.
+    pub const FOCUS_PARENT: usize = 9;
+    /// Which of the parent's worktrees, only when it has several.
+    pub const FOCUS_PARENT_PICK: usize = 10;
 
     /// The focus stops, in Tab order. A PR review has no branch to name and
     /// no base to branch from — `gh pr checkout` decides both — so its
-    /// screen draws none of those controls and the ring skips them.
-    pub fn ring(&self) -> &'static [usize] {
+    /// screen draws none of those controls and the ring skips them. A base
+    /// the parent's branch has taken over is not typed in either.
+    pub fn ring(&self) -> Vec<usize> {
         if self.is_review() {
-            &[
+            return vec![
                 Self::FOCUS_NAME,
                 Self::FOCUS_EDIT,
                 Self::FOCUS_YOLO,
                 Self::FOCUS_LAUNCH,
                 Self::FOCUS_CANCEL,
-            ]
-        } else {
-            &[
-                Self::FOCUS_NAME,
-                Self::FOCUS_BRANCH,
-                Self::FOCUS_BASE,
-                Self::FOCUS_FETCH,
-                Self::FOCUS_PULL,
-                Self::FOCUS_EDIT,
-                Self::FOCUS_YOLO,
-                Self::FOCUS_LAUNCH,
-                Self::FOCUS_CANCEL,
-            ]
+            ];
         }
+        let mut ring = vec![Self::FOCUS_NAME, Self::FOCUS_BRANCH];
+        if self.branching_parent().is_none() {
+            ring.push(Self::FOCUS_BASE);
+        }
+        ring.extend([Self::FOCUS_FETCH, Self::FOCUS_PULL]);
+        if let Some(parent) = &self.parent {
+            ring.push(Self::FOCUS_PARENT);
+            if parent.on && parent.worktree.is_choice() {
+                ring.push(Self::FOCUS_PARENT_PICK);
+            }
+        }
+        ring.extend([
+            Self::FOCUS_EDIT,
+            Self::FOCUS_YOLO,
+            Self::FOCUS_LAUNCH,
+            Self::FOCUS_CANCEL,
+        ]);
+        ring
+    }
+
+    /// Offer to branch from parent issue `number`, whose worktree is
+    /// `worktree`, filling the first prompt from `template` — the
+    /// `sub-issue` one — while that is on, which it starts as.
+    pub fn set_parent(&mut self, number: i64, worktree: work::ParentWorktree, template: String) {
+        self.parent = Some(SubIssueParent {
+            number,
+            on: false,
+            worktree,
+            template,
+            other_base: String::new(),
+        });
+        self.toggle_parent();
+    }
+
+    /// The parent, while the screen branches from it.
+    pub fn branching_parent(&self) -> Option<&SubIssueParent> {
+        self.parent.as_ref().filter(|parent| parent.on)
+    }
+
+    /// Turn "Branch from #n" over: on, the base field holds the parent's
+    /// branch; off, the base it held before comes back.
+    fn toggle_parent(&mut self) {
+        let Some(parent) = self.parent.as_mut() else {
+            return;
+        };
+        parent.on = !parent.on;
+        if parent.on {
+            parent.other_base = self.base_branch.value().to_string();
+            let branch = parent.worktree.branch().unwrap_or_default().to_string();
+            self.base_branch.set_value(branch);
+        } else {
+            self.base_branch.set_value(parent.other_base.clone());
+        }
+    }
+
+    /// Pick the next of the parent's worktrees; the base follows.
+    fn pick_parent_worktree(&mut self) {
+        let Some(parent) = self.parent.as_mut().filter(|parent| parent.on) else {
+            return;
+        };
+        parent.worktree.pick_next();
+        let branch = parent.worktree.branch().unwrap_or_default().to_string();
+        self.base_branch.set_value(branch);
     }
 
     /// Whether this is a PR review, which checks out the PR's own branch.
@@ -1692,6 +1799,7 @@ impl StartWorkConfirmModal {
             spinner_index: 0,
             name_request: None,
             names_edited: false,
+            parent: None,
             focus: Self::FOCUS_NAME,
         }
     }
@@ -1749,8 +1857,10 @@ impl StartWorkConfirmModal {
             }
             WorkItem::Session { prompt } => (None, prompt.as_str(), Some(prompt.as_str())),
         };
+        let parent = self.branching_parent();
+        let template = parent.map_or(&self.template, |parent| &parent.template);
         prompt::fill(
-            &self.template,
+            template,
             &prompt::TemplateVars {
                 number,
                 title,
@@ -1758,6 +1868,8 @@ impl StartWorkConfirmModal {
                 worktree: self.name.value(),
                 repo: &self.repo_name,
                 body,
+                parent_number: parent.map(|parent| parent.number),
+                parent_branch: parent.and_then(|parent| parent.worktree.branch()),
             },
         )
     }
@@ -1795,6 +1907,10 @@ impl StartWorkConfirmModal {
         if self.is_review() {
             return true;
         }
+        // The parent's branch may not exist yet: it is created first.
+        if let Some(parent) = self.branching_parent() {
+            return !self.branch.is_empty() && parent.worktree.branch().is_some();
+        }
         let base = self.base_branch.value();
         !self.branch.is_empty()
             && (base.is_empty() || self.branches.branches.iter().any(|b| b == base))
@@ -1805,15 +1921,20 @@ impl StartWorkConfirmModal {
         self.is_fetching = false;
         // A base still at what the screen chose follows the new list, so a
         // fetch that brings in the repository's base branch switches to it;
-        // a base the user typed stays.
+        // a base the user typed stays. While the parent's branch holds the
+        // field, that is the base the toggle puts back.
         let chosen = initial_base_branch(&self.branches, self.configured_base.as_deref());
         self.branches = branches;
-        let base = self.base_branch.value().to_string();
+        let base = match self.branching_parent() {
+            Some(parent) => parent.other_base.clone(),
+            None => self.base_branch.value().to_string(),
+        };
         if base.is_empty() || base == chosen || !self.branches.branches.contains(&base) {
-            self.base_branch.set_value(initial_base_branch(
-                &self.branches,
-                self.configured_base.as_deref(),
-            ));
+            let base = initial_base_branch(&self.branches, self.configured_base.as_deref());
+            match self.parent.as_mut().filter(|parent| parent.on) {
+                Some(parent) => parent.other_base = base,
+                None => self.base_branch.set_value(base),
+            }
         }
     }
 
@@ -1844,7 +1965,9 @@ impl StartWorkConfirmModal {
             return ModalOutcome::Close;
         }
 
-        if self.focus == Self::FOCUS_BASE {
+        // The parent's branch is the base while the toggle is on.
+        let base_editable = self.branching_parent().is_none();
+        if self.focus == Self::FOCUS_BASE && base_editable {
             let suggestion = self.base_suggestion();
             if accept_suggestion(&mut self.base_branch, suggestion, key) {
                 return ModalOutcome::None;
@@ -1854,7 +1977,7 @@ impl StartWorkConfirmModal {
         let editable = match self.focus {
             Self::FOCUS_NAME => Some(&mut self.name),
             Self::FOCUS_BRANCH => Some(&mut self.branch),
-            Self::FOCUS_BASE => Some(&mut self.base_branch),
+            Self::FOCUS_BASE if base_editable => Some(&mut self.base_branch),
             _ => None,
         };
         if let Some(input) = editable {
@@ -1903,6 +2026,17 @@ impl StartWorkConfirmModal {
                 self.yolo = !self.yolo;
                 ModalOutcome::None
             }
+            (Self::FOCUS_PARENT, KeyCode::Enter | KeyCode::Char(' ')) => {
+                self.toggle_parent();
+                ModalOutcome::None
+            }
+            (
+                Self::FOCUS_PARENT_PICK,
+                KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right,
+            ) => {
+                self.pick_parent_worktree();
+                ModalOutcome::None
+            }
             (Self::FOCUS_CANCEL, KeyCode::Enter) => ModalOutcome::Close,
             (_, KeyCode::Enter) => {
                 if !self.can_launch() {
@@ -1924,6 +2058,22 @@ impl StartWorkConfirmModal {
         let base = self.base_branch.value().to_string();
         let review = self.is_review();
         let names = self.names();
+        let parent = self.branching_parent().and_then(|parent| {
+            let source = match &parent.worktree {
+                work::ParentWorktree::Existing { .. } => ParentSource::Existing {
+                    path: parent.worktree.chosen()?.path.clone(),
+                },
+                work::ParentWorktree::Create(names) => ParentSource::Create {
+                    names: names.clone(),
+                    base_branch: Some(parent.other_base.clone()).filter(|base| !base.is_empty()),
+                },
+            };
+            Some(ParentLaunch {
+                number: parent.number,
+                branch: parent.worktree.branch()?.to_string(),
+                source,
+            })
+        });
         ModalResult::WorktreeForWorkItem {
             repo_id: self.repo_id,
             link: self.item.link(),
@@ -1933,6 +2083,7 @@ impl StartWorkConfirmModal {
             base_branch: (!base.is_empty() && !review).then_some(base),
             first_prompt: self.first_prompt(),
             yolo: self.yolo,
+            parent,
         }
     }
 }

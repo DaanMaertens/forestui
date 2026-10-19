@@ -9,6 +9,10 @@ pub const ISSUE_TEMPLATE: &str = include_str!("../assets/prompts/issue.md");
 /// The built-in `feature` template: plan first, build once the plan is approved.
 pub const FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/feature.md");
 
+/// The built-in `sub-issue` template: work on a sub-issue whose branch
+/// stems from its parent issue's, and open the pull request into that.
+pub const SUB_ISSUE_TEMPLATE: &str = include_str!("../assets/prompts/sub-issue.md");
+
 /// The built-in `session` template: the session prompt as typed, and
 /// nothing else, so by default Claude gets exactly what the user wrote.
 pub const SESSION_TEMPLATE: &str = include_str!("../assets/prompts/session.md");
@@ -36,6 +40,8 @@ pub const PR_REVIEW_OWN_TEMPLATE: &str = include_str!("../assets/prompts/pr-revi
 pub enum Template {
     Issue,
     Feature,
+    /// An issue or feature started from its parent issue's branch.
+    SubIssue,
     Session,
     /// A blank session prompt's first message, if any: `session` wraps a
     /// typed prompt, and a blank one has none to wrap.
@@ -48,9 +54,10 @@ pub enum Template {
 
 impl Template {
     /// Every template, in the order the Settings picker lists them.
-    pub const ALL: [Template; 7] = [
+    pub const ALL: [Template; 8] = [
         Template::Issue,
         Template::Feature,
+        Template::SubIssue,
         Template::Session,
         Template::SessionBlank,
         Template::SessionName,
@@ -63,6 +70,7 @@ impl Template {
         match self {
             Template::Issue => "issue.md",
             Template::Feature => "feature.md",
+            Template::SubIssue => "sub-issue.md",
             Template::Session => "session.md",
             Template::SessionBlank => "session-blank.md",
             Template::SessionName => "session-name.md",
@@ -76,6 +84,7 @@ impl Template {
         match self {
             Template::Issue => "Issue",
             Template::Feature => "Feature",
+            Template::SubIssue => "Sub-issue",
             Template::Session => "Single session",
             Template::SessionBlank => "Single session, blank prompt",
             Template::SessionName => "Single session name suggestion",
@@ -95,6 +104,7 @@ impl Template {
         match self {
             Template::Issue => ISSUE_TEMPLATE,
             Template::Feature => FEATURE_TEMPLATE,
+            Template::SubIssue => SUB_ISSUE_TEMPLATE,
             Template::Session => SESSION_TEMPLATE,
             Template::SessionBlank => SESSION_BLANK_TEMPLATE,
             Template::SessionName => SESSION_NAME_TEMPLATE,
@@ -178,6 +188,9 @@ pub struct TemplateVars<'a> {
     /// The session prompt, and nothing else: an issue's or PR's body would
     /// be a stale copy of text Claude can read fresh with `gh`.
     pub body: Option<&'a str>,
+    /// A sub-issue's parent issue, and the branch its own stems from.
+    pub parent_number: Option<i64>,
+    pub parent_branch: Option<&'a str>,
 }
 
 /// `template` with every known placeholder replaced.
@@ -186,8 +199,10 @@ pub struct TemplateVars<'a> {
 /// titled `{branch}` stays that title. A placeholder this does not know, or
 /// `{body}` outside a session, is left as written rather than failing: a
 /// typo in a template should show up in the prompt, not stop the launch.
+/// So is `{parent_number}` or `{parent_branch}` outside a sub-issue.
 pub fn fill(template: &str, vars: &TemplateVars<'_>) -> String {
     let number = vars.number.map(|n| n.to_string());
+    let parent_number = vars.parent_number.map(|n| n.to_string());
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(open) = rest.find('{') {
@@ -201,6 +216,8 @@ pub fn fill(template: &str, vars: &TemplateVars<'_>) -> String {
                 "worktree" => Some(vars.worktree),
                 "repo" => Some(vars.repo),
                 "body" => vars.body,
+                "parent_number" => parent_number.as_deref(),
+                "parent_branch" => vars.parent_branch,
                 _ => None,
             };
             value.map(|v| (v, close))

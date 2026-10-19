@@ -8,6 +8,7 @@ fn issue_vars() -> TemplateVars<'static> {
         worktree: "42-fix-login-bug",
         repo: "forestui",
         body: None,
+        ..Default::default()
     }
 }
 
@@ -83,6 +84,7 @@ fn pr_vars() -> TemplateVars<'static> {
         worktree: "pr-31-give-the-cache-tests-their-own-cache",
         repo: "forestui",
         body: None,
+        ..Default::default()
     }
 }
 
@@ -119,6 +121,7 @@ fn the_session_template_is_the_prompt_alone() {
         branch: "session/why-is-the-sidebar-slow",
         worktree: "session-why-is-the-sidebar-slow",
         repo: "forestui",
+        ..Default::default()
     };
     assert_eq!(
         fill(SESSION_TEMPLATE, &session),
@@ -136,6 +139,7 @@ fn a_session_override_fills_the_other_placeholders() {
         branch: "session/spike",
         worktree: "session-spike",
         repo: "forestui",
+        ..Default::default()
     };
     assert_eq!(
         fill("{body} ({worktree} of {repo}, on {branch})", &session),
@@ -203,6 +207,7 @@ fn the_file_names_are_the_template_names() {
         [
             "issue.md",
             "feature.md",
+            "sub-issue.md",
             "session.md",
             "session-blank.md",
             "session-name.md",
@@ -354,4 +359,37 @@ fn an_empty_blank_session_file_is_used_as_written() {
     let resolved = resolve(&[repo.as_path(), global.as_path()], Template::SessionBlank);
     assert_eq!(resolved.text, "");
     assert_eq!(resolved.warning, None);
+}
+
+#[test]
+fn the_parent_placeholders_are_filled_for_a_sub_issue_only() {
+    let template = "into {parent_branch}, part of #{parent_number}";
+    assert_eq!(fill(template, &issue_vars()), template);
+    let sub = TemplateVars {
+        parent_number: Some(12),
+        parent_branch: Some("feat/12-epic"),
+        ..issue_vars()
+    };
+    assert_eq!(fill(template, &sub), "into feat/12-epic, part of #12");
+}
+
+/// The sub-issue's pull request goes into the parent's branch, never the
+/// default branch, and says which issue it is part of.
+#[test]
+fn the_sub_issue_template_opens_its_pr_into_the_parents_branch() {
+    let prompt = fill(
+        SUB_ISSUE_TEMPLATE,
+        &TemplateVars {
+            parent_number: Some(12),
+            parent_branch: Some("feat/12-epic"),
+            ..issue_vars()
+        },
+    );
+    assert!(prompt.contains("gh issue view 42 --comments"), "{prompt}");
+    assert!(prompt.contains("--base feat/12-epic"), "{prompt}");
+    assert!(prompt.contains("Part of #12"), "{prompt}");
+    assert!(
+        !prompt.contains('{'),
+        "every placeholder is filled:\n{prompt}"
+    );
 }

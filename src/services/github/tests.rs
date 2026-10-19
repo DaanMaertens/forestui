@@ -303,17 +303,28 @@ fn the_scope_decides_the_gh_filters() {
 /// A `gh` from before issue dependencies refuses the whole call over the
 /// one field it does not know; only that refusal is worth a retry without it.
 #[test]
-fn only_an_unknown_blocked_by_field_asks_for_the_older_fields() {
+fn only_an_unknown_blocked_by_or_parent_field_asks_for_the_older_fields() {
     let refusal = "Unknown JSON field: \"blockedBy\"\nAvailable fields:\n  assignees\n  author";
-    assert!(rejects_blocked_by(refusal));
-    assert!(!rejects_blocked_by("HTTP 502: Bad Gateway"));
-    assert!(!rejects_blocked_by(""));
-    assert!(ISSUE_FIELDS.ends_with(",blockedBy"));
+    assert!(rejects_newer_fields(refusal));
+    assert!(rejects_newer_fields(
+        "Unknown JSON field: \"parent\"\nAvailable fields:\n  assignees"
+    ));
+    assert!(!rejects_newer_fields("HTTP 502: Bad Gateway"));
+    assert!(!rejects_newer_fields(""));
+    assert!(ISSUE_FIELDS.ends_with(",blockedBy,parent"));
     assert_eq!(
-        format!("{LEGACY_ISSUE_FIELDS},blockedBy"),
+        format!("{LEGACY_ISSUE_FIELDS},blockedBy,parent"),
         ISSUE_FIELDS,
-        "the fallback differs from the full list by blockedBy alone"
+        "the fallback differs from the full list by blockedBy and parent alone"
     );
+}
+
+/// Captured from `gh pr list --head <b> --base <p> --state merged --json number`.
+#[test]
+fn a_merged_pull_request_is_one_gh_lists() {
+    assert_eq!(parse_any_listed(r#"[{"number":7}]"#), Some(true));
+    assert_eq!(parse_any_listed("[]"), Some(false));
+    assert_eq!(parse_any_listed("garbled"), None);
 }
 
 /// Captured from `gh issue view <n> --json state` and

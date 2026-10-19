@@ -7,7 +7,7 @@
 //! repository still has. Whether an answer means finished is
 //! [`work::is_finished`], a pure rule.
 
-use crate::models::{Repository, WorkItemLink};
+use crate::models::{ItemState, Repository, WorkItemLink};
 use crate::services::git;
 use crate::services::github::{self, AuthStatus};
 use crate::work::{self, Observed};
@@ -112,8 +112,10 @@ pub struct LinkedWorktree {
     branch: String,
     created_from: Option<String>,
     /// The base branch it was started from, which a session's branch is
-    /// merged into once its work is done.
+    /// merged into once its work is done — and a sub-issue's pull request.
     base: Option<String>,
+    /// The parent issue a sub-issue's worktree was branched from.
+    parent_issue: Option<i64>,
 }
 
 /// The repository's worktrees that have a work item link. Without one a
@@ -128,6 +130,7 @@ pub fn linked(repo: &Repository) -> Vec<LinkedWorktree> {
                 branch: worktree.branch.clone(),
                 created_from: worktree.created_from_ref.clone(),
                 base: worktree.base_branch.clone(),
+                parent_issue: worktree.parent_issue,
             })
         })
         .collect()
@@ -137,6 +140,10 @@ pub fn linked(repo: &Repository) -> Vec<LinkedWorktree> {
 /// `source`. A worktree with no verdict is one nobody could answer for —
 /// `gh` missing or signed out, a branch git cannot resolve, no remote
 /// default branch — and keeps whatever mark it had.
+///
+/// A sub-issue's worktree is also finished once a pull request from its
+/// branch into the base it was started from — its parent issue's branch —
+/// is merged, while its issue is still open.
 ///
 /// A session's branch counts as merged only when its tip is in the base
 /// branch it was started from — the remote's default branch for a worktree
@@ -159,6 +166,20 @@ pub async fn check(source: &str, linked: &[LinkedWorktree]) -> HashMap<Uuid, boo
 
     let mut verdicts = HashMap::new();
     for item in linked {
+        if let (WorkItemLink::Issue { number }, Some(_), Some(parent_branch), true) =
+            (&item.link, item.parent_issue, &item.base, signed_in)
+        {
+            let state = github::issue_state(source, *number).await;
+            let merged = if state == Some(ItemState::Open) || state.is_none() {
+                github::merged_pull_request(source, &item.branch, parent_branch).await
+            } else {
+                None
+            };
+            if let Some(finished) = work::is_sub_issue_finished(state, merged) {
+                verdicts.insert(item.id, finished);
+            }
+            continue;
+        }
         let observed = match &item.link {
             WorkItemLink::Issue { number } if signed_in => github::issue_state(source, *number)
                 .await

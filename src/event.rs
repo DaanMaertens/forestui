@@ -199,6 +199,14 @@ pub enum AppEvent {
         request: Uuid,
         reply: Option<String>,
     },
+    /// Start work asked `gh` for parent issue `number`, which its confirm
+    /// screen names a worktree after if the parent has none: the issue, or
+    /// `None` for a call that failed. Sent before the branches the screen
+    /// waits on, so it is in place when they arrive.
+    ParentIssueLoaded {
+        number: i64,
+        issue: Option<Box<crate::models::GitHubIssue>>,
+    },
     /// A `git worktree list` scan finished; the fold reconciles the config
     /// against it (git is the source of truth for which worktrees exist).
     /// `None` means git itself failed — the fold releases the in-flight guard
