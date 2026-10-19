@@ -622,10 +622,10 @@ async fn a_blank_prompt_launches_with_no_first_prompt() {
     );
 }
 
-/// A blank prompt with a standing-instructions `session.md` still starts
-/// Claude with nothing: the template wraps a prompt, and there is none.
+/// A blank prompt never goes through `session.md`: that wraps a typed
+/// prompt, and there is none.
 #[tokio::test]
-async fn a_blank_prompt_ignores_a_session_template() {
+async fn a_blank_prompt_ignores_the_session_template() {
     let prompts = PromptsDir::new();
     prompts.write(
         crate::prompt::Template::Session,
@@ -640,6 +640,46 @@ async fn a_blank_prompt_ignores_a_session_template() {
         panic!("a launch expected");
     };
     assert_eq!(first_prompt, None);
+}
+
+/// A `session-blank.md` the user wrote is what a blank prompt sends, its
+/// placeholders filled, and the confirm screen shows it.
+#[tokio::test]
+async fn a_blank_prompt_sends_the_blank_session_template() {
+    let prompts = PromptsDir::new();
+    prompts.write(
+        crate::prompt::Template::SessionBlank,
+        b"You are in {worktree} on {branch}. Wait for me.",
+    );
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    confirm_session(&mut app, "  ");
+
+    let confirm = confirm_screen(&app);
+    let expected = format!(
+        "You are in {} on {}. Wait for me.",
+        confirm.name.value(),
+        confirm.branch.value()
+    );
+    let crate::modal::ModalResult::WorktreeForWorkItem { first_prompt, .. } = confirm.launch()
+    else {
+        panic!("a launch expected");
+    };
+    assert_eq!(first_prompt.as_deref(), Some(expected.as_str()));
+    let screen = rendered(&mut app);
+    assert!(screen.contains("Wait for me."), "{screen}");
+    assert!(!screen.contains("No first prompt"), "{screen}");
+}
+
+/// A typed prompt keeps `session.md` even when it gets a timestamp name;
+/// only a blank one takes `session-blank.md`.
+#[tokio::test]
+async fn an_unnameable_prompt_is_still_a_typed_one() {
+    let prompts = PromptsDir::new();
+    prompts.write(crate::prompt::Template::SessionBlank, b"blank");
+    let (_dir, mut app, _) = app_with_issues(Vec::new());
+    confirm_session(&mut app, "???");
+
+    assert_eq!(confirm_screen(&app).prompt(), "???\n");
 }
 
 /// Claude starts in the new worktree even with no first prompt; before,

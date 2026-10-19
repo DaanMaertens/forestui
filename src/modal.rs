@@ -1762,16 +1762,10 @@ impl StartWorkConfirmModal {
         )
     }
 
-    /// What Claude is started with: [`Self::prompt`], except for a blank
-    /// session prompt left unedited, which starts Claude with nothing — a
-    /// `session.md` wraps a prompt, and there is none to wrap.
+    /// What Claude is started with: [`Self::prompt`], or nothing when that
+    /// is blank — as a blank session prompt's template is unless the user
+    /// wrote one. Never an empty message.
     pub fn first_prompt(&self) -> Option<String> {
-        if self.edited_prompt.is_none()
-            && let WorkItem::Session { prompt } = &self.item
-            && prompt.trim().is_empty()
-        {
-            return None;
-        }
         Some(self.prompt()).filter(|prompt| !prompt.trim().is_empty())
     }
 

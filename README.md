@@ -329,7 +329,8 @@ work in three steps:
    either one already; a failed or slow call just leaves the first-words
    names. You can launch at any time. Leave the prompt blank for a fresh
    worktree named for the minute it was started (`session-20261011-1432`),
-   with Claude running in it and no first prompt, ready to talk to. If the
+   with Claude running in it and no first prompt, ready to talk to — or with
+   your `session-blank.md`, if you wrote one (see Prompt templates). If the
    names on screen are taken when
    you launch, forestui asks whether to open the existing worktree, create a
    copy, or edit the name.
@@ -379,7 +380,10 @@ Each prompt comes from a Markdown template, with `{number}`, `{title}`,
 `{body}`, the prompt you typed, and its template, `session.md`, is `{body}`
 alone, so by default Claude gets exactly what you typed. Issue and PR prompts
 tell Claude to read the item with `gh` instead, so it sees the current text
-and comments. The templates are `issue.md`, `feature.md`, `session.md`,
+and comments. A blank session prompt skips `session.md` and sends
+`session-blank.md` instead, which ships empty: Claude starts with no first
+message until you write one, such as `You are in {worktree} on {branch}.`
+The templates are `issue.md`, `feature.md`, `session.md`, `session-blank.md`,
 `session-name.md`, `pr-review-others.md` and `pr-review-own.md`.
 `session-name.md` is not a first prompt: it is the instruction the name
 suggestion sends, with the session prompt as `{body}`. Each one that has no file yet

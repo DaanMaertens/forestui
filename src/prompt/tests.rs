@@ -204,6 +204,7 @@ fn the_file_names_are_the_template_names() {
             "issue.md",
             "feature.md",
             "session.md",
+            "session-blank.md",
             "session-name.md",
             "pr-review-others.md",
             "pr-review-own.md"
@@ -325,4 +326,29 @@ fn the_session_name_template_asks_for_a_kebab_case_name_for_the_prompt() {
     );
     assert!(filled.contains("Why is the sidebar slow?"), "{filled}");
     assert!(!filled.contains("{body}"), "{filled}");
+}
+
+/// A blank session prompt's template ships empty, so a blank prompt starts
+/// Claude with nothing until the user writes one.
+#[test]
+fn the_blank_session_template_ships_empty() {
+    assert_eq!(Template::SessionBlank.file_name(), "session-blank.md");
+    assert_eq!(Template::SessionBlank.label(), "Session, blank prompt");
+    assert_eq!(SESSION_BLANK_TEMPLATE, "");
+}
+
+/// An empty `session-blank.md` is a choice, not a broken file: it is used,
+/// without a warning, and wins over a layer below it.
+#[test]
+fn an_empty_blank_session_file_is_used_as_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let (repo, global) = (dir.path().join("repo"), dir.path().join("global"));
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&global).unwrap();
+    std::fs::write(repo.join("session-blank.md"), "").unwrap();
+    std::fs::write(global.join("session-blank.md"), "You are in {worktree}.").unwrap();
+
+    let resolved = resolve(&[repo.as_path(), global.as_path()], Template::SessionBlank);
+    assert_eq!(resolved.text, "");
+    assert_eq!(resolved.warning, None);
 }

@@ -535,7 +535,7 @@ fn branch_rows_are_clickable() {
 #[test]
 fn the_template_picker_lists_every_template_by_file_and_clicks_select_it() {
     let mut picker = crate::modal::PromptTemplatesModal::new();
-    picker.select(4);
+    picker.select(5);
     let (screen, hits) = render_with_hits(&Modal::PromptTemplates(picker), 160, 40);
     for (row, template) in crate::prompt::Template::ALL.iter().enumerate() {
         assert!(screen.contains(template.label()), "{screen}");

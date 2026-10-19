@@ -1732,7 +1732,8 @@ because the name on screen is taken: `Open existing`, `Create copy` (naming
 is created. What each choice does, a suggestion never replacing an edited
 name or reaching a screen that was left, a failed or disabled suggestion
 keeping the first-words names, a blank prompt confirming with timestamp
-names (`session-20261018-1839`) and launching Claude with no first prompt,
+names (`session-20261018-1839`) and launching Claude with no first prompt
+or with a `session-blank.md` the user wrote,
 the session naming, `session.md` and
 `session-name.md` overrides, and that a repository without a GitHub remote
 offers only `session` and `worktree`, with the rest greyed out as

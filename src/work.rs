@@ -397,6 +397,7 @@ impl WorkItem {
         match self {
             WorkItem::Issue { kind, .. } => kind.template(),
             WorkItem::PullRequest { review, .. } => review.template(),
+            WorkItem::Session { prompt } if prompt.trim().is_empty() => Template::SessionBlank,
             WorkItem::Session { .. } => Template::Session,
         }
     }
