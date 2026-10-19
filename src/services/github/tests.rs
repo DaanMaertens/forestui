@@ -311,11 +311,19 @@ fn only_an_unknown_blocked_by_or_parent_field_asks_for_the_older_fields() {
     ));
     assert!(!rejects_newer_fields("HTTP 502: Bad Gateway"));
     assert!(!rejects_newer_fields(""));
-    assert!(ISSUE_FIELDS.ends_with(",blockedBy,parent"));
     assert_eq!(
-        format!("{LEGACY_ISSUE_FIELDS},blockedBy,parent"),
+        format!("{NO_PARENT_ISSUE_FIELDS},parent"),
         ISSUE_FIELDS,
-        "the fallback differs from the full list by blockedBy and parent alone"
+        "a gh without parent keeps blockedBy"
+    );
+    assert_eq!(
+        format!("{LEGACY_ISSUE_FIELDS},blockedBy"),
+        NO_PARENT_ISSUE_FIELDS,
+        "the last fallback drops blockedBy alone"
+    );
+    assert_eq!(
+        ISSUE_FIELD_SETS,
+        [ISSUE_FIELDS, NO_PARENT_ISSUE_FIELDS, LEGACY_ISSUE_FIELDS]
     );
 }
 

@@ -734,6 +734,8 @@ pub struct GitHubIssue {
     /// know the field, which leaves the issue unblocked.
     #[serde(default)]
     pub blocked_by: Option<BlockedBy>,
+    /// The issue's page, which says which repository it is in: a parent is
+    /// only branched from when its URL names the same one.
     #[serde(default)]
     pub url: String,
     /// The issue this one is a sub-issue of. `None` from a `gh` too old to

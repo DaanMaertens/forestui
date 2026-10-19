@@ -330,9 +330,17 @@ fn pull_request_filters(scope: Scope) -> &'static [&'static [&'static str]] {
 const ISSUE_FIELDS: &str =
     "number,title,state,url,createdAt,author,assignees,labels,blockedBy,parent";
 
-/// [`ISSUE_FIELDS`] for a `gh` too old to know `blockedBy` or `parent`, whose
-/// issues then all count as unblocked and as having no parent.
+/// [`ISSUE_FIELDS`] for a `gh` that knows `blockedBy` but not `parent`, whose
+/// issues then all count as having no parent — and stay blocked as before.
+const NO_PARENT_ISSUE_FIELDS: &str =
+    "number,title,state,url,createdAt,author,assignees,labels,blockedBy";
+
+/// [`ISSUE_FIELDS`] for a `gh` too old to know either, whose issues then all
+/// count as unblocked and as having no parent.
 const LEGACY_ISSUE_FIELDS: &str = "number,title,state,url,createdAt,author,assignees,labels";
+
+/// The field lists tried in turn, newest first.
+const ISSUE_FIELD_SETS: [&str; 3] = [ISSUE_FIELDS, NO_PARENT_ISSUE_FIELDS, LEGACY_ISSUE_FIELDS];
 
 /// Whether `gh` refused a call because it does not know `blockedBy` or
 /// `parent`. `gh` rejects the whole call over one unknown field, so without
@@ -350,19 +358,19 @@ async fn fetch_issues(path: &str, scope: Scope) -> Result<Merged<GitHubIssue>, L
         let mut args = vec!["issue", "list"];
         args.extend_from_slice(filter);
         args.extend_from_slice(&["--state", "open", "--limit", &limit, "--json"]);
-        let (mut code, mut stdout, stderr) = run_gh(
-            &[&args[..], &[ISSUE_FIELDS]].concat(),
-            Some(Path::new(path)),
-        )
-        .await;
-        if code != 0 && rejects_newer_fields(&stderr) {
-            (code, stdout, _) = run_gh(
-                &[&args[..], &[LEGACY_ISSUE_FIELDS]].concat(),
-                Some(Path::new(path)),
-            )
-            .await;
+        let mut answer = None;
+        for fields in ISSUE_FIELD_SETS {
+            let (code, stdout, stderr) =
+                run_gh(&[&args[..], &[fields]].concat(), Some(Path::new(path))).await;
+            if code == 0 {
+                answer = Some(stdout);
+                break;
+            }
+            if !rejects_newer_fields(&stderr) {
+                break;
+            }
         }
-        answers.push((code == 0).then_some(stdout));
+        answers.push(answer);
     }
     let answers: Vec<Option<&str>> = answers.iter().map(Option::as_deref).collect();
     merge_issues(&answers)

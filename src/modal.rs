@@ -1736,8 +1736,7 @@ impl StartWorkConfirmModal {
         parent.on = !parent.on;
         if parent.on {
             parent.other_base = self.base_branch.value().to_string();
-            let branch = parent.worktree.branch().unwrap_or_default().to_string();
-            self.base_branch.set_value(branch);
+            self.show_parent_branch();
         } else {
             self.base_branch.set_value(parent.other_base.clone());
         }
@@ -1749,7 +1748,17 @@ impl StartWorkConfirmModal {
             return;
         };
         parent.worktree.pick_next();
-        let branch = parent.worktree.branch().unwrap_or_default().to_string();
+        self.show_parent_branch();
+    }
+
+    /// Put the parent's branch in the base field — empty while several
+    /// worktrees wait to be picked from.
+    fn show_parent_branch(&mut self) {
+        let branch = self
+            .branching_parent()
+            .and_then(|parent| parent.worktree.branch())
+            .unwrap_or_default()
+            .to_string();
         self.base_branch.set_value(branch);
     }
 

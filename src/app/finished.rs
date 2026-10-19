@@ -166,8 +166,10 @@ pub async fn check(source: &str, linked: &[LinkedWorktree]) -> HashMap<Uuid, boo
 
     let mut verdicts = HashMap::new();
     for item in linked {
-        if let (WorkItemLink::Issue { number }, Some(_), Some(parent_branch), true) =
-            (&item.link, item.parent_issue, &item.base, signed_in)
+        if let WorkItemLink::Issue { number } = &item.link
+            && item.parent_issue.is_some()
+            && let Some(parent_branch) = &item.base
+            && signed_in
         {
             let state = github::issue_state(source, *number).await;
             let merged = if state == Some(ItemState::Open) || state.is_none() {

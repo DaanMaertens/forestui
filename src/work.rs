@@ -429,9 +429,7 @@ impl ParentWorktree {
     /// several worktrees wait to be picked from.
     pub fn branch(&self) -> Option<&str> {
         match self {
-            ParentWorktree::Existing { candidates, chosen } => chosen
-                .and_then(|index| candidates.get(index))
-                .map(|candidate| candidate.branch.as_str()),
+            ParentWorktree::Existing { .. } => self.chosen().map(|chosen| chosen.branch.as_str()),
             ParentWorktree::Create(names) => Some(&names.branch),
         }
     }
