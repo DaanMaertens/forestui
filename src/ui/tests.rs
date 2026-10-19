@@ -257,3 +257,93 @@ fn wrap_words_splits_an_overlong_word() {
     assert_eq!(wrapped.concat(), "supercalifragilistic");
     assert!(wrap_words("anything", 0).is_empty());
 }
+
+/// The cell where `text` starts on screen row `y`.
+fn cell_of<'a>(
+    buffer: &'a ratatui::buffer::Buffer,
+    y: u16,
+    text: &str,
+) -> &'a ratatui::buffer::Cell {
+    let row: String = (0..buffer.area.width)
+        .map(|col| buffer[(col, y)].symbol().to_string())
+        .collect();
+    let byte = row
+        .find(text)
+        .unwrap_or_else(|| panic!("{text:?} not in {row:?}"));
+    &buffer[(row[..byte].chars().count() as u16, y)]
+}
+
+/// The cursor row keeps each span's own colour: the selected worktree still
+/// wears its session state, on the cursor background, bold — focused or not.
+#[tokio::test]
+async fn the_cursor_row_keeps_the_session_state_colour() {
+    use crate::app::test_support::app_with_fixture;
+    use crate::app::{Focus, SidebarRow};
+    use crate::services::live::{Activity, SessionState};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Modifier;
+
+    let _theme = crate::theme::test_lock();
+    let palette = crate::theme::active();
+    // Header row + the 3-row gh-status box put the first tree row at y=4.
+    let repository_row = 4;
+    let worktree_row = 5;
+
+    for (focus, background) in [
+        (Focus::Sidebar, palette.accent_dark),
+        (Focus::Detail, palette.bg_selected),
+    ] {
+        for (state, colour) in [
+            (SessionState::NeedsYou, palette.warning),
+            (SessionState::Busy, palette.accent),
+            (SessionState::Idle, palette.success),
+        ] {
+            let (_dir, mut app) = app_with_fixture();
+            let Some(SidebarRow::Worktree {
+                name,
+                branch,
+                activity,
+                ..
+            }) = app.rows.get_mut(1)
+            else {
+                panic!("fixture row 1 is not a worktree");
+            };
+            let name = name.clone();
+            *branch = Some("a-branch".into());
+            *activity = Some(Activity { state, count: 2 });
+            app.sidebar_index = 1;
+            app.focus = focus;
+
+            let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
+            terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+            let buffer = terminal.backend().buffer();
+            for text in [name.as_str(), "{2}"] {
+                let cell = cell_of(buffer, worktree_row, text);
+                assert_eq!(cell.fg, colour, "{text} on the {focus:?} cursor, {state:?}");
+                assert_eq!(cell.bg, background, "{text} background, {focus:?}");
+                assert!(
+                    cell.modifier.contains(Modifier::BOLD),
+                    "{text} bold, {focus:?}"
+                );
+            }
+            let branch = cell_of(buffer, worktree_row, "[a-branch]");
+            assert_eq!(branch.fg, palette.accent, "branch, {focus:?}");
+
+            // A finished worktree stays dimmed on the cursor too.
+            if let Some(SidebarRow::Worktree { finished, .. }) = app.rows.get_mut(1) {
+                *finished = true;
+            }
+            terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+            let cell = cell_of(terminal.backend().buffer(), worktree_row, &name);
+            assert_eq!(cell.fg, palette.text_muted, "finished, {focus:?}");
+
+            // A repository on the cursor keeps its muted twisty.
+            app.sidebar_index = 0;
+            terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+            let twisty = &terminal.backend().buffer()[(0, repository_row)];
+            assert_eq!(twisty.fg, palette.text_muted, "twisty, {focus:?}");
+            assert_eq!(twisty.bg, background, "twisty background, {focus:?}");
+        }
+    }
+}

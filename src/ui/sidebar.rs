@@ -1,6 +1,7 @@
 //! The repository / worktree tree on the left.
 
 use crate::app::{App, Focus, HitTarget, SidebarRow};
+use crate::services::live::SessionState;
 use crate::theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -59,9 +60,9 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) -> Option<HoverReveal>
     state.select(Some(app.sidebar_index));
 
     let highlight = if app.focus == Focus::Sidebar {
-        theme::cursor()
+        theme::sidebar_cursor()
     } else {
-        theme::cursor_unfocused()
+        theme::sidebar_cursor_unfocused()
     };
     frame.render_stateful_widget(
         List::new(items).highlight_style(highlight),
@@ -258,11 +259,17 @@ fn row_line(row: &SidebarRow) -> Line<'static> {
             if *finished {
                 spans.push(Span::styled("✓ ", theme::finished_badge()));
             }
-            // One session is said by the colour alone; a count from two.
-            if let (Some(activity), Some(style)) = (activity, state_style)
-                && activity.count >= 2
-            {
-                spans.push(Span::styled(format!("{{{}}} ", activity.count), style));
+            if let (Some(activity), Some(style)) = (activity, state_style) {
+                // Busy gets a glyph as well as a colour: several themes colour
+                // busy and idle alike, and the cursor background lowers the
+                // colour's contrast.
+                if activity.state == SessionState::Busy {
+                    spans.push(Span::styled("⟳ ", style));
+                }
+                // One session is said by the colour alone; a count from two.
+                if activity.count >= 2 {
+                    spans.push(Span::styled(format!("{{{}}} ", activity.count), style));
+                }
             }
             spans.push(Span::styled(name.clone(), name_style));
             if let Some(branch) = branch {
