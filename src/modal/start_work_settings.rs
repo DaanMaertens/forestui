@@ -29,7 +29,7 @@ impl Section {
         match self {
             Section::Listing => "LISTING",
             Section::Naming => "NAMING",
-            Section::Suggestion => "SESSION NAME SUGGESTION",
+            Section::Suggestion => "SINGLE SESSION NAME SUGGESTION",
         }
     }
 }

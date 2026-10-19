@@ -738,6 +738,13 @@ fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
     column.text(frame, format!("in {}", modal.repo_name), theme::secondary());
     column.line(frame, widgets::section("Work Mode"));
     let focused = modal.focus == StartWorkModal::FOCUS_LIST;
+    // Descriptions line up two columns past the longest label.
+    let label_width = WorkMode::ALL
+        .map(|m| m.label().len())
+        .into_iter()
+        .max()
+        .unwrap_or(0)
+        + 2;
     for (row, mode) in WorkMode::ALL.into_iter().enumerate() {
         let enabled = modal.mode_enabled(mode);
         let style = if !enabled {
@@ -751,7 +758,12 @@ fn start_work_mode(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits: 
         } else {
             theme::primary()
         };
-        let mut text = format!(" {:<16}{}", mode.label(), mode.description());
+        let mut text = format!(
+            " {:<width$}{}",
+            mode.label(),
+            mode.description(),
+            width = label_width
+        );
         if !enabled {
             text.push_str("  (needs GitHub)");
         }
@@ -971,7 +983,7 @@ fn start_work_prompt(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits
     let now = util::local_now();
     let names = match work::session_names(&modal.start_work, now, modal.prompt.value()) {
         Some(names) => format!("Worktree: {}", names.worktree),
-        None => "The single session name pattern fills to nothing".to_string(),
+        None => "The single session worktree name pattern fills to nothing".to_string(),
     };
     column.text(frame, names, theme::muted());
     column.text(

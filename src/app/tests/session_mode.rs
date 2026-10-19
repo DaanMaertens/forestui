@@ -306,7 +306,7 @@ async fn a_session_is_never_matched_by_its_link() {
 /// started: the other modes are greyed out and the highlight cannot reach
 /// them.
 #[tokio::test]
-async fn a_repository_without_github_offers_only_session_and_worktree() {
+async fn a_repository_without_github_offers_only_single_session_and_worktree() {
     let (_dir, mut app, path) = app_with_issues(Vec::new());
     app.handle_key(key(KeyCode::Char('s')));
     no_github(&mut app, &path);
