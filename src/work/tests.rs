@@ -193,6 +193,7 @@ fn a_session_is_named_from_its_first_words() {
     assert_eq!(
         session_names(
             &defaults(),
+            noon(),
             "Try a dark theme for the sidebar and every modal"
         ),
         Some(WorktreeNames {
@@ -201,29 +202,49 @@ fn a_session_is_named_from_its_first_words() {
         })
     );
     assert_eq!(
-        session_names(&defaults(), "  Spike:   GraphQL?  ").map(|n| n.worktree),
+        session_names(&defaults(), noon(), "  Spike:   GraphQL?  ").map(|n| n.worktree),
         Some("session-spike-graphql".into())
     );
 }
 
-/// A prompt with nothing sluggable names nothing, rather than a bare
-/// `session-` that every such prompt would share.
+/// A fixed moment, so timestamp names are known in advance.
+fn noon() -> chrono::NaiveDateTime {
+    chrono::NaiveDate::from_ymd_opt(2026, 10, 11)
+        .and_then(|d| d.and_hms_opt(14, 32, 5))
+        .unwrap_or_default()
+}
+
+/// A blank prompt, or one with nothing sluggable, is named for the minute
+/// it was started, through the session naming: unique enough, and sortable.
 #[test]
-fn a_prompt_with_nothing_sluggable_has_no_names() {
-    assert_eq!(session_names(&defaults(), ""), None);
-    assert_eq!(session_names(&defaults(), "!!! ???"), None);
+fn a_prompt_with_nothing_sluggable_is_named_for_the_time() {
+    let expected = Some(WorktreeNames {
+        worktree: "session-20261011-1432".into(),
+        branch: "session/20261011-1432".into(),
+    });
+    assert_eq!(session_names(&defaults(), noon(), ""), expected);
+    assert_eq!(session_names(&defaults(), noon(), "  \n "), expected);
+    assert_eq!(session_names(&defaults(), noon(), "!!! ???"), expected);
+}
+
+/// A pattern that fills to nothing still names nothing, timestamp or not.
+#[test]
+fn a_pattern_without_a_slug_still_names_nothing_from_blank() {
+    let mut settings = defaults();
+    settings.session.name_pattern = String::new();
+    assert_eq!(session_names(&settings, noon(), ""), None);
 }
 
 #[test]
 fn long_first_words_are_still_capped() {
-    let names = session_names(&defaults(), &"abcdefghij ".repeat(6)).unwrap();
+    let names = session_names(&defaults(), noon(), &"abcdefghij ".repeat(6)).unwrap();
     assert!(names.worktree.len() <= "session-".len() + 40, "{names:?}");
     assert!(!names.worktree.ends_with('-'), "{names:?}");
 }
 
 #[test]
 fn a_copy_takes_the_first_free_suffix_from_two() {
-    let names = session_names(&defaults(), "Dark mode").unwrap();
+    let names = session_names(&defaults(), noon(), "Dark mode").unwrap();
     let copy = first_free_copy(&names, |_| false);
     assert_eq!(copy.worktree, "session-dark-mode-2");
     assert_eq!(copy.branch, "session/dark-mode-2");
@@ -241,7 +262,7 @@ fn worktree(name: &str, branch: &str) -> crate::models::Worktree {
 /// would make git refuse the create.
 #[test]
 fn names_clash_on_the_worktree_name_or_the_branch() {
-    let names = session_names(&defaults(), "Dark mode").unwrap();
+    let names = session_names(&defaults(), noon(), "Dark mode").unwrap();
     let by_name = [worktree("session-dark-mode", "elsewhere")];
     let by_branch = [worktree("renamed", "session/dark-mode")];
     let neither = [worktree("session-dark-mode-2", "session/dark-mode-2")];
@@ -369,7 +390,7 @@ fn a_session_follows_its_own_naming() {
         branch_pattern: "spike-{slug}".into(),
     };
     assert_eq!(
-        session_names(&settings, "Dark mode"),
+        session_names(&settings, noon(), "Dark mode"),
         Some(WorktreeNames {
             worktree: "try-dark-mode".into(),
             branch: "spike/spike-dark-mode".into(),
@@ -377,7 +398,7 @@ fn a_session_follows_its_own_naming() {
     );
     settings.session.name_pattern = "idea-{number}-{slug}".into();
     assert_eq!(
-        session_names(&settings, "Dark mode").map(|n| n.worktree),
+        session_names(&settings, noon(), "Dark mode").map(|n| n.worktree),
         Some("idea-dark-mode".into())
     );
 }
@@ -413,7 +434,7 @@ fn a_branch_pattern_that_fills_to_nothing_takes_the_worktree_name() {
     // A session has no number, so `{number}` alone fills to nothing.
     settings.session.branch_pattern = "{number}".into();
     assert_eq!(
-        session_names(&settings, "Dark mode").map(|n| n.branch),
+        session_names(&settings, noon(), "Dark mode").map(|n| n.branch),
         Some("session/session-dark-mode".into())
     );
 }

@@ -1406,8 +1406,7 @@ impl App {
             AppEvent::WorktreeAdded {
                 create,
                 worktree,
-                first_prompt,
-                yolo,
+                claude,
             } => {
                 let repo_id = create.repo_id();
                 self.worktree_sync.finish_create(create);
@@ -1435,8 +1434,9 @@ impl App {
                 self.notify_saved(format!("Created worktree '{name}'"));
                 // Named after the worktree itself, with no prefix: the window,
                 // the session and the worktree carry one recognisable name.
-                if let Some(prompt) = first_prompt {
-                    self.start_claude(&path, None, yolo, None, Some(name), Some(&prompt));
+                if let Some(claude) = claude {
+                    let prompt = claude.first_prompt.as_deref();
+                    self.start_claude(&path, None, claude.yolo, None, Some(name), prompt);
                 }
             }
             AppEvent::PromptEdited {

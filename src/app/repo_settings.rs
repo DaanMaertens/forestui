@@ -9,6 +9,7 @@
 
 use super::App;
 use crate::event::{AppEvent, Severity};
+use crate::modal::{Modal, StartWorkSettingsModal};
 use crate::models::{PartialStartWork, Scope, StartWorkSettings};
 use crate::repo_settings::{self, ConfigFile, PROMPTS_DIR, RepoKey};
 use crate::services::{github, settings as settings_service};
@@ -239,6 +240,67 @@ impl App {
                 format!("Could not create {key}'s {}: {error}", file.relative_path()),
                 Severity::Error,
             ),
+        }
+    }
+
+    /// Open the Start Work Settings dialog on a repository's overrides, as
+    /// its settings file holds them now. A small local file, read here for
+    /// the same reason the overrides are re-read on selection.
+    pub(super) fn open_repository_start_work_settings(&mut self, key: RepoKey) {
+        let file = repo_settings::read_file(&key.dir(&settings_service::repos_dir()));
+        let modal = StartWorkSettingsModal::repository(key, &self.settings.start_work, file);
+        self.modals.push(Modal::StartWorkSettings(Box::new(modal)));
+    }
+
+    /// Replace the global Start work settings with what the dialog saved. A
+    /// repository's overrides are laid over them as before, so they keep
+    /// winning in their repository.
+    pub(super) fn save_global_start_work(&mut self, start_work: StartWorkSettings) {
+        let paths: Vec<String> = self.repos.keys().cloned().collect();
+        let before: Vec<StartWorkSettings> =
+            paths.iter().map(|path| self.start_work_for(path)).collect();
+        self.settings.start_work = start_work;
+        match settings_service::save_settings(&self.settings) {
+            Ok(()) => self.notify("Start work settings saved", Severity::Information),
+            Err(error) => self.notify(format!("Could not save settings: {error}"), Severity::Error),
+        }
+        for (path, before) in paths.iter().zip(before) {
+            self.settings_changed(path, &before);
+        }
+    }
+
+    /// Write a repository's changed overrides into its settings file, then
+    /// re-read them for every checkout of that repository, so the next
+    /// Start work there uses them.
+    pub(super) fn save_repository_start_work(
+        &mut self,
+        key: RepoKey,
+        changes: Vec<repo_settings::OverrideChange>,
+    ) {
+        // Saved untouched: the file stays exactly as the user left it.
+        if changes.is_empty() {
+            return;
+        }
+        let dir = key.dir(&settings_service::repos_dir());
+        if let Err(error) = repo_settings::save_overrides(&dir, &changes) {
+            self.notify(
+                format!("Could not save {key}'s settings: {error}"),
+                Severity::Error,
+            );
+            return;
+        }
+        self.notify(
+            format!("Saved {key}'s Start work settings"),
+            Severity::Information,
+        );
+        let paths: Vec<String> = self
+            .repos
+            .iter()
+            .filter(|(_, lookup)| lookup.key.as_ref() == Some(&key))
+            .map(|(path, _)| path.clone())
+            .collect();
+        for path in paths {
+            self.reread_repository_settings(&path);
         }
     }
 }

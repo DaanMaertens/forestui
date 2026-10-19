@@ -1334,7 +1334,12 @@ modal, and `w` now does nothing.
 **Area:** Sweep | **Priority:** P0 | 🟢 EXECUTED (both builds)
 **Expected:** `DEFAULT EDITOR` = `Vim (tmux)`, `BRANCH PREFIX` = `feat/`,
 `THEME` = `Forest Dark…` (a button opening the theme picker; the frozen python
-baseline still shows the old inert `System` cycle), `1 custom button configured`.
+baseline still shows the old inert `System` cycle), `1 custom button configured`,
+and beside `Manage Custom Buttons...` a `Start Work Settings...` button under
+`START WORK` (Rust only), which opens the Start Work Settings dialog. Its
+fields, Save and Cancel, timeout validation, clicks, scrolling on a short
+terminal, and the same dialog opened from Repository Settings for one
+repository's overrides are unit-tested and were checked by hand under `tu`.
 **Fails if:** the count does not reflect `custom_buttons` in the settings file.
 
 ### UC-58 — `d` opens the delete confirmation
@@ -1726,7 +1731,10 @@ because the name on screen is taken: `Open existing`, `Create copy` (naming
 `Escape` steps back one screen (clash → prompt → modes → closed) and nothing
 is created. What each choice does, a suggestion never replacing an edited
 name or reaching a screen that was left, a failed or disabled suggestion
-keeping the first-words names, the session naming, `session.md` and
+keeping the first-words names, a blank prompt confirming with timestamp
+names (`session-20261018-1839`) and launching Claude with no first prompt
+or with a `session-blank.md` the user wrote,
+the session naming, `session.md` and
 `session-name.md` overrides, and that a repository without a GitHub remote
 offers only `session` and `worktree`, with the rest greyed out as
 `(needs GitHub)`, are unit-tested.

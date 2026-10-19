@@ -13,6 +13,10 @@ pub const FEATURE_TEMPLATE: &str = include_str!("../assets/prompts/feature.md");
 /// nothing else, so by default Claude gets exactly what the user wrote.
 pub const SESSION_TEMPLATE: &str = include_str!("../assets/prompts/session.md");
 
+/// The built-in `session-blank` template: empty, so a blank session prompt
+/// starts Claude with no first message until the user writes one.
+pub const SESSION_BLANK_TEMPLATE: &str = include_str!("../assets/prompts/session-blank.md");
+
 /// The built-in `session-name` template: the name suggestion's instruction,
 /// asking for a few-word kebab-case name for the session prompt and nothing
 /// else.
@@ -33,6 +37,9 @@ pub enum Template {
     Issue,
     Feature,
     Session,
+    /// A blank session prompt's first message, if any: `session` wraps a
+    /// typed prompt, and a blank one has none to wrap.
+    SessionBlank,
     /// Not a first prompt: what the name suggestion sends to Claude.
     SessionName,
     PrReviewOthers,
@@ -41,10 +48,11 @@ pub enum Template {
 
 impl Template {
     /// Every template, in the order the Settings picker lists them.
-    pub const ALL: [Template; 6] = [
+    pub const ALL: [Template; 7] = [
         Template::Issue,
         Template::Feature,
         Template::Session,
+        Template::SessionBlank,
         Template::SessionName,
         Template::PrReviewOthers,
         Template::PrReviewOwn,
@@ -56,6 +64,7 @@ impl Template {
             Template::Issue => "issue.md",
             Template::Feature => "feature.md",
             Template::Session => "session.md",
+            Template::SessionBlank => "session-blank.md",
             Template::SessionName => "session-name.md",
             Template::PrReviewOthers => "pr-review-others.md",
             Template::PrReviewOwn => "pr-review-own.md",
@@ -68,10 +77,18 @@ impl Template {
             Template::Issue => "Issue",
             Template::Feature => "Feature",
             Template::Session => "Session",
+            Template::SessionBlank => "Session, blank prompt",
             Template::SessionName => "Session name suggestion",
             Template::PrReviewOthers => "Review someone else's PR",
             Template::PrReviewOwn => "Review my own PR",
         }
+    }
+
+    /// Whether an empty file is this template's own choice rather than a
+    /// broken one. Only for the template whose default is empty: nothing
+    /// is a fine first message for a blank session.
+    fn may_be_empty(self) -> bool {
+        matches!(self, Template::SessionBlank)
     }
 
     pub fn default_text(self) -> &'static str {
@@ -79,6 +96,7 @@ impl Template {
             Template::Issue => ISSUE_TEMPLATE,
             Template::Feature => FEATURE_TEMPLATE,
             Template::Session => SESSION_TEMPLATE,
+            Template::SessionBlank => SESSION_BLANK_TEMPLATE,
             Template::SessionName => SESSION_NAME_TEMPLATE,
             Template::PrReviewOthers => PR_REVIEW_OTHERS_TEMPLATE,
             Template::PrReviewOwn => PR_REVIEW_OWN_TEMPLATE,
@@ -98,7 +116,8 @@ pub struct Resolved {
 /// repository's prompts, then the global ones — or its built-in default.
 ///
 /// A missing file is the normal case and says nothing. A file that is there
-/// but unusable — unreadable, not UTF-8, or blank — falls through to the
+/// but unusable — unreadable, not UTF-8, or blank where blank is not a
+/// choice — falls through to the
 /// next layer too, since a broken template must not stop a launch, but with
 /// a warning: the user wrote that file and expects it to be used.
 pub fn resolve(layers: &[&Path], template: Template) -> Resolved {
@@ -106,7 +125,9 @@ pub fn resolve(layers: &[&Path], template: Template) -> Resolved {
     for dir in layers {
         let path = dir.join(template.file_name());
         let why = match std::fs::read_to_string(&path) {
-            Ok(text) if text.trim().is_empty() => "is empty".to_string(),
+            Ok(text) if text.trim().is_empty() && !template.may_be_empty() => {
+                "is empty".to_string()
+            }
             Ok(text) => {
                 return Resolved {
                     warning: warning(&problems, &path.display().to_string()),

@@ -27,6 +27,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+mod start_work_settings;
+
 /// Width of a normal modal — Textual's `.modal-container { width: 80 }`.
 const WIDTH: u16 = 80;
 /// Width of the two wide modals — Textual's `.modal-wide { width: 140 }`.
@@ -85,6 +87,7 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) -> Hits {
         Modal::EditButton(m) => edit_button(frame, m, area, &mut hits),
         Modal::ThemePicker(m) => theme_picker(frame, m, area, &mut hits),
         Modal::PromptTemplates(m) => prompt_templates(frame, m, area, &mut hits),
+        Modal::StartWorkSettings(m) => start_work_settings::render(frame, m, area, &mut hits),
         Modal::ClaudeIntegration(m) => claude_integration(frame, m, area, &mut hits),
         Modal::Confirm(m) => confirm(frame, m, area, &mut hits),
         Modal::RenameSession(m) => rename_session(frame, m, area, &mut hits),
@@ -965,9 +968,10 @@ fn start_work_prompt(frame: &mut Frame, modal: &StartWorkModal, area: Rect, hits
     );
     // What Enter would create, so the names are no surprise on the confirm
     // screen — and why Enter does nothing while there are none.
-    let names = match work::session_names(&modal.start_work, modal.prompt.value()) {
+    let now = util::local_now();
+    let names = match work::session_names(&modal.start_work, now, modal.prompt.value()) {
         Some(names) => format!("Worktree: {}", names.worktree),
-        None => "Type a few words to name the worktree after".to_string(),
+        None => "The session name pattern fills to nothing".to_string(),
     };
     column.text(frame, names, theme::muted());
     column.text(
@@ -1058,8 +1062,12 @@ fn start_work_confirm(
     let room = (area.height.saturating_mul(95) / 100)
         .saturating_sub(body)
         .max(MIN_PROMPT_ROWS) as usize;
-    let mut prompt: Vec<String> = modal
-        .prompt()
+    // A blank session prompt starts Claude with nothing; saying so beats an
+    // empty box that reads like a prompt failed to fill.
+    let text = modal
+        .first_prompt()
+        .unwrap_or_else(|| "No first prompt: Claude starts ready to talk to.".to_string());
+    let mut prompt: Vec<String> = text
         .lines()
         .flat_map(|line| {
             let wrapped = super::wrap_words(line, width);
@@ -1328,17 +1336,40 @@ fn settings(frame: &mut Frame, modal: &SettingsModal, area: Rect, hits: &mut Hit
         false,
     );
 
-    column.line(frame, widgets::section("CUSTOM CLAUDE BUTTONS"));
+    // Start work's settings share the custom buttons' row, and open a
+    // dialog of their own, for the reason the back key shares the
+    // templates' row below: a section here would push the dialog past a
+    // 40-row terminal, and the settings themselves are far more than fit.
+    let manage = "Manage Custom Buttons...";
+    let indent = (widgets::button_box_width(manage) + GAP) as usize;
+    column.line(
+        frame,
+        Line::from(vec![
+            Span::styled(
+                format!("{:<indent$}", "CUSTOM CLAUDE BUTTONS"),
+                theme::section_header(),
+            ),
+            Span::styled("START WORK", theme::section_header()),
+        ]),
+    );
     column.text(frame, modal.buttons_summary(), theme::muted());
     column.controls(
         frame,
         hits,
-        vec![control(
-            "Manage Custom Buttons...",
-            modal.focus == SettingsModal::FOCUS_MANAGE,
-            theme::Variant::Normal,
-            SettingsModal::FOCUS_MANAGE,
-        )],
+        vec![
+            control(
+                manage,
+                modal.focus == SettingsModal::FOCUS_MANAGE,
+                theme::Variant::Normal,
+                SettingsModal::FOCUS_MANAGE,
+            ),
+            control(
+                "Start Work Settings...",
+                modal.focus == SettingsModal::FOCUS_START_WORK,
+                theme::Variant::Normal,
+                SettingsModal::FOCUS_START_WORK,
+            ),
+        ],
         false,
     );
     // The back key shares the templates' row for the same reason the Remote

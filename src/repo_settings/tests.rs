@@ -222,3 +222,47 @@ fn an_empty_base_branch_is_none() {
         assert_eq!(overrides_from(json).base_branch(), None, "{json}");
     }
 }
+
+/// With no file and nothing to override, nothing is written: opening and
+/// saving the dialog untouched must not leave an empty file behind.
+#[test]
+fn no_file_and_no_overrides_writes_nothing() {
+    assert_eq!(apply_overrides(None, &[]), Ok(None));
+    let inherit: [OverrideChange; 1] = [(&["scope"], None)];
+    assert_eq!(apply_overrides(None, &inherit), Ok(None));
+}
+
+/// A first override creates the file with only that key.
+#[test]
+fn a_first_override_writes_only_its_key() {
+    let change: [OverrideChange; 1] =
+        [(&["session", "branch_prefix"], Some(serde_json::json!("s/")))];
+    let written = apply_overrides(None, &change).unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&written).unwrap(),
+        serde_json::json!({"start_work": {"session": {"branch_prefix": "s/"}}})
+    );
+    assert!(written.ends_with('\n'));
+}
+
+/// A file that does not parse, or is not an object, is refused rather than
+/// replaced.
+#[test]
+fn a_broken_file_is_refused() {
+    let change: [OverrideChange; 1] = [(&["scope"], Some(serde_json::json!("all")))];
+    assert!(apply_overrides(Some("{ nope"), &change).is_err());
+    assert!(apply_overrides(Some("[1, 2]"), &change).is_err());
+}
+
+/// Removing a key prunes the objects it leaves empty, up to the section,
+/// and nothing else.
+#[test]
+fn removing_a_key_prunes_what_it_empties() {
+    let raw = r#"{"start_work": {"issue": {"branch_prefix": "x/"}, "base_branch": null}}"#;
+    let change: [OverrideChange; 1] = [(&["issue", "branch_prefix"], None)];
+    let written = apply_overrides(Some(raw), &change).unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&written).unwrap(),
+        serde_json::json!({"start_work": {"base_branch": null}})
+    );
+}

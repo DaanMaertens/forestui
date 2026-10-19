@@ -10,6 +10,7 @@
 use crate::models::{PartialStartWork, StartWorkSettings};
 use crate::prompt::Template;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -176,6 +177,121 @@ pub fn ensure_file(
         ConfigFile::Settings => ensure_settings_file(dir, global),
         ConfigFile::Template(template) => {
             crate::prompt::ensure_file(&dir.join(PROMPTS_DIR), template, &[global_prompts])
+        }
+    }
+}
+
+/// A repository's settings file as JSON: `Ok(None)` when there is none
+/// yet, `Err` saying why when it cannot be read or parsed.
+pub fn read_file(dir: &Path) -> Result<Option<Value>, String> {
+    let path = dir.join(SETTINGS_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => parse_file(&raw)
+            .map(Some)
+            .map_err(|why| format!("{} {why}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{} could not be read ({e})", path.display())),
+    }
+}
+
+fn parse_file(raw: &str) -> Result<Value, String> {
+    match serde_json::from_str::<Value>(raw) {
+        Ok(value) if value.is_object() => Ok(value),
+        Ok(_) => Err("is not a JSON object".to_string()),
+        Err(e) => Err(format!("does not parse ({e})")),
+    }
+}
+
+/// One change to a repository's overrides: a path in its `start_work`
+/// section, and the value to write there — `None` to remove the key and
+/// inherit the global setting again.
+pub type OverrideChange = (&'static [&'static str], Option<Value>);
+
+/// `raw`, the settings file as it is (`None` for no file), with `changes`
+/// made to its `start_work` section and every other key left as it was. A
+/// section left with nothing in it is removed. Keys come back sorted: the
+/// file goes through a `Value`, and keeping the user's order would mean
+/// `serde_json`'s `preserve_order`, which changes every JSON write forestui
+/// makes. `Ok(None)` when there is
+/// nothing to write: no file, and nothing to put in one.
+pub fn apply_overrides(
+    raw: Option<&str>,
+    changes: &[OverrideChange],
+) -> Result<Option<String>, String> {
+    let mut file = match raw {
+        Some(raw) => parse_file(raw)?,
+        None => Value::Object(Default::default()),
+    };
+    for (path, value) in changes {
+        let full: Vec<&str> = std::iter::once("start_work")
+            .chain(path.iter().copied())
+            .collect();
+        set_path(&mut file, &full, value.clone());
+    }
+    if raw.is_none() && file.as_object().is_some_and(|o| o.is_empty()) {
+        return Ok(None);
+    }
+    serde_json::to_string_pretty(&file)
+        .map(|json| Some(format!("{json}\n")))
+        .map_err(|e| e.to_string())
+}
+
+/// Write `changes` into the settings file in `dir`, atomically. A file that
+/// cannot be read or parsed is never written over: the user's typo is
+/// theirs to fix, not ours to throw away.
+pub fn save_overrides(dir: &Path, changes: &[OverrideChange]) -> Result<(), String> {
+    let path = dir.join(SETTINGS_FILE);
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => Some(raw),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{} could not be read ({e})", path.display())),
+    };
+    let Some(json) = apply_overrides(raw.as_deref(), changes)
+        .map_err(|why| format!("{} {why}", path.display()))?
+    else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    crate::util::write_atomically(&path, &json).map_err(|e| e.to_string())
+}
+
+/// Set `path` in `root` to `value`, creating the objects on the way, or
+/// remove it for `None` — along with any object that leaves empty, so a
+/// section with nothing overridden goes rather than staying as `{}`.
+pub fn set_path(root: &mut Value, path: &[&str], value: Option<Value>) {
+    let Some((first, rest)) = path.split_first() else {
+        return;
+    };
+    let Some(value) = value else {
+        remove(root, path);
+        return;
+    };
+    if !root.is_object() {
+        *root = Value::Object(Default::default());
+    }
+    let Some(object) = root.as_object_mut() else {
+        return;
+    };
+    if rest.is_empty() {
+        object.insert(first.to_string(), value);
+    } else {
+        let child = object.entry(*first).or_insert(Value::Null);
+        set_path(child, rest, Some(value));
+    }
+}
+
+fn remove(node: &mut Value, path: &[&str]) {
+    let (Some(object), Some((first, rest))) = (node.as_object_mut(), path.split_first()) else {
+        return;
+    };
+    if rest.is_empty() {
+        object.remove(*first);
+        return;
+    }
+    if let Some(child) = object.get_mut(*first) {
+        remove(child, rest);
+        if child.as_object().is_some_and(|o| o.is_empty()) {
+            object.remove(*first);
         }
     }
 }

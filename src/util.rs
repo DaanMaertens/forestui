@@ -218,6 +218,11 @@ pub fn exit_code(status: std::process::ExitStatus, sentinel: i32) -> i32 {
     status.code().unwrap_or(sentinel)
 }
 
+/// The local wall clock, for names made from the time.
+pub fn local_now() -> chrono::NaiveDateTime {
+    chrono::Local::now().naive_local()
+}
+
 /// Write a file via a sibling temp file and an atomic rename.
 ///
 /// `.forestui-config.json` is the only record of every tracked repository and

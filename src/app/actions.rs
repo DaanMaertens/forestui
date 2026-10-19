@@ -7,7 +7,7 @@
 
 use super::{Action, App, Field, PendingJump, PendingStart};
 use crate::event::Severity;
-use crate::event::{AppEvent, BranchList, BranchTarget, EventTx};
+use crate::event::{AppEvent, BranchList, BranchTarget, ClaudeStart, EventTx};
 use crate::modal::{BackKeyAnswer, IntegrationAction, ModalOutcome};
 use crate::modal::{
     Clash, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult, PromptTemplatesModal,
@@ -27,7 +27,7 @@ use uuid::Uuid;
 /// first message Claude is started with once it exists.
 struct WorkStart {
     link: WorkItemLink,
-    first_prompt: String,
+    first_prompt: Option<String>,
     /// Start that Claude with the built-in YOLO flag.
     yolo: bool,
 }
@@ -231,12 +231,12 @@ impl App {
                 let repo_id = flow.repo_id;
                 self.start_work_on_pull_request(repo_id, *item);
             }
-            ModalEffect::ConfirmSession { prompt } => {
+            ModalEffect::ConfirmSession { prompt, names } => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
                     return;
                 };
                 let repo_id = flow.repo_id;
-                self.start_session(repo_id, prompt);
+                self.start_session(repo_id, prompt, names);
             }
             ModalEffect::LaunchSession => self.launch_session(),
             ModalEffect::OpenWorktree(worktree_id) => {
@@ -274,6 +274,9 @@ impl App {
             ModalEffect::ListScope(path) => self.list_for_flow(&path),
             ModalEffect::EditTemplate(template) => self.edit_template(template),
             ModalEffect::EditRepositoryFile(key, file) => self.edit_repository_file(key, file),
+            ModalEffect::RepositoryStartWorkSettings(key) => {
+                self.open_repository_start_work_settings(key)
+            }
             ModalEffect::Fetch(repo_path) => {
                 let repo_id = self.state.selection.repository_id.unwrap_or_default();
                 let tx = self.tx.clone();
@@ -349,6 +352,12 @@ impl App {
                 if back_key_moved {
                     self.apply_back_key();
                 }
+            }
+            ModalResult::StartWorkSettingsSaved(start_work) => {
+                self.save_global_start_work(*start_work)
+            }
+            ModalResult::RepositoryStartWorkSaved { key, changes } => {
+                self.save_repository_start_work(key, changes)
             }
             ModalResult::BackKeyAnswered(answer) => self.answer_back_key(answer),
             // The picker already applied the theme live and `receive_child`
@@ -772,14 +781,10 @@ impl App {
     /// Its link is never looked up — a prompt is not an identity, and the
     /// same words may well mean new work. What can collide is the names,
     /// and those are checked on Launch, once they are final.
-    fn start_session(&mut self, repo_id: Uuid, prompt: String) {
-        let Some(repo) = self.state.find_repository(repo_id) else {
+    fn start_session(&mut self, repo_id: Uuid, prompt: String, names: work::WorktreeNames) {
+        if self.state.find_repository(repo_id).is_none() {
             return;
-        };
-        let start_work = self.start_work_for(&repo.source_path);
-        let Some(names) = work::session_names(&start_work, &prompt) else {
-            return;
-        };
+        }
         self.pending_start = Some(PendingStart {
             item: WorkItem::Session { prompt },
             names,
@@ -1711,17 +1716,17 @@ impl App {
                     };
                 let mut worktree =
                     Worktree::new(name, branch, worktree_path.to_string_lossy().to_string());
-                let (yolo, first_prompt) = start
-                    .map(|start| {
-                        worktree.work_item = Some(start.link);
-                        (start.yolo, Some(start.first_prompt))
-                    })
-                    .unwrap_or_default();
+                let claude = start.map(|start| {
+                    worktree.work_item = Some(start.link);
+                    ClaudeStart {
+                        first_prompt: start.first_prompt,
+                        yolo: start.yolo,
+                    }
+                });
                 tx.send(AppEvent::WorktreeAdded {
                     create,
                     worktree: Box::new(worktree),
-                    first_prompt,
-                    yolo,
+                    claude,
                 });
             });
             return;
@@ -1771,16 +1776,18 @@ impl App {
             );
             worktree.base_branch = base;
             worktree.created_from_ref = base_ref;
-            let yolo = start.as_ref().is_some_and(|start| start.yolo);
-            let (work_item, first_prompt) =
-                start.map(|start| (start.link, start.first_prompt)).unzip();
-            worktree.work_item = work_item;
+            let claude = start.map(|start| {
+                worktree.work_item = Some(start.link);
+                ClaudeStart {
+                    first_prompt: start.first_prompt,
+                    yolo: start.yolo,
+                }
+            });
 
             tx.send(AppEvent::WorktreeAdded {
                 create,
                 worktree: Box::new(worktree),
-                first_prompt,
-                yolo,
+                claude,
             });
         });
     }

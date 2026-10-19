@@ -17,11 +17,11 @@
    │  ┌──────────────┐                                                                                                                 │
    │  │ Forest Dark… │                                                                                                                 │
    │  └──────────────┘                                                                                                                 │
-   │  CUSTOM CLAUDE BUTTONS                                                                                                            │
+   │  CUSTOM CLAUDE BUTTONS        START WORK                                                                                          │
    │  1 custom button configured                                                                                                       │
-   │  ┌──────────────────────────┐                                                                                                     │
-   │  │ Manage Custom Buttons... │                                                                                                     │
-   │  └──────────────────────────┘                                                                                                     │
+   │  ┌──────────────────────────┐ ┌────────────────────────┐                                                                          │
+   │  │ Manage Custom Buttons... │ │ Start Work Settings... │                                                                          │
+   │  └──────────────────────────┘ └────────────────────────┘                                                                          │
    │  PROMPT TEMPLATES             BACK KEY TO FORESTUI                                                                                │
    │  ┌──────────────────────────┐ ┌──────────────┐ ┌───────────────┐                                                                  │
    │  │ Edit Prompt Templates... │ │ [x] prefix ← │ │ Change Key... │                                                                  │

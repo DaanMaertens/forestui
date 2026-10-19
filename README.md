@@ -327,7 +327,11 @@ work in three steps:
    reads the whole prompt in the background and suggests a better name. The
    suggestion replaces both names when it arrives, unless you have edited
    either one already; a failed or slow call just leaves the first-words
-   names. You can launch at any time. If the names on screen are taken when
+   names. You can launch at any time. Leave the prompt blank for a fresh
+   worktree named for the minute it was started (`session-20261011-1432`),
+   with Claude running in it and no first prompt, ready to talk to — or with
+   your `session-blank.md`, if you wrote one (see Prompt templates). If the
+   names on screen are taken when
    you launch, forestui asks whether to open the existing worktree, create a
    copy, or edit the name.
 3. **Confirm** the worktree name, branch, base branch (with **Pull repo
@@ -376,7 +380,10 @@ Each prompt comes from a Markdown template, with `{number}`, `{title}`,
 `{body}`, the prompt you typed, and its template, `session.md`, is `{body}`
 alone, so by default Claude gets exactly what you typed. Issue and PR prompts
 tell Claude to read the item with `gh` instead, so it sees the current text
-and comments. The templates are `issue.md`, `feature.md`, `session.md`,
+and comments. A blank session prompt skips `session.md` and sends
+`session-blank.md` instead, which ships empty: Claude starts with no first
+message until you write one, such as `You are in {worktree} on {branch}.`
+The templates are `issue.md`, `feature.md`, `session.md`, `session-blank.md`,
 `session-name.md`, `pr-review-others.md` and `pr-review-own.md`.
 `session-name.md` is not a first prompt: it is the instruction the name
 suggestion sends, with the session prompt as `{body}`. Each one that has no file yet
@@ -391,8 +398,18 @@ settings and templates for that repository alone, in
 `~/.config/forestui/repos/<owner>/<name>/` (a `settings.json` read only for
 its `start_work` section, plus a `prompts/` directory). Nothing is written
 inside a checkout. The key is the `owner/name` that `gh` resolves for the
-clone (see `gh repo set-default`). Each file is created from the global
+clone (see `gh repo set-default`). Each template is created from the global
 version on first use.
+
+Its **Start work settings** row opens the Start Work Settings dialog for
+that repository. Every field there either inherits the global value, shown
+dimmed in an empty field, or overrides it: type to override, clear the field
+to inherit again, and cycle a toggle through **Inherit** and its values.
+Saving writes only the overridden keys and keeps everything else in the
+file; a file that does not parse is never written over. **Edit
+settings.json...** opens the file itself, written from the global settings
+if it does not exist yet. An explicitly empty override, such as
+`"feature_labels": []`, can only be written in the file.
 
 ### Pruning finished worktrees
 
@@ -471,7 +488,9 @@ Settings are stored in `~/.config/forestui/settings.json`:
 
 Press `S` in the app to open the settings modal.
 
-`start_work` configures Start work (`s`) and is edited in the file:
+`start_work` configures Start work (`s`). Settings → **Start Work
+Settings...** edits every key below except `bug_labels`, so the file rarely
+needs touching:
 
 - `scope` — `mine` lists issues assigned to or opened by you and PRs with a
   review requested from you or opened by you; `all` lists every open one.

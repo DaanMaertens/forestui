@@ -41,6 +41,9 @@ fn escape_closes_every_modal() {
         )),
         Modal::BackKey(BackKeyModal::offer("Left", "previous-window")),
         Modal::BackKey(BackKeyModal::pick()),
+        Modal::StartWorkSettings(Box::new(StartWorkSettingsModal::global(
+            &Settings::default().start_work,
+        ))),
     ];
     for modal in &mut modals {
         assert!(matches!(
