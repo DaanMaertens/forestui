@@ -12,7 +12,7 @@
 
                               ┌──────────────────────────────────────────────────────────────────────────────┐
                               │                                                                              │
-                              │   Start Work: Session                                                        │
+                              │   Start Work: Single Session                                                 │
                               │                                                                              │
                               │  in beta                                                                     │
                               │  Prompt                                                                      │

@@ -58,7 +58,7 @@ async fn the_mode_step_lists_worktree_after_pr_review() {
     let screen = rendered(&mut app);
     let review = screen.find("pr-review").expect("listed");
     let worktree = screen
-        .find("worktree   A plain worktree: new or existing branch, no Claude")
+        .find("worktree        A plain worktree: new or existing branch, no Claude")
         .expect("listed");
     assert!(review < worktree, "{screen}");
 }

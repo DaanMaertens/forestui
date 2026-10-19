@@ -17,10 +17,10 @@
                               │                                                                              │
                               │  in beta                                                                     │
                               │  Work Mode                                                                   │
-                              │   issue      Work on an open issue: a feature, a bug or a chore              │
-                              │   session    A Claude session for anything else                              │
-                              │   pr-review  Review a pull request                                           │
-                              │   worktree   A plain worktree: new or existing branch, no Claude             │
+                              │   issue           Work on an issue: feature, bug or chore                    │
+                              │   single session  A Claude session for anything else                         │
+                              │   pr-review       Review a pull request                                      │
+                              │   worktree        A plain worktree: new or existing branch, no Claude        │
                               │                                                                              │
                               │  Enter chooses · Esc closes                                                  │
                               │                                  ┌────────┐                                  │

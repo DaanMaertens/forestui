@@ -214,7 +214,7 @@ pane, `↑`/`↓` move and `Enter` activates.
 | `PgUp` / `PgDn` | Page the sidebar, or scroll the detail pane |
 | `Enter` | Select a row / activate the focused control |
 | `a` | Add repository |
-| `s` | Start work (an issue, a session, a PR review, or a plain worktree) |
+| `s` | Start work (an issue, a single session, a PR review, or a plain worktree) |
 | `e` | Open in editor |
 | `t` | Open in terminal |
 | `o` | Open in file manager |
@@ -310,7 +310,7 @@ work in three steps:
 
 ![Start work's issue picker, with one blocked issue hidden](doc/screenshot_start_work.png)
 
-1. **Pick a work mode**: `issue`, `session`, `pr-review` or `worktree`.
+1. **Pick a work mode**: `issue`, `single session`, `pr-review` or `worktree`.
    `issue` lists every open issue. One carrying a feature label
    (`enhancement` by default) starts as a feature, with the `feature`
    naming (`feat-<n>-<slug>` on `feat/<n>-<slug>`) and the plan-first `feature.md` prompt;
@@ -319,7 +319,7 @@ work in three steps:
 2. **Pick a work item** from a fuzzy-searchable list. By default it holds
    only your items: issues assigned to or opened by you, PRs with a review
    requested from you or opened by you. Tick **Not just mine** to list every
-   open one for this pick. The `session` mode has no list: you type a
+   open one for this pick. The `single session` mode has no list: you type a
    **session prompt** instead, for a Claude session that is not about an
    issue or a PR. It stays local and never creates a GitHub issue.
    The confirm screen opens straight away with names made from the prompt's
@@ -352,7 +352,7 @@ nothing in it. It needs no GitHub remote.
 
 Selecting a repository fetches its open issues in the background, so the
 `issue` list is usually filled by the time you open it. A
-repository without a GitHub remote offers sessions and plain worktrees only.
+repository without a GitHub remote offers single sessions and plain worktrees only.
 
 #### Blocked issues
 
@@ -376,7 +376,7 @@ names it (`3 bug issues`). The choice is remembered across runs as
 #### Prompt templates
 
 Each prompt comes from a Markdown template, with `{number}`, `{title}`,
-`{branch}`, `{worktree}` and `{repo}` filled in. A session also gets
+`{branch}`, `{worktree}` and `{repo}` filled in. A single session also gets
 `{body}`, the prompt you typed, and its template, `session.md`, is `{body}`
 alone, so by default Claude gets exactly what you typed. Issue and PR prompts
 tell Claude to read the item with `gh` instead, so it sees the current text
@@ -501,7 +501,8 @@ needs touching:
   listed together under `issue`.
 - `bug_labels` — an issue carrying any of these (case-insensitive) is a
   bug for the issue filter. It does not change how the issue starts.
-- Per kind of work (`issue`, `feature`, `session`, `pr_review`), the
+- Per kind of work (`issue`, `feature`, `session` for a single session,
+  `pr_review`), the
   worktree is named by `name_pattern` with `{number}` and `{slug}` (from the
   title, or a session prompt's first six words) filled in, and the branch is
   `branch_prefix` followed by `branch_pattern`, filled the same way. The
@@ -511,7 +512,7 @@ needs touching:
   default `branch_pattern`, and a `branch_pattern` that fills to nothing
   falls back to the worktree name. A `pr-review` worktree checks out the
   PR's own branch, so it has neither a prefix nor a `branch_pattern`.
-- `session_naming` — the name suggestion for sessions (see below):
+- `session_naming` — the name suggestion for single sessions (see below):
   `enabled`, the `model` it runs (an alias such as `haiku` or a full model
   name), `timeout_secs` before the first-words names are kept, and
   `allowed_tools`, the Claude Code tools it may use (none by default, so it

@@ -95,7 +95,7 @@ async fn settings_opens_the_dialog_on_the_global_values() {
         "[x] Enabled",
         "{number} {slug}",
         "pr-review",
-        "SESSION NAME SUGGESTION",
+        "SINGLE SESSION NAME SUGGESTION",
     ] {
         assert!(screen.contains(expected), "{expected}:\n{screen}");
     }

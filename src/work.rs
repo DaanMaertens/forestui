@@ -39,7 +39,7 @@ impl WorkMode {
     pub fn label(self) -> &'static str {
         match self {
             WorkMode::Issue => "issue",
-            WorkMode::Session => "session",
+            WorkMode::Session => "single session",
             WorkMode::PrReview => "pr-review",
             WorkMode::Worktree => "worktree",
         }
@@ -47,7 +47,7 @@ impl WorkMode {
 
     pub fn description(self) -> &'static str {
         match self {
-            WorkMode::Issue => "Work on an open issue: a feature, a bug or a chore",
+            WorkMode::Issue => "Work on an issue: feature, bug or chore",
             WorkMode::Session => "A Claude session for anything else",
             WorkMode::PrReview => "Review a pull request",
             WorkMode::Worktree => "A plain worktree: new or existing branch, no Claude",

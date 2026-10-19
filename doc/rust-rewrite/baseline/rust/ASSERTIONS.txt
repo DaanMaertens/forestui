@@ -44,10 +44,10 @@ PASS UC-101    linked-item-marked                             expected=yes      
 PASS UC-101    switched-to-claude-window                      expected=yes                          actual=yes
 PASS UC-101    nothing-created                                expected=4                            actual=4
 PASS UC-101    worktree-selected                              expected=yes                          actual=yes
-PASS UC-103    session-listed                                 expected=yes                          actual=yes
+PASS UC-103    single-session-listed                          expected=yes                          actual=yes
 PASS UC-103    first-words-while-suggesting                   expected=yes                          actual=yes
 PASS UC-103    suggestion-stopped-spinning                    expected=no                           actual=no
-PASS UC-103    titled-as-session                              expected=yes                          actual=yes
+PASS UC-103    titled-as-single-session                       expected=yes                          actual=yes
 PASS UC-103    prompt-carries-the-prompt                      expected=yes                          actual=yes
 PASS UC-103    prompt-reads-no-issue                          expected=no                           actual=no
 PASS UC-103    prompt-asks-for-no-plan                        expected=no                           actual=no

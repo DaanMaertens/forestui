@@ -1024,7 +1024,7 @@ impl StartWorkModal {
     }
 
     /// Whether `mode` can be picked here: the repository is on GitHub, or
-    /// the mode needs nothing from it: `session` and `worktree`.
+    /// the mode needs nothing from it: `single session` and `worktree`.
     pub fn mode_enabled(&self, mode: WorkMode) -> bool {
         self.has_github() || matches!(mode, WorkMode::Session | WorkMode::Worktree)
     }
@@ -1038,9 +1038,9 @@ impl StartWorkModal {
     }
 
     /// Take the probe's answer. A repository found not to be on GitHub moves
-    /// off any mode it can no longer offer to `session` — even mid-list, if
-    /// the answer was slower than the user, in which case it goes back to the
-    /// mode step: `session` has no list to stay on.
+    /// off any mode it can no longer offer to `single session` — even
+    /// mid-list, if the answer was slower than the user, in which case it
+    /// goes back to the mode step: `single session` has no list to stay on.
     pub fn set_github(&mut self, is_github: bool) {
         self.github = Some(is_github);
         // A yes is what the flow assumed all along: nothing on screen
