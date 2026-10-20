@@ -6,7 +6,11 @@ repository, `app/finished.rs`) that asks `gh` for each linked issue's or PR's
 state and git whether a session's branch is merged into the base branch the
 worktree recorded when it was created (`Worktree.base_branch`), or into the
 remote default branch for a worktree from before that was recorded;
-`work::is_finished` is the rule. The check never reads repository settings,
+`work::is_finished` is the rule. A sub-issue's worktree
+(`Worktree.parent_issue` set) is also asked whether a PR from its branch into
+that base, the parent issue's branch, is merged: its issue normally stays open
+until the parent's PR lands, so either one finishes it
+(`work::is_sub_issue_finished`). The check never reads repository settings,
 so `forestui prune` judges the same way without them. The marks are derived and never saved.
 A worktree the check could not answer for (`gh` signed out, no remote default
 branch) keeps its previous mark — "could not tell" must not unmark it.

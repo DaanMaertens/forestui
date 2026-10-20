@@ -140,6 +140,12 @@ pub struct Worktree {
     /// name or branch, so renaming either keeps it.
     #[serde(default, deserialize_with = "lenient_work_item")]
     pub work_item: Option<WorkItemLink>,
+    /// The parent issue a sub-issue's worktree was branched from, whose
+    /// branch is `base_branch`. Kept beside the link rather than in it, so
+    /// the link still names the work item alone. Its work is done once its
+    /// pull request into that branch is merged.
+    #[serde(default)]
+    pub parent_issue: Option<i64>,
 }
 
 /// The record on a worktree of which work item it was started for.
@@ -189,6 +195,7 @@ impl Worktree {
             base_branch: None,
             created_from_ref: None,
             work_item: None,
+            parent_issue: None,
         }
     }
 }
@@ -727,6 +734,43 @@ pub struct GitHubIssue {
     /// know the field, which leaves the issue unblocked.
     #[serde(default)]
     pub blocked_by: Option<BlockedBy>,
+    /// The issue's page, which says which repository it is in: a parent is
+    /// only branched from when its URL names the same one.
+    #[serde(default)]
+    pub url: String,
+    /// The issue this one is a sub-issue of. `None` from a `gh` too old to
+    /// know the field, and for an answer that does not parse: a garbled
+    /// parent must not take the whole list down.
+    #[serde(default, deserialize_with = "lenient_parent")]
+    pub parent: Option<ParentIssue>,
+}
+
+/// The parent issue `gh issue list --json parent` returns.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ParentIssue {
+    #[serde(default)]
+    pub number: i64,
+    #[serde(default)]
+    pub title: String,
+    /// `OPEN` or `CLOSED`.
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+fn lenient_parent<'de, D>(deserializer: D) -> Result<Option<ParentIssue>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
+}
+
+/// The `https://github.com/<owner>/<name>` an issue URL belongs to, `None`
+/// for one that is not an issue URL.
+fn issue_repository(url: &str) -> Option<&str> {
+    url.rsplit_once("/issues/").map(|(repo, _)| repo)
 }
 
 /// The `blockedBy` connection `gh issue list --json blockedBy` returns.
@@ -805,6 +849,30 @@ impl GitHubIssue {
     /// Whether at least one open issue blocks this one.
     pub fn is_blocked(&self) -> bool {
         self.open_blocker_nodes().next().is_some()
+    }
+
+    /// The parent as a reference from this issue: `#12` in the same
+    /// repository, `owner/name#12` in another.
+    pub fn parent_reference(&self) -> Option<String> {
+        let parent = self.parent.as_ref()?;
+        let theirs = issue_repository(&parent.url);
+        if theirs.is_some() && theirs == issue_repository(&self.url) {
+            return Some(format!("#{}", parent.number));
+        }
+        let repo = theirs
+            .and_then(|repo| repo.strip_prefix("https://github.com/"))
+            .unwrap_or_default();
+        Some(format!("{repo}#{}", parent.number))
+    }
+
+    /// The parent a sub-issue can be started from: an open one in this
+    /// issue's own repository. A closed parent's work has landed, and one
+    /// elsewhere has no branch here to stem from.
+    pub fn open_parent(&self) -> Option<&ParentIssue> {
+        let parent = self.parent.as_ref()?;
+        let here = issue_repository(&self.url)?;
+        (parent.state.eq_ignore_ascii_case("open") && issue_repository(&parent.url) == Some(here))
+            .then_some(parent)
     }
 }
 

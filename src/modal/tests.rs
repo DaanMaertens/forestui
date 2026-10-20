@@ -885,3 +885,219 @@ fn right_at_the_end_of_start_works_base_takes_the_completion() {
     modal.handle_key(key(KeyCode::Right));
     assert_eq!(modal.base_branch.value(), "origin/develop");
 }
+
+fn issue_confirm(list: BranchList) -> StartWorkConfirmModal {
+    StartWorkConfirmModal::new(
+        &Repository::new("demo".into(), "/tmp/demo".into()),
+        WorkItem::Issue {
+            number: 20,
+            title: "Slice".into(),
+            kind: work::IssueKind::Issue,
+        },
+        WorktreeNames {
+            worktree: "issue-20-slice".into(),
+            branch: "fix/issue-20-slice".into(),
+        },
+        "Issue #{number}".into(),
+        list,
+        PathBuf::from("/forest"),
+        None,
+    )
+}
+
+fn parent_list() -> BranchList {
+    branch_list(
+        &["feat/epic", "feat/epic-2", "main", "origin/main"],
+        &["origin"],
+        Some("origin/main"),
+        "main",
+    )
+}
+
+fn candidate(name: &str) -> work::ParentCandidate {
+    work::ParentCandidate {
+        name: name.into(),
+        branch: format!("feat/{name}"),
+        path: format!("/forest/demo/{name}"),
+    }
+}
+
+fn with_parent(worktree: work::ParentWorktree) -> StartWorkConfirmModal {
+    let mut modal = issue_confirm(parent_list());
+    modal.set_parent(
+        12,
+        worktree,
+        "Sub #{number} of #{parent_number} into {parent_branch}".into(),
+    );
+    modal
+}
+
+fn launched(modal: &StartWorkConfirmModal) -> (Option<String>, Option<ParentLaunch>, String) {
+    let ModalResult::WorktreeForWorkItem {
+        base_branch,
+        parent,
+        first_prompt,
+        ..
+    } = modal.launch()
+    else {
+        panic!("an issue launches a work item worktree");
+    };
+    (base_branch, parent, first_prompt.unwrap_or_default())
+}
+
+/// No parent, no toggle: the screen is the one it always was.
+#[test]
+fn an_issue_without_a_parent_has_no_toggle() {
+    let modal = issue_confirm(parent_list());
+    assert!(!modal.ring().contains(&StartWorkConfirmModal::FOCUS_PARENT));
+    assert!(modal.ring().contains(&StartWorkConfirmModal::FOCUS_BASE));
+    let (base, parent, prompt) = launched(&modal);
+    assert_eq!(base.as_deref(), Some("origin/main"));
+    assert_eq!(parent, None);
+    assert_eq!(prompt, "Issue #20");
+}
+
+/// The toggle is on by default: the base is the parent's branch and cannot
+/// be typed over, and the sub-issue template fills Claude's first prompt.
+#[test]
+fn branching_from_the_parent_is_on_and_takes_over_the_base() {
+    let mut modal = with_parent(work::ParentWorktree::Existing {
+        candidates: vec![candidate("epic")],
+        chosen: Some(0),
+    });
+    let parent = modal.parent.as_ref().expect("a parent");
+    assert!(parent.on);
+    assert_eq!(modal.base_branch.value(), "feat/epic");
+    assert!(!modal.ring().contains(&StartWorkConfirmModal::FOCUS_BASE));
+    assert!(modal.ring().contains(&StartWorkConfirmModal::FOCUS_PARENT));
+    assert!(
+        !modal
+            .ring()
+            .contains(&StartWorkConfirmModal::FOCUS_PARENT_PICK),
+        "one parent worktree is used without asking"
+    );
+
+    // Read-only even when focus lands on it some other way.
+    modal.focus = StartWorkConfirmModal::FOCUS_BASE;
+    modal.handle_key(key(KeyCode::Char('x')));
+    assert_eq!(modal.base_branch.value(), "feat/epic");
+
+    assert!(modal.can_launch());
+    let (base, parent, prompt) = launched(&modal);
+    assert_eq!(base.as_deref(), Some("feat/epic"));
+    assert_eq!(
+        parent,
+        Some(ParentLaunch {
+            number: 12,
+            branch: "feat/epic".into(),
+            source: ParentSource::Existing {
+                path: "/forest/demo/epic".into()
+            },
+        })
+    );
+    assert_eq!(prompt, "Sub #20 of #12 into feat/epic");
+}
+
+/// Toggling off puts back the base the screen would otherwise show, and
+/// launches exactly as an issue without a parent.
+#[test]
+fn toggling_off_restores_the_base_and_the_issue_template() {
+    let mut modal = with_parent(work::ParentWorktree::Existing {
+        candidates: vec![candidate("epic")],
+        chosen: Some(0),
+    });
+    modal.focus = StartWorkConfirmModal::FOCUS_PARENT;
+    modal.handle_key(key(KeyCode::Char(' ')));
+
+    assert!(!modal.parent.as_ref().expect("still offered").on);
+    assert_eq!(modal.base_branch.value(), "origin/main");
+    assert!(modal.ring().contains(&StartWorkConfirmModal::FOCUS_BASE));
+    let (base, parent, prompt) = launched(&modal);
+    assert_eq!(base.as_deref(), Some("origin/main"));
+    assert_eq!(parent, None);
+    assert_eq!(prompt, "Issue #20");
+
+    // A base typed while off is what comes back after another round trip.
+    modal.base_branch.set_value("main");
+    modal.handle_key(key(KeyCode::Enter));
+    assert_eq!(modal.base_branch.value(), "feat/epic");
+    modal.handle_key(key(KeyCode::Enter));
+    assert_eq!(modal.base_branch.value(), "main");
+}
+
+/// Several parent worktrees: nothing launches until one is picked, and the
+/// base follows the pick.
+#[test]
+fn several_parent_worktrees_are_picked_from_before_launch() {
+    let mut modal = with_parent(work::ParentWorktree::Existing {
+        candidates: vec![candidate("epic"), candidate("epic-2")],
+        chosen: None,
+    });
+    assert!(!modal.can_launch(), "the parent worktree is not picked yet");
+    assert_eq!(modal.base_branch.value(), "");
+    assert!(
+        modal
+            .ring()
+            .contains(&StartWorkConfirmModal::FOCUS_PARENT_PICK)
+    );
+
+    modal.focus = StartWorkConfirmModal::FOCUS_PARENT_PICK;
+    modal.handle_key(key(KeyCode::Enter));
+    assert_eq!(modal.base_branch.value(), "feat/epic");
+    modal.handle_key(key(KeyCode::Right));
+    assert_eq!(modal.base_branch.value(), "feat/epic-2");
+    assert!(modal.can_launch());
+    let (base, parent, _) = launched(&modal);
+    assert_eq!(base.as_deref(), Some("feat/epic-2"));
+    assert_eq!(
+        parent.map(|p| p.source),
+        Some(ParentSource::Existing {
+            path: "/forest/demo/epic-2".into()
+        })
+    );
+}
+
+/// No parent worktree yet: the launch creates one first, under the
+/// parent's default names and from the base the screen would have used,
+/// and the sub-issue's branch stems from that new branch.
+#[test]
+fn a_missing_parent_worktree_is_created_first() {
+    let names = WorktreeNames {
+        worktree: "feat-12-epic".into(),
+        branch: "feat/feat-12-epic".into(),
+    };
+    let modal = with_parent(work::ParentWorktree::Create(names.clone()));
+    assert_eq!(modal.base_branch.value(), "feat/feat-12-epic");
+    assert!(
+        modal.can_launch(),
+        "the parent's branch does not exist yet, and need not"
+    );
+    let (base, parent, _) = launched(&modal);
+    assert_eq!(base.as_deref(), Some("feat/feat-12-epic"));
+    assert_eq!(
+        parent.map(|p| p.source),
+        Some(ParentSource::Create {
+            names,
+            base_branch: Some("origin/main".into()),
+        })
+    );
+}
+
+/// A fetch while the toggle is on leaves the parent's branch in the field,
+/// and updates the base that comes back when it is turned off.
+#[test]
+fn a_fetch_while_branching_from_the_parent_keeps_its_branch() {
+    let mut modal = with_parent(work::ParentWorktree::Existing {
+        candidates: vec![candidate("epic")],
+        chosen: Some(0),
+    });
+    let mut list = parent_list();
+    list.branches.push("origin/develop".into());
+    list.remote_default = Some("origin/develop".into());
+    modal.update_branches(list);
+    assert_eq!(modal.base_branch.value(), "feat/epic");
+
+    modal.focus = StartWorkConfirmModal::FOCUS_PARENT;
+    modal.handle_key(key(KeyCode::Enter));
+    assert_eq!(modal.base_branch.value(), "origin/develop");
+}

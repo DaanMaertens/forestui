@@ -25,6 +25,7 @@ mod sessions;
 mod start_work;
 mod start_work_scope;
 mod start_work_settings;
+mod sub_issues;
 mod update_notice;
 mod worktrees;
 

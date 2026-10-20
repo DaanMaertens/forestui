@@ -362,6 +362,26 @@ how many were left out (`2 blocked hidden`). Tick **Show blocked** to list
 them, each marked with what blocks it (`blocked by #12`). The choice is
 remembered across runs as `show_blocked_issues`.
 
+#### Sub-issues
+
+A sub-issue's row in the `issue` list names its parent (`↳ #12`). When the
+parent is an open issue in the same repository, the confirm screen offers
+**Branch from #12 (feat/12-…)**, ticked by default. While it is ticked, the
+base branch is the parent's branch and cannot be edited, so the sub-issue
+gets its own worktree on a branch made from the parent's local branch tip,
+and its prompt comes from `sub-issue.md`, which tells Claude to open its pull
+request into the parent's branch. Unticking it puts back the base branch the
+screen would otherwise show.
+
+The parent's worktree is the one started for the parent issue. If it has
+several, pick one on the confirm screen. If it has none, Launch first creates
+one under the parent's default names, with no Claude in it (the screen says
+`also creates feat/12-… for #12`), and stops with a notification if those
+names are taken. With **Pull repo before creating**, an existing parent
+worktree that has an upstream is fast-forwarded first. If that fails, nothing
+is created. A worktree started this way is finished once its pull request
+into the parent's branch is merged, even while its issue is still open.
+
 #### Filtering issues
 
 The **Filter** button under the `issue` list cycles through **All**,
@@ -383,8 +403,10 @@ tell Claude to read the item with `gh` instead, so it sees the current text
 and comments. A blank session prompt skips `session.md` and sends
 `session-blank.md` instead, which ships empty: Claude starts with no first
 message until you write one, such as `You are in {worktree} on {branch}.`
-The templates are `issue.md`, `feature.md`, `session.md`, `session-blank.md`,
-`session-name.md`, `pr-review-others.md` and `pr-review-own.md`.
+The templates are `issue.md`, `feature.md`, `sub-issue.md`, `session.md`,
+`session-blank.md`, `session-name.md`, `pr-review-others.md` and
+`pr-review-own.md`. `sub-issue.md` also gets `{parent_number}` and
+`{parent_branch}`, and is used for any issue started from its parent's branch.
 `session-name.md` is not a first prompt: it is the instruction the name
 suggestion sends, with the session prompt as `{body}`. Each one that has no file yet
 uses the built-in default. Settings → **Edit Prompt Templates...** lists them;
@@ -413,8 +435,9 @@ if it does not exist yet. An explicitly empty override, such as
 
 ### Pruning finished worktrees
 
-A worktree whose issue is closed, whose pull request is merged or closed, or
-whose session branch is merged into the default branch is *finished*. The
+A worktree whose issue is closed, whose pull request is merged or closed,
+whose sub-issue pull request is merged into its parent's branch, or whose
+session branch is merged into the default branch is *finished*. The
 repository pane's **Prune finished (N)** removes those worktrees together with
 their local branches. The same prune runs from a shell, over every repository
 in a forest, without tmux:

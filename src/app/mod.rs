@@ -255,6 +255,20 @@ pub struct App {
 pub(crate) struct PendingStart {
     pub item: crate::work::WorkItem,
     pub names: crate::work::WorktreeNames,
+    /// The parent issue of a sub-issue that can be branched from.
+    pub parent: Option<PendingParent>,
+}
+
+/// A sub-issue's parent issue, as Start work learns it before the confirm
+/// screen opens.
+#[derive(Debug)]
+pub(crate) struct PendingParent {
+    pub number: i64,
+    pub title: String,
+    /// The parent issue with its labels, which decide the names its
+    /// worktree is created under if it has none. `None` when neither the
+    /// loaded list nor `gh` could say; it is then named as a plain issue.
+    pub issue: Option<crate::models::GitHubIssue>,
 }
 
 /// What a jump still waits for: the jumped-to worktree's session list, and
@@ -1465,6 +1479,16 @@ impl App {
                             Severity::Error,
                         );
                     }
+                }
+            }
+            AppEvent::ParentIssueLoaded { number, issue } => {
+                if let Some(parent) = self
+                    .pending_start
+                    .as_mut()
+                    .and_then(|start| start.parent.as_mut())
+                    .filter(|parent| parent.number == number)
+                {
+                    parent.issue = issue.map(|issue| *issue);
                 }
             }
             AppEvent::SessionNameSuggested { request, reply } => {

@@ -403,6 +403,93 @@ impl WorkItem {
     }
 }
 
+/// Where the worktree of a sub-issue's parent issue comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParentWorktree {
+    /// The worktrees linked to the parent issue. One is used as it is;
+    /// with several, `chosen` stays `None` until the user picks one.
+    Existing {
+        candidates: Vec<ParentCandidate>,
+        chosen: Option<usize>,
+    },
+    /// None is linked to it yet: one is created under these names first.
+    Create(WorktreeNames),
+}
+
+/// A worktree linked to a parent issue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParentCandidate {
+    pub name: String,
+    pub branch: String,
+    pub path: String,
+}
+
+impl ParentWorktree {
+    /// The parent's branch, which the sub-issue's stems from. `None` while
+    /// several worktrees wait to be picked from.
+    pub fn branch(&self) -> Option<&str> {
+        match self {
+            ParentWorktree::Existing { .. } => self.chosen().map(|chosen| chosen.branch.as_str()),
+            ParentWorktree::Create(names) => Some(&names.branch),
+        }
+    }
+
+    /// The worktree in use, if one exists and is chosen.
+    pub fn chosen(&self) -> Option<&ParentCandidate> {
+        match self {
+            ParentWorktree::Existing { candidates, chosen } => {
+                chosen.and_then(|index| candidates.get(index))
+            }
+            ParentWorktree::Create(_) => None,
+        }
+    }
+
+    /// Whether there is a choice to make: more than one worktree.
+    pub fn is_choice(&self) -> bool {
+        matches!(self, ParentWorktree::Existing { candidates, .. } if candidates.len() > 1)
+    }
+
+    /// Pick the next worktree, from the first when none is picked yet.
+    pub fn pick_next(&mut self) {
+        if let ParentWorktree::Existing { candidates, chosen } = self
+            && !candidates.is_empty()
+        {
+            *chosen = Some(chosen.map_or(0, |index| (index + 1) % candidates.len()));
+        }
+    }
+}
+
+/// The worktree of parent issue `parent` among `worktrees`: the ones whose
+/// work item link is the parent issue, or — with none — one to create
+/// under `names`, the names Start work gives the parent issue by default.
+pub fn parent_worktree(
+    worktrees: &[Worktree],
+    parent: i64,
+    names: WorktreeNames,
+) -> ParentWorktree {
+    let link = WorkItemLink::Issue { number: parent };
+    let candidates: Vec<ParentCandidate> = worktrees
+        .iter()
+        .filter(|worktree| worktree.work_item.as_ref() == Some(&link))
+        .map(|worktree| ParentCandidate {
+            name: worktree.name.clone(),
+            branch: worktree.branch.clone(),
+            path: worktree.path.clone(),
+        })
+        .collect();
+    match candidates.len() {
+        0 => ParentWorktree::Create(names),
+        1 => ParentWorktree::Existing {
+            candidates,
+            chosen: Some(0),
+        },
+        _ => ParentWorktree::Existing {
+            candidates,
+            chosen: None,
+        },
+    }
+}
+
 /// What a finished check saw of a worktree's work item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Observed {
@@ -436,6 +523,23 @@ pub fn is_finished(link: &WorkItemLink, observed: Observed) -> Option<bool> {
                 has_commits,
             },
         ) => Some(merged && has_commits),
+        _ => None,
+    }
+}
+
+/// Whether a sub-issue's worktree is done, from its issue's `state` and
+/// whether its pull request into the parent issue's branch is merged:
+/// either one finishes it, since its issue normally stays open until the
+/// parent's pull request lands. `None` when neither is known to be done
+/// and one could not be told.
+pub fn is_sub_issue_finished(
+    state: Option<ItemState>,
+    merged_into_parent: Option<bool>,
+) -> Option<bool> {
+    let closed = state.map(|state| state != ItemState::Open);
+    match (closed, merged_into_parent) {
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        (Some(false), Some(false)) => Some(false),
         _ => None,
     }
 }
@@ -557,6 +661,12 @@ pub fn blocked_marker(issue: &GitHubIssue) -> Option<String> {
         marker.push_str(&format!(" +{}", blockers.len() - MARKER_BLOCKERS));
     }
     Some(marker)
+}
+
+/// The marker a sub-issue carries, naming its parent: `↳ #12`, or with the
+/// repository for a parent in another one. `None` for an issue with none.
+pub fn parent_marker(issue: &GitHubIssue) -> Option<String> {
+    Some(format!("↳ {}", issue.parent_reference()?))
 }
 
 /// The rows `issue` lists: the open issues in `filter` — less the blocked

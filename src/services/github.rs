@@ -324,19 +324,30 @@ fn pull_request_filters(scope: Scope) -> &'static [&'static [&'static str]] {
     }
 }
 
-/// The fields an issue is fetched with. `blockedBy` comes along in the same
-/// call, so knowing which issues are blocked costs no `gh` call per issue.
-const ISSUE_FIELDS: &str = "number,title,state,url,createdAt,author,assignees,labels,blockedBy";
+/// The fields an issue is fetched with. `blockedBy` and `parent` come along
+/// in the same call, so knowing which issues are blocked, and which are
+/// sub-issues, costs no `gh` call per issue.
+const ISSUE_FIELDS: &str =
+    "number,title,state,url,createdAt,author,assignees,labels,blockedBy,parent";
 
-/// [`ISSUE_FIELDS`] for a `gh` too old to know `blockedBy`, whose issues
-/// then all count as unblocked.
+/// [`ISSUE_FIELDS`] for a `gh` that knows `blockedBy` but not `parent`, whose
+/// issues then all count as having no parent — and stay blocked as before.
+const NO_PARENT_ISSUE_FIELDS: &str =
+    "number,title,state,url,createdAt,author,assignees,labels,blockedBy";
+
+/// [`ISSUE_FIELDS`] for a `gh` too old to know either, whose issues then all
+/// count as unblocked and as having no parent.
 const LEGACY_ISSUE_FIELDS: &str = "number,title,state,url,createdAt,author,assignees,labels";
 
-/// Whether `gh` refused a call because it does not know `blockedBy`. `gh`
-/// rejects the whole call over one unknown field, so without the retry this
-/// enables an older `gh` would list no issues at all.
-fn rejects_blocked_by(stderr: &str) -> bool {
-    stderr.contains("Unknown JSON field") && stderr.contains("blockedBy")
+/// The field lists tried in turn, newest first.
+const ISSUE_FIELD_SETS: [&str; 3] = [ISSUE_FIELDS, NO_PARENT_ISSUE_FIELDS, LEGACY_ISSUE_FIELDS];
+
+/// Whether `gh` refused a call because it does not know `blockedBy` or
+/// `parent`. `gh` rejects the whole call over one unknown field, so without
+/// the retry this enables an older `gh` would list no issues at all.
+fn rejects_newer_fields(stderr: &str) -> bool {
+    stderr.contains("Unknown JSON field")
+        && (stderr.contains("blockedBy") || stderr.contains("parent"))
 }
 
 /// Every query `scope` is made of, merged by [`merge_issues`].
@@ -347,19 +358,19 @@ async fn fetch_issues(path: &str, scope: Scope) -> Result<Merged<GitHubIssue>, L
         let mut args = vec!["issue", "list"];
         args.extend_from_slice(filter);
         args.extend_from_slice(&["--state", "open", "--limit", &limit, "--json"]);
-        let (mut code, mut stdout, stderr) = run_gh(
-            &[&args[..], &[ISSUE_FIELDS]].concat(),
-            Some(Path::new(path)),
-        )
-        .await;
-        if code != 0 && rejects_blocked_by(&stderr) {
-            (code, stdout, _) = run_gh(
-                &[&args[..], &[LEGACY_ISSUE_FIELDS]].concat(),
-                Some(Path::new(path)),
-            )
-            .await;
+        let mut answer = None;
+        for fields in ISSUE_FIELD_SETS {
+            let (code, stdout, stderr) =
+                run_gh(&[&args[..], &[fields]].concat(), Some(Path::new(path))).await;
+            if code == 0 {
+                answer = Some(stdout);
+                break;
+            }
+            if !rejects_newer_fields(&stderr) {
+                break;
+            }
         }
-        answers.push((code == 0).then_some(stdout));
+        answers.push(answer);
     }
     let answers: Vec<Option<&str>> = answers.iter().map(Option::as_deref).collect();
     merge_issues(&answers)
@@ -562,6 +573,53 @@ fn parse_item_state(json: &str) -> Option<ItemState> {
     serde_json::from_str::<Answer>(json)
         .ok()
         .map(|answer| answer.state)
+}
+
+/// Issue `number` with the fields its names are made from, or `None` when
+/// `gh` could not say. Not cached: Start work asks it once, for a parent
+/// issue the list it loaded does not hold.
+pub async fn issue(path: &str, number: i64) -> Option<GitHubIssue> {
+    let number = number.to_string();
+    let (code, stdout, _) = run_gh(
+        &[
+            "issue",
+            "view",
+            &number,
+            "--json",
+            "number,title,url,createdAt,labels",
+        ],
+        Some(Path::new(path)),
+    )
+    .await;
+    if code != 0 {
+        return None;
+    }
+    serde_json::from_str(&stdout).ok()
+}
+
+/// Whether a pull request from `head` into `base` has been merged, or
+/// `None` when `gh` could not say. Not cached, like [`issue_state`].
+pub async fn merged_pull_request(path: &str, head: &str, base: &str) -> Option<bool> {
+    let (code, stdout, _) = run_gh(
+        &[
+            "pr", "list", "--head", head, "--base", base, "--state", "merged", "--limit", "1",
+            "--json", "number",
+        ],
+        Some(Path::new(path)),
+    )
+    .await;
+    if code != 0 {
+        return None;
+    }
+    parse_any_listed(&stdout)
+}
+
+/// Whether a `gh … list --json` answer lists anything. A garbled answer is
+/// unknown, never "none".
+fn parse_any_listed(json: &str) -> Option<bool> {
+    serde_json::from_str::<Vec<serde_json::Value>>(json)
+        .ok()
+        .map(|items| !items.is_empty())
 }
 
 /// Drop the cached issues for one repository path; see

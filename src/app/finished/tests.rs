@@ -175,6 +175,7 @@ fn session(branch: &str, created_from: &str, base: Option<&str>) -> LinkedWorktr
         branch: branch.into(),
         created_from: Some(created_from.into()),
         base: base.map(str::to_string),
+        parent_issue: None,
     }
 }
 

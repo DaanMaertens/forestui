@@ -5,10 +5,10 @@
 //! `EventTx`; results come back as events, and only the main loop ever
 //! writes the state file.
 
-use super::{Action, App, Field, PendingJump, PendingStart};
+use super::{Action, App, Field, PendingJump, PendingParent, PendingStart};
 use crate::event::Severity;
 use crate::event::{AppEvent, BranchList, BranchTarget, ClaudeStart, EventTx};
-use crate::modal::{BackKeyAnswer, IntegrationAction, ModalOutcome};
+use crate::modal::{BackKeyAnswer, IntegrationAction, ModalOutcome, ParentLaunch, ParentSource};
 use crate::modal::{
     Clash, ConfirmAction, ConfirmModal, Modal, ModalEffect, ModalResult, PromptTemplatesModal,
     StartWorkConfirmModal, StartWorkModal, WorktreeForm,
@@ -30,6 +30,44 @@ struct WorkStart {
     first_prompt: Option<String>,
     /// Start that Claude with the built-in YOLO flag.
     yolo: bool,
+}
+
+/// Create the worktree `name` on `branch` at `worktree_path`, recording
+/// where it stemmed from for the detail header and the finished check.
+async fn new_worktree(
+    source_path: &str,
+    worktree_path: &Path,
+    name: String,
+    branch: String,
+    new_branch: bool,
+    base_branch: Option<String>,
+) -> git::GitResult<Worktree> {
+    let (base, base_ref) = if let Some(base) = base_branch.clone() {
+        let reference = git::get_ref(source_path, &base).await;
+        (Some(base), reference)
+    } else if new_branch {
+        let current = git::get_current_branch(source_path).await.ok();
+        (current, git::get_ref(source_path, "HEAD").await)
+    } else {
+        (
+            Some(branch.clone()),
+            git::get_ref(source_path, &branch).await,
+        )
+    };
+
+    let branch = git::create_worktree(
+        source_path,
+        worktree_path,
+        &branch,
+        new_branch,
+        base_branch.as_deref(),
+    )
+    .await?;
+
+    let mut worktree = Worktree::new(name, branch, worktree_path.to_string_lossy().to_string());
+    worktree.base_branch = base;
+    worktree.created_from_ref = base_ref;
+    Ok(worktree)
 }
 
 /// Create a worktree for reviewing PR `number`, on the PR's own branch, and
@@ -215,7 +253,11 @@ impl App {
                     return;
                 };
                 let repo_id = flow.repo_id;
-                self.start_work_on_issue(repo_id, *issue);
+                let parent = issue
+                    .open_parent()
+                    .and_then(|parent| flow.loaded_issue(parent.number))
+                    .cloned();
+                self.start_work_on_issue(repo_id, *issue, parent);
             }
             ModalEffect::LoadWorktreeBranches => {
                 let Some(Modal::StartWork(flow)) = self.modals.last() else {
@@ -310,6 +352,7 @@ impl App {
                 base_branch,
                 first_prompt,
                 yolo,
+                parent,
             } => {
                 // Launching ends the whole flow: the item step left beneath
                 // the confirm screen has nothing more to offer.
@@ -319,6 +362,14 @@ impl App {
                     first_prompt,
                     yolo,
                 };
+                if let Some(parent) = parent {
+                    let names = work::WorktreeNames {
+                        worktree: name,
+                        branch,
+                    };
+                    self.create_sub_issue_worktree(repo_id, names, parent, pull_first, start);
+                    return;
+                }
                 self.create_worktree(
                     repo_id,
                     name,
@@ -638,7 +689,7 @@ impl App {
             &layers.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
             start.item.template(),
         );
-        let modal = StartWorkConfirmModal::new(
+        let mut modal = StartWorkConfirmModal::new(
             repo,
             start.item,
             start.names,
@@ -647,8 +698,27 @@ impl App {
             settings_service::get_forest_path(),
             self.base_branch_for(&repo.source_path),
         );
+        let mut warnings: Vec<String> = template.warning.into_iter().collect();
+        if let Some(parent) = start.parent {
+            let start_work = self.start_work_for(&repo.source_path);
+            let (kind, title) = match &parent.issue {
+                Some(issue) => (
+                    work::issue_kind(issue, &start_work.feature_labels),
+                    issue.title.as_str(),
+                ),
+                None => (work::IssueKind::Issue, parent.title.as_str()),
+            };
+            let names = work::issue_names(&start_work, kind, parent.number, title);
+            let worktree = work::parent_worktree(&repo.worktrees, parent.number, names);
+            let template = crate::prompt::resolve(
+                &layers.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
+                crate::prompt::Template::SubIssue,
+            );
+            warnings.extend(template.warning);
+            modal.set_parent(parent.number, worktree, template.text);
+        }
         self.modals.push(Modal::StartWorkConfirm(Box::new(modal)));
-        if let Some(warning) = template.warning {
+        for warning in warnings {
             self.notify(warning, Severity::Warning);
         }
         self.suggest_session_name();
@@ -705,7 +775,17 @@ impl App {
     ///
     /// Its kind — feature or issue, and so its naming and template — is
     /// settled here, by the feature labels in effect for the repository.
-    fn start_work_on_issue(&mut self, repo_id: Uuid, issue: GitHubIssue) {
+    ///
+    /// A sub-issue whose parent can be branched from carries the parent
+    /// along. `loaded_parent` is the parent as the flow's list holds it, if
+    /// it does; a parent with no worktree that the list lacks is asked of
+    /// `gh` while the branches load, for the names its worktree would take.
+    fn start_work_on_issue(
+        &mut self,
+        repo_id: Uuid,
+        issue: GitHubIssue,
+        loaded_parent: Option<GitHubIssue>,
+    ) {
         let link = WorkItemLink::Issue {
             number: issue.number,
         };
@@ -723,11 +803,35 @@ impl App {
         };
         let start_work = self.start_work_for(&repo.source_path);
         let kind = work::issue_kind(&issue, &start_work.feature_labels);
+        let parent = issue.open_parent().map(|parent| PendingParent {
+            number: parent.number,
+            title: parent.title.clone(),
+            issue: loaded_parent,
+        });
+        let fetch_parent = parent
+            .as_ref()
+            .filter(|parent| parent.issue.is_none())
+            .map(|parent| parent.number)
+            .filter(|&number| {
+                let link = WorkItemLink::Issue { number };
+                self.state.linked_worktree(repo_id, &link).is_none()
+            });
+        let path = repo.source_path.clone();
         self.pending_start = Some(PendingStart {
             names: work::issue_names(&start_work, kind, issue.number, &issue.title),
             item: WorkItem::from_issue(&issue, kind),
+            parent,
         });
-        self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
+        let Some(number) = fetch_parent else {
+            self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
+            return;
+        };
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let issue = github::issue(&path, number).await.map(Box::new);
+            tx.send(AppEvent::ParentIssueLoaded { number, issue });
+            load_branches(tx, path, repo_id, BranchTarget::StartWorkConfirm).await;
+        });
     }
 
     /// Start work on a picked PR: the confirm screen at once — a review has
@@ -772,7 +876,11 @@ impl App {
             branch: head_branch.clone(),
             ..work::pull_request_names(&start_work, number, title)
         };
-        let start = PendingStart { item, names };
+        let start = PendingStart {
+            item,
+            names,
+            parent: None,
+        };
         self.open_confirm(repo_id, start, BranchList::default());
     }
 
@@ -788,6 +896,7 @@ impl App {
         self.pending_start = Some(PendingStart {
             item: WorkItem::Session { prompt },
             names,
+            parent: None,
         });
         self.load_branches_then(repo_id, BranchTarget::StartWorkConfirm);
     }
@@ -1738,44 +1847,23 @@ impl App {
                 let _ = git::pull(&source_path).await;
             }
 
-            // Record where the worktree stemmed from, for the detail header.
-            let (base, base_ref) = if let Some(base) = base_branch.clone() {
-                let reference = git::get_ref(&source_path, &base).await;
-                (Some(base), reference)
-            } else if new_branch {
-                let current = git::get_current_branch(&source_path).await.ok();
-                (current, git::get_ref(&source_path, "HEAD").await)
-            } else {
-                (
-                    Some(branch.clone()),
-                    git::get_ref(&source_path, &branch).await,
-                )
-            };
-
-            let branch = match git::create_worktree(
+            let mut worktree = match new_worktree(
                 &source_path,
                 &worktree_path,
-                &branch,
+                name,
+                branch,
                 new_branch,
-                base_branch.as_deref(),
+                base_branch,
             )
             .await
             {
-                Ok(branch) => branch,
+                Ok(worktree) => worktree,
                 Err(error) => {
                     tx.error(format!("Failed to create worktree: {error}"));
                     tx.send(AppEvent::WorktreeAddFailed { create });
                     return;
                 }
             };
-
-            let mut worktree = Worktree::new(
-                name.clone(),
-                branch,
-                worktree_path.to_string_lossy().to_string(),
-            );
-            worktree.base_branch = base;
-            worktree.created_from_ref = base_ref;
             let claude = start.map(|start| {
                 worktree.work_item = Some(start.link);
                 ClaudeStart {
@@ -1788,6 +1876,151 @@ impl App {
                 create,
                 worktree: Box::new(worktree),
                 claude,
+            });
+        });
+    }
+}
+
+impl App {
+    /// Launch a sub-issue's worktree on a branch from its parent issue's
+    /// local branch tip — worktrees share refs, so nothing has to be pushed.
+    /// A parent with no worktree gets one first, with no Claude in it; one
+    /// that has a worktree is fast-forwarded first when pulling first, and
+    /// never changed beyond that. Anything in the way stops the launch
+    /// before the sub-issue's worktree is made.
+    fn create_sub_issue_worktree(
+        &mut self,
+        repo_id: Uuid,
+        names: work::WorktreeNames,
+        parent: ParentLaunch,
+        pull_first: bool,
+        start: WorkStart,
+    ) {
+        let Some(repo) = self.state.find_repository(repo_id) else {
+            return;
+        };
+        let source_path = repo.source_path.clone();
+        let repo_dir = settings_service::get_forest_path().join(&repo.name);
+        let worktree_path = repo_dir.join(&names.worktree);
+        let number = parent.number;
+        if let ParentSource::Create {
+            names: parent_names,
+            ..
+        } = &parent.source
+            && let Some(taken) = work::clash(parent_names, &repo.worktrees)
+        {
+            let message = format!(
+                "Cannot create #{number}'s worktree '{}': '{}' already has its name or branch",
+                parent_names.worktree, taken.name
+            );
+            self.notify(message, Severity::Error);
+            return;
+        }
+        let parent_create = matches!(parent.source, ParentSource::Create { .. })
+            .then(|| self.worktree_sync.begin_create(repo_id));
+        let create = self.worktree_sync.begin_create(repo_id);
+        let tx = self.tx.clone();
+
+        tokio::spawn(async move {
+            // Both tickets go back on every exit before the sub-issue's
+            // worktree exists.
+            let abort = |tx: &EventTx, parent_create, create, error: String| {
+                tx.error(error);
+                if let Some(create) = parent_create {
+                    tx.send(AppEvent::WorktreeAddFailed { create });
+                }
+                tx.send(AppEvent::WorktreeAddFailed { create });
+            };
+            match parent.source {
+                ParentSource::Create {
+                    names: parent_names,
+                    base_branch,
+                } => {
+                    let parent_path = repo_dir.join(&parent_names.worktree);
+                    let local = format!("refs/heads/{}", parent_names.branch);
+                    if git::get_ref(&source_path, &local).await.is_some() {
+                        let error = format!(
+                            "Cannot create #{number}'s worktree: branch '{}' already exists",
+                            parent_names.branch
+                        );
+                        return abort(&tx, parent_create, create, error);
+                    }
+                    if tokio::fs::try_exists(&parent_path).await.unwrap_or(true) {
+                        let error = format!(
+                            "Cannot create #{number}'s worktree: {} already exists",
+                            parent_path.display()
+                        );
+                        return abort(&tx, parent_create, create, error);
+                    }
+                    if pull_first {
+                        tx.info("Pulling repo...");
+                        let _ = git::pull(&source_path).await;
+                    }
+                    let mut worktree = match new_worktree(
+                        &source_path,
+                        &parent_path,
+                        parent_names.worktree,
+                        parent_names.branch,
+                        true,
+                        base_branch,
+                    )
+                    .await
+                    {
+                        Ok(worktree) => worktree,
+                        Err(error) => {
+                            let error = format!("Failed to create #{number}'s worktree: {error}");
+                            return abort(&tx, parent_create, create, error);
+                        }
+                    };
+                    worktree.work_item = Some(WorkItemLink::Issue { number });
+                    if let Some(parent_create) = parent_create {
+                        tx.send(AppEvent::WorktreeAdded {
+                            create: parent_create,
+                            worktree: Box::new(worktree),
+                            claude: None,
+                        });
+                    }
+                }
+                ParentSource::Existing { path } => {
+                    if pull_first && git::has_remote_tracking(&path).await.unwrap_or(false) {
+                        tx.info(format!("Pulling #{number}'s worktree..."));
+                        if let Err(error) = git::pull_fast_forward(&path).await {
+                            let error = format!(
+                                "Could not fast-forward #{number}'s worktree, so nothing was \
+                                 created: {error}"
+                            );
+                            return abort(&tx, parent_create, create, error);
+                        }
+                    }
+                }
+            }
+
+            let mut worktree = match new_worktree(
+                &source_path,
+                &worktree_path,
+                names.worktree,
+                names.branch,
+                true,
+                Some(parent.branch),
+            )
+            .await
+            {
+                Ok(worktree) => worktree,
+                Err(error) => {
+                    tx.error(format!("Failed to create worktree: {error}"));
+                    tx.send(AppEvent::WorktreeAddFailed { create });
+                    return;
+                }
+            };
+            worktree.work_item = Some(start.link);
+            worktree.parent_issue = Some(number);
+            tx.send(AppEvent::WorktreeAdded {
+                create,
+                worktree: Box::new(worktree),
+                claude: Some(ClaudeStart {
+                    first_prompt: start.first_prompt,
+                    yolo: start.yolo,
+                }),
             });
         });
     }

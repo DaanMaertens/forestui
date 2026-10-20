@@ -172,6 +172,71 @@ fn gh_output_without_blocked_by_counts_as_unblocked() {
     assert!(issues.iter().all(|issue| !issue.is_blocked()));
 }
 
+/// An issue as `gh issue list --json ...,parent` prints it, with `parent`
+/// standing for the value under test.
+fn issue_with_parent(parent: &str) -> GitHubIssue {
+    let json = format!(
+        r#"{{"number":20,"title":"Twenty","state":"OPEN",
+        "url":"https://github.com/o/r/issues/20","createdAt":"2026-01-01T00:00:00Z",
+        "parent":{parent}}}"#
+    );
+    serde_json::from_str(&json).unwrap()
+}
+
+#[test]
+fn an_open_parent_in_the_same_repository_is_the_one_to_branch_from() {
+    let issue = issue_with_parent(
+        r#"{"id":"I_1","number":12,"state":"OPEN","title":"Twelve",
+        "url":"https://github.com/o/r/issues/12"}"#,
+    );
+    assert_eq!(issue.parent.as_ref().map(|p| p.number), Some(12));
+    assert_eq!(issue.open_parent().map(|p| p.number), Some(12));
+}
+
+#[test]
+fn a_closed_parent_or_one_in_another_repository_is_not_branched_from() {
+    let closed = issue_with_parent(
+        r#"{"number":12,"state":"CLOSED","url":"https://github.com/o/r/issues/12"}"#,
+    );
+    assert!(closed.parent.is_some());
+    assert!(closed.open_parent().is_none());
+
+    let elsewhere = issue_with_parent(
+        r#"{"number":12,"state":"OPEN","url":"https://github.com/o/other/issues/12"}"#,
+    );
+    assert!(elsewhere.open_parent().is_none());
+    // A repository whose name only starts the same is another one.
+    let longer = issue_with_parent(
+        r#"{"number":12,"state":"OPEN","url":"https://github.com/o/r2/issues/12"}"#,
+    );
+    assert!(longer.open_parent().is_none());
+}
+
+#[test]
+fn no_parent_or_one_that_does_not_parse_loads_as_none() {
+    assert!(issue_with_parent("null").parent.is_none());
+    let garbled = issue_with_parent(r#""not an object""#);
+    assert!(garbled.parent.is_none());
+    assert_eq!(garbled.number, 20, "the rest of the issue still loads");
+    let older: GitHubIssue =
+        serde_json::from_str(r#"{"number":5,"createdAt":"2026-01-01T00:00:00Z"}"#).unwrap();
+    assert!(older.parent.is_none());
+}
+
+/// Worktrees from before sub-issues load with no parent, and a parent
+/// round-trips.
+#[test]
+fn a_worktrees_parent_issue_is_optional_and_roundtrips() {
+    let old: Worktree =
+        serde_json::from_str(r#"{"name":"wt","branch":"feat/wt","path":"/f/wt"}"#).unwrap();
+    assert_eq!(old.parent_issue, None);
+
+    let mut sub = Worktree::new("wt".into(), "feat/wt".into(), "/f/wt".into());
+    sub.parent_issue = Some(12);
+    let back: Worktree = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
+    assert_eq!(back.parent_issue, Some(12));
+}
+
 #[test]
 fn blocker_state_is_compared_without_case() {
     let json = r#"{"number":1,"createdAt":"2026-01-01T00:00:00Z",

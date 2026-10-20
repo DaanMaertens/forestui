@@ -785,3 +785,123 @@ fn a_suggestion_that_cleans_to_nothing_names_nothing() {
         );
     }
 }
+
+fn sub_issue(number: i64, parent: serde_json::Value) -> GitHubIssue {
+    serde_json::from_value(serde_json::json!({
+        "number": number,
+        "title": "Slice",
+        "url": format!("https://github.com/o/r/issues/{number}"),
+        "createdAt": "2026-01-01T00:00:00Z",
+        "parent": parent,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn the_parent_marker_names_a_sub_issues_parent() {
+    let here = sub_issue(
+        20,
+        serde_json::json!({"number": 12, "state": "OPEN",
+            "url": "https://github.com/o/r/issues/12"}),
+    );
+    assert_eq!(parent_marker(&here).as_deref(), Some("↳ #12"));
+    // A closed parent is still the issue's parent; the marker says so.
+    let closed = sub_issue(
+        20,
+        serde_json::json!({"number": 12, "state": "CLOSED",
+            "url": "https://github.com/o/r/issues/12"}),
+    );
+    assert_eq!(parent_marker(&closed).as_deref(), Some("↳ #12"));
+    let elsewhere = sub_issue(
+        20,
+        serde_json::json!({"number": 3, "state": "OPEN",
+            "url": "https://github.com/o/other/issues/3"}),
+    );
+    assert_eq!(parent_marker(&elsewhere).as_deref(), Some("↳ o/other#3"));
+    assert_eq!(parent_marker(&labelled(2, &[])), None);
+}
+
+fn linked_to(name: &str, branch: &str, number: i64) -> crate::models::Worktree {
+    let mut worktree = worktree(name, branch);
+    worktree.work_item = Some(issue(number));
+    worktree
+}
+
+fn parent_names() -> WorktreeNames {
+    WorktreeNames {
+        worktree: "feat-12-epic".into(),
+        branch: "feat/feat-12-epic".into(),
+    }
+}
+
+/// The parent's worktree is the one linked to the parent issue: one is used
+/// as it is, several are the user's to pick from, and none is created.
+#[test]
+fn the_parent_worktree_is_the_one_linked_to_the_parent_issue() {
+    let one = [
+        worktree("feat-12-epic", "feat/unlinked"),
+        linked_to("epic", "feat/epic", 12),
+        linked_to("other", "feat/other", 13),
+    ];
+    let ParentWorktree::Existing { candidates, chosen } = parent_worktree(&one, 12, parent_names())
+    else {
+        panic!("one linked worktree is the parent's");
+    };
+    assert_eq!(chosen, Some(0));
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].name, "epic");
+    assert_eq!(candidates[0].branch, "feat/epic");
+
+    let several = [
+        linked_to("epic", "feat/epic", 12),
+        linked_to("epic-2", "feat/epic-2", 12),
+    ];
+    let ParentWorktree::Existing { candidates, chosen } =
+        parent_worktree(&several, 12, parent_names())
+    else {
+        panic!("linked worktrees are the parent's");
+    };
+    assert_eq!(chosen, None, "several are asked about, never guessed");
+    assert_eq!(candidates.len(), 2);
+
+    assert_eq!(
+        parent_worktree(&[linked_to("other", "feat/other", 13)], 12, parent_names()),
+        ParentWorktree::Create(parent_names())
+    );
+}
+
+#[test]
+fn the_parent_branch_is_the_chosen_worktrees_or_the_one_to_create() {
+    let several = [
+        linked_to("epic", "feat/epic", 12),
+        linked_to("epic-2", "feat/epic-2", 12),
+    ];
+    let mut parent = parent_worktree(&several, 12, parent_names());
+    assert_eq!(parent.branch(), None);
+    parent.pick_next();
+    assert_eq!(parent.branch(), Some("feat/epic"));
+    parent.pick_next();
+    assert_eq!(parent.branch(), Some("feat/epic-2"));
+    parent.pick_next();
+    assert_eq!(parent.branch(), Some("feat/epic"), "picking wraps around");
+
+    let mut create = ParentWorktree::Create(parent_names());
+    create.pick_next();
+    assert_eq!(create.branch(), Some("feat/feat-12-epic"));
+}
+
+/// A sub-issue's work is done when its issue closes or its pull request
+/// into the parent's branch is merged, whichever comes first.
+#[test]
+fn a_sub_issue_is_finished_once_closed_or_merged_into_its_parent() {
+    use ItemState::{Closed, Open};
+    assert_eq!(is_sub_issue_finished(Some(Open), Some(true)), Some(true));
+    assert_eq!(is_sub_issue_finished(Some(Closed), Some(false)), Some(true));
+    assert_eq!(is_sub_issue_finished(Some(Closed), None), Some(true));
+    assert_eq!(is_sub_issue_finished(None, Some(true)), Some(true));
+    assert_eq!(is_sub_issue_finished(Some(Open), Some(false)), Some(false));
+    // Neither done, and one could not be told: no verdict.
+    assert_eq!(is_sub_issue_finished(Some(Open), None), None);
+    assert_eq!(is_sub_issue_finished(None, Some(false)), None);
+    assert_eq!(is_sub_issue_finished(None, None), None);
+}
