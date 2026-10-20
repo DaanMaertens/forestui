@@ -82,7 +82,12 @@ fn a_worktree_name_takes_its_sessions_state_colour() {
         SessionState::NeedsYou,
     ] {
         let line = row_line(&a_worktree_row(false, Some(Activity { state, count: 1 })));
-        assert_eq!(line.to_string(), "├─ wt-two [release-2]");
+        let badge = if state == SessionState::Busy {
+            "⟳ "
+        } else {
+            ""
+        };
+        assert_eq!(line.to_string(), format!("├─ {badge}wt-two [release-2]"));
         assert_eq!(span_style(&line, "wt-two"), theme::session_state(state));
     }
     // No counted session: exactly as before.
@@ -101,7 +106,7 @@ fn several_sessions_lead_the_name_with_a_count() {
         count: 3,
     });
     let line = row_line(&a_worktree_row(false, busy));
-    assert_eq!(line.to_string(), "├─ {3} wt-two [release-2]");
+    assert_eq!(line.to_string(), "├─ ⟳ {3} wt-two [release-2]");
     assert_eq!(
         span_style(&line, "{3} "),
         theme::session_state(SessionState::Busy)
@@ -118,4 +123,43 @@ fn several_sessions_lead_the_name_with_a_count() {
         theme::session_state(SessionState::NeedsYou)
     );
     assert_eq!(span_style(&line, "wt-two"), theme::finished());
+}
+
+/// A busy worktree leads with ⟳, so busy reads apart from idle in the themes
+/// that colour them the same. It follows the most urgent state only.
+#[test]
+fn a_busy_worktree_leads_with_a_busy_badge() {
+    let _theme = crate::theme::test_lock();
+    let busy = |count| {
+        Some(Activity {
+            state: SessionState::Busy,
+            count,
+        })
+    };
+    let line = row_line(&a_worktree_row(false, busy(1)));
+    assert_eq!(line.to_string(), "├─ ⟳ wt-two [release-2]");
+    assert_eq!(
+        span_style(&line, "⟳ "),
+        theme::session_state(SessionState::Busy)
+    );
+
+    // Finished keeps its dimmed name, but ⟳ says something still works there.
+    let line = row_line(&a_worktree_row(true, busy(2)));
+    assert_eq!(line.to_string(), "├─ ✓ ⟳ {2} wt-two [release-2]");
+    assert_eq!(span_style(&line, "wt-two"), theme::finished());
+
+    for activity in [
+        Some(Activity {
+            state: SessionState::Idle,
+            count: 1,
+        }),
+        Some(Activity {
+            state: SessionState::NeedsYou,
+            count: 1,
+        }),
+        None,
+    ] {
+        let line = row_line(&a_worktree_row(false, activity));
+        assert_eq!(line.to_string(), "├─ wt-two [release-2]", "{activity:?}");
+    }
 }

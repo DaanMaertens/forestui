@@ -306,6 +306,23 @@ pub fn cursor_unfocused() -> Style {
         .fg(active().text_primary)
 }
 
+/// The sidebar's cursor row: the cursor background, bold, and no foreground,
+/// so every span keeps its own colour — a worktree's session state must stay
+/// readable on the row you are looking at. Bold carries the selection where
+/// a state colour has little contrast against the background.
+pub fn sidebar_cursor() -> Style {
+    Style::default()
+        .bg(active().accent_dark)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// [`sidebar_cursor`] when the sidebar does not have focus.
+pub fn sidebar_cursor_unfocused() -> Style {
+    Style::default()
+        .bg(active().bg_selected)
+        .add_modifier(Modifier::BOLD)
+}
+
 /// Which of Textual's button variants a control carries.
 ///
 /// `Primary` is `Button.-primary` — the filled accent pair, kept for modal
