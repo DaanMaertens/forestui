@@ -210,7 +210,9 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
         text(nodes, format!("Branch:     {branch}"), theme::accent());
     }
     commit_line(nodes, app);
-    text(nodes, format!("Path:       {path}"), theme::secondary());
+    // The repository pane has no `⚠ MISSING` line or disabled controls for a
+    // vanished checkout, so its path line does not claim one either.
+    path_line(nodes, path, true);
 
     let mut top = vec![
         ControlSpec::new(Action::StartWork, "Start work", theme::Variant::Primary),
@@ -229,7 +231,7 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
     controls(nodes, top);
     // A row of its own rather than the tail of the one above: all six would
     // overflow a narrow pane, and a control row does not wrap.
-    controls(nodes, open_in().to_vec());
+    controls(nodes, open_in_controls());
     // Textual ran CLAUDE straight into RECENT SESSIONS with no rule between them.
     nodes.push(DetailNode::Rule);
     claude(nodes, app);
@@ -312,24 +314,12 @@ fn worktree(nodes: &mut Vec<DetailNode>, app: &App) {
         text(nodes, line, theme::muted());
     }
     commit_line(nodes, app);
-    if app.meta.path_exists {
-        text(
-            nodes,
-            format!("Path:       {}", app.meta.path),
-            theme::secondary(),
-        );
-    } else {
-        text(
-            nodes,
-            format!("Path:       {}  (missing)", app.meta.path),
-            theme::destructive(),
-        );
-    }
+    path_line(nodes, &app.meta.path, app.meta.path_exists);
 
     // The session cards are what this pane is visited for, so everything
     // above them is folded into the header: one control row, one rule.
     let mut top = vec![sync_control(app, !app.meta.path_exists)];
-    top.extend(open_in());
+    top.extend(open_in_controls());
     controls(nodes, top);
 
     nodes.push(DetailNode::Rule);
@@ -399,11 +389,25 @@ fn sync_control(app: &App, missing_directory: bool) -> ControlSpec {
     }
 }
 
+/// The header's `Path:` line. A directory that is gone says so on the line
+/// itself, in the destructive style the `⚠ MISSING` line above it wears.
+fn path_line(nodes: &mut Vec<DetailNode>, path: &str, exists: bool) {
+    if exists {
+        text(nodes, format!("Path:       {path}"), theme::secondary());
+    } else {
+        text(
+            nodes,
+            format!("Path:       {path}  (missing)"),
+            theme::destructive(),
+        );
+    }
+}
+
 /// Editor, Terminal and Files: the controls that open the selection's
 /// directory somewhere else. They ride the header's control rows rather than
 /// a section of their own.
-fn open_in() -> [ControlSpec; 3] {
-    [
+fn open_in_controls() -> Vec<ControlSpec> {
+    vec![
         ControlSpec::new(Action::Editor, "Editor", theme::Variant::Normal),
         ControlSpec::new(Action::Terminal, "Terminal", theme::Variant::Normal),
         ControlSpec::new(Action::Files, "Files", theme::Variant::Normal),
