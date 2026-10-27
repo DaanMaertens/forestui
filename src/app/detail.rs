@@ -109,11 +109,6 @@ pub enum DetailNode {
     Blank,
     /// The horizontal rule between major sections, with its margin row above.
     Rule,
-    /// A path in the elevated box that hugs its content.
-    PathBox {
-        path: String,
-        style: Style,
-    },
     /// Open a card; nodes until [`DetailNode::CardEnd`] land inside it.
     CardStart,
     CardEnd,
@@ -215,6 +210,7 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
         text(nodes, format!("Branch:     {branch}"), theme::accent());
     }
     commit_line(nodes, app);
+    text(nodes, format!("Path:       {path}"), theme::secondary());
 
     let mut top = vec![
         ControlSpec::new(Action::StartWork, "Start work", theme::Variant::Primary),
@@ -231,16 +227,9 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
         ));
     }
     controls(nodes, top);
-
-    nodes.push(DetailNode::Rule);
-    nodes.push(DetailNode::Section("LOCATION"));
-    nodes.push(DetailNode::PathBox {
-        path: path.to_string(),
-        style: theme::secondary(),
-    });
-
-    nodes.push(DetailNode::Rule);
-    open_in(nodes);
+    // A row of its own rather than the tail of the one above: all six would
+    // overflow a narrow pane, and a control row does not wrap.
+    controls(nodes, open_in().to_vec());
     // Textual ran CLAUDE straight into RECENT SESSIONS with no rule between them.
     nodes.push(DetailNode::Rule);
     claude(nodes, app);
@@ -323,25 +312,26 @@ fn worktree(nodes: &mut Vec<DetailNode>, app: &App) {
         text(nodes, line, theme::muted());
     }
     commit_line(nodes, app);
-
-    controls(nodes, vec![sync_control(app, !app.meta.path_exists)]);
-
-    nodes.push(DetailNode::Rule);
-    nodes.push(DetailNode::Section("LOCATION"));
     if app.meta.path_exists {
-        nodes.push(DetailNode::PathBox {
-            path: app.meta.path.clone(),
-            style: theme::secondary(),
-        });
+        text(
+            nodes,
+            format!("Path:       {}", app.meta.path),
+            theme::secondary(),
+        );
     } else {
-        nodes.push(DetailNode::PathBox {
-            path: format!("{}  (missing)", app.meta.path),
-            style: theme::destructive(),
-        });
+        text(
+            nodes,
+            format!("Path:       {}  (missing)", app.meta.path),
+            theme::destructive(),
+        );
     }
 
-    nodes.push(DetailNode::Rule);
-    open_in(nodes);
+    // The session cards are what this pane is visited for, so everything
+    // above them is folded into the header: one control row, one rule.
+    let mut top = vec![sync_control(app, !app.meta.path_exists)];
+    top.extend(open_in());
+    controls(nodes, top);
+
     nodes.push(DetailNode::Rule);
     claude(nodes, app);
     sessions(nodes, app);
@@ -409,16 +399,15 @@ fn sync_control(app: &App, missing_directory: bool) -> ControlSpec {
     }
 }
 
-fn open_in(nodes: &mut Vec<DetailNode>) {
-    nodes.push(DetailNode::Section("OPEN IN"));
-    controls(
-        nodes,
-        vec![
-            ControlSpec::new(Action::Editor, "Editor", theme::Variant::Normal),
-            ControlSpec::new(Action::Terminal, "Terminal", theme::Variant::Normal),
-            ControlSpec::new(Action::Files, "Files", theme::Variant::Normal),
-        ],
-    );
+/// Editor, Terminal and Files: the controls that open the selection's
+/// directory somewhere else. They ride the header's control rows rather than
+/// a section of their own.
+fn open_in() -> [ControlSpec; 3] {
+    [
+        ControlSpec::new(Action::Editor, "Editor", theme::Variant::Normal),
+        ControlSpec::new(Action::Terminal, "Terminal", theme::Variant::Normal),
+        ControlSpec::new(Action::Files, "Files", theme::Variant::Normal),
+    ]
 }
 
 /// One launch vocabulary everywhere: the CLAUDE section and every session

@@ -412,11 +412,9 @@ MAIN REPOSITORY
 Repository: alpha
 Branch:     main
 Commit:     <7-hex> (<humanized time>)
-[ ↓ Git Pull (No remote) ]  [  Add Worktree ]
-LOCATION
-<absolute source path>
-OPEN IN
-[  Editor ] [  Terminal ] [  Files ]
+Path:       <absolute source path>
+[ Start work ] [ ↓ Git Pull (No remote) ]
+[ Editor ] [ Terminal ] [ Files ]
 CLAUDE
 [ New Session ] [ New Session: YOLO ]
 RECENT SESSIONS
@@ -495,11 +493,8 @@ Worktree:   wt-two
 Branch:     feat/wt-two
 Based on:   main (<7-hex>)
 Commit:     <7-hex> (<humanized time>)
-[ ↓ Git Pull (No remote) ]
-LOCATION
-<forest>/alpha/wt-two
-OPEN IN
-[  Editor ] [  Terminal ] [  Files ]
+Path:       <forest>/alpha/wt-two
+[ ↓ Git Pull (No remote) ] [ Editor ] [ Terminal ] [ Files ]
 CLAUDE
 [ New Session ] [ New Session: YOLO ]
 RECENT SESSIONS
@@ -514,7 +509,7 @@ MANAGE
 `created_from_ref` persisted at creation time, not from git); the rename inputs are
 empty instead of pre-filled.
 
-> The `LOCATION` path is the **resolved** path — on macOS `/tmp/...` resolves to
+> The `Path:` line is the **resolved** path — on macOS `/tmp/...` resolves to
 > `/private/tmp/...`. Assert with a suffix match, not an equality against `$FUI_FOREST`.
 
 ---
@@ -1039,9 +1034,9 @@ Worktree:   wt-two
 Branch:     feat/wt-two
 ⚠ MISSING:   directory no longer exists on disk
 Based on:   main (<7-hex>)
-[ ↓ Git Pull (Directory missing) ]      <- disabled
-LOCATION
-<path>  (missing)                        <- destructive colour
+Path:       <path>  (missing)            <- destructive colour
+[ ↓ Git Pull (Directory missing) ] [ Editor ] [ Terminal ] [ Files ]
+                                         ^ Git Pull disabled
 ```
 The `Commit:` line is **absent** (git cannot run in a missing cwd; the error is
 swallowed). The app must **not** crash — regression guard for commit `b8f2bc5`
@@ -1301,14 +1296,18 @@ that the tmux session dies instantly. The Rust build resolves itself through
 **Setup:** harness fixture — repos `alpha` (one worktree `wt-a`) and `beta`, one
 custom Claude button `Opus`.
 **Expected:** `MAIN REPOSITORY`, `Repository: alpha`, `Branch:     main`,
-`Commit:     <sha> (<rel>)`, `↓ Git Pull (No remote)`.
+`Commit:     <sha> (<rel>)`, `Path:       <path>`, then a row holding
+`Start work` and `↓ Git Pull (No remote)`, then a row holding `Editor`,
+`Terminal`, `Files`. No `LOCATION` or `OPEN IN` header.
 **Fails if:** the commit line is missing (fixture has no commits) or the sync
 control is enabled without a remote.
 
 ### UC-54 — Worktree detail
 **Area:** Sweep | **Priority:** P0 | 🟢 EXECUTED (both builds)
 **Expected:** `WORKTREE`, `Worktree:   wt-a`, `Branch:     feat/wt-a`,
-`Based on:   main (<sha>)`.
+`Based on:   main (<sha>)`, `Path:       <path>`, then one row holding
+`↓ Git Pull`, `Editor`, `Terminal`, `Files`, a rule, and `CLAUDE: NEW SESSION`.
+No `LOCATION` or `OPEN IN` header.
 **Fails if:** `Based on:` is absent — the base branch was not captured at create time.
 
 ### UC-55 — `a` opens Add Repository
@@ -1621,7 +1620,8 @@ errors, update failures) still depends on it.
 **Area:** Visual | **Priority:** P1 | 🟡 IN PROGRESS
 **Expected:** the detail pane carries the same visual structure Textual gave it —
 horizontal rules between sections, an elevated bordered card behind each Claude
-session and each GitHub issue, and the LOCATION path in a bordered box. Without
+session and each GitHub issue. (The LOCATION path box went in #125: the path
+is a `Path:` header line now, so the session cards sit higher.) Without
 them the pane reads as one flat undifferentiated list, which is what a user
 comparing the two builds side by side noticed first.
 

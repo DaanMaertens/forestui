@@ -47,7 +47,7 @@ SESS="sweep-$LABEL"
 
 # tmux refuses long socket paths, so the server dir has to be short.
 TMUXDIR="$(mktemp -d /tmp/fuisweepXXXX)"
-# A fixed template, not the platform default: the LOCATION box hugs the path,
+# A fixed template, not the platform default: the `Path:` line prints the path,
 # so the path's *length* is part of every frame that shows it. macOS's default
 # mktemp dir lands under /var/folders/<xx>/<random>/T with a variable-length
 # prefix, which is why committed baselines did not reproduce across machines.

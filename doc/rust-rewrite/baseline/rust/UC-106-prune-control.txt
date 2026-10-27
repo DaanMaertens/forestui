@@ -5,21 +5,11 @@
   alpha                                │  Repository: beta
 ▼ beta                                 │  Branch:     main
 ├─ ✓ pr-45-retry-uploads-with-backoff [│  Commit:     <sha> (<rel>)
-├─ session-caching-spike [session/cachi│
-└─ feat-77-dark-mode-for-the-dashboard │  ┌────────────┐ ┌────────────────────────┐ ┌────────────────────┐
-▼ gamma                                │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Prune finished (1) │
-└─ gamma-imported [feat/imported]      │  └────────────┘ └────────────────────────┘ └────────────────────┘
-                                       │
-                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
-                                       │
-                                       │  LOCATION
-                                       │  ┌────────────────────────────────┐
-                                       │  │ <ROOT>/src/beta │
-                                       │  └────────────────────────────────┘
-                                       │
-                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
-                                       │
-                                       │  OPEN IN
+├─ session-caching-spike [session/cachi│  Path:       <ROOT>/src/beta
+└─ feat-77-dark-mode-for-the-dashboard │
+▼ gamma                                │  ┌────────────┐ ┌────────────────────────┐ ┌────────────────────┐
+└─ gamma-imported [feat/imported]      │  │ Start work │ │ ↓ Git Pull (No remote) │ │ Prune finished (1) │
+                                       │  └────────────┘ └────────────────────────┘ └────────────────────┘
                                        │
                                        │  ┌────────┐ ┌──────────┐ ┌───────┐
                                        │  │ Editor │ │ Terminal │ │ Files │
@@ -30,15 +20,25 @@
                                        │  CLAUDE: NEW SESSION
                                        │
                                        │  ┌────────┐ ┌──────┐ ┌──────┐
-                                       │  │ Claude │ │ YOLO │ │ Opus │         Deleted
-                                       │  └────────┘ └──────┘ └──────┘         'issue-298-proactive-metrics-coalesced-fire-rows-ov'; kept
-                                       │                                       branch
-                                       │  CLAUDE: RECENT SESSIONS              'fix/issue-298-proactive-metrics-coalesced-fire-rows-ov' —
-                                       │  No sessions found                    no remote to push to.
-                                       │                                       Deleting 'wt-a-renamed'…
-                                       │  ──────────────────────────────────── Deleting 'wt-a-renamed'…
-                                       │                                       Deleted 'wt-a-renamed'; kept branch 'feat/wt-a-v2' — no
-                                       │  MANAGE                               remote to push to.
+                                       │  │ Claude │ │ YOLO │ │ Opus │
+                                       │  └────────┘ └──────┘ └──────┘
+                                       │
+                                       │  CLAUDE: RECENT SESSIONS
+                                       │  No sessions found
+                                       │
+                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
+                                       │
+                                       │  MANAGE
                                        │  Settings for sweep-user/alpha
+                                       │                                       Deleted
+                                       │  ┌─────────────────────┐ ┌─────────── 'issue-298-proactive-metrics-coalesced-fire-rows-ov'; kept
+                                       │  │ Repository settings │ │ Remove Rep branch
+                                       │  └─────────────────────┘ └─────────── 'fix/issue-298-proactive-metrics-coalesced-fire-rows-ov' —
+                                       │                                       no remote to push to.
+                                       │                                       Deleting 'wt-a-renamed'…
+                                       │                                       Deleting 'wt-a-renamed'…
+                                       │                                       Deleted 'wt-a-renamed'; kept branch 'feat/wt-a-v2' — no
+                                       │                                       remote to push to.
+                                       │
  a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>
