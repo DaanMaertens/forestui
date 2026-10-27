@@ -159,6 +159,10 @@ pub struct App {
     /// panels; without the guard, bouncing across the sidebar stacks
     /// concurrent duplicate fetches for identical results.
     issues_in_flight: std::collections::HashSet<(String, crate::models::Scope)>,
+    /// Fetches in flight that a revalidation was asked for behind. The one
+    /// running may answer from a fresh cache without asking `gh`, so the
+    /// revalidation runs once it lands rather than being deduped away.
+    issues_revalidation_owed: std::collections::HashSet<(String, crate::models::Scope)>,
     /// What is known of each checkout's repository settings, by path.
     repos: std::collections::HashMap<String, repo_settings::RepoLookup>,
     /// Paths a selection has asked `gh` about and not had an answer for.
@@ -318,6 +322,7 @@ impl App {
             last_issue_refresh: Instant::now(),
             should_quit: false,
             issues_in_flight: std::collections::HashSet::new(),
+            issues_revalidation_owed: std::collections::HashSet::new(),
             repos: std::collections::HashMap::new(),
             repo_probes: std::collections::HashSet::new(),
             sessions_in_flight: std::collections::HashSet::new(),
@@ -1045,20 +1050,29 @@ impl App {
     /// the cache, and folds into any open Start work for that path.
     pub(super) fn fetch_issues_for(&mut self, path: String) {
         let scope = self.start_work_for(&path).scope;
-        self.fetch_issues_scoped(path, scope);
+        self.fetch_issues_scoped(path, scope, false);
     }
 
     /// Fetch one scope's issues, which may not be the setting's: an open
-    /// Start work can be listing the other.
-    pub(super) fn fetch_issues_scoped(&mut self, path: String, scope: Scope) {
+    /// Start work can be listing the other. `revalidate` asks `gh` even
+    /// when the cache is fresh, for a Start work that shows the cached list
+    /// meanwhile.
+    pub(super) fn fetch_issues_scoped(&mut self, path: String, scope: Scope, revalidate: bool) {
         // One fetch per path and scope at a time — each one is a chain of gh
         // subprocesses and possibly a network call for an identical result.
         if !self.issues_in_flight.insert((path.clone(), scope)) {
+            if revalidate {
+                self.issues_revalidation_owed.insert((path, scope));
+            }
             return;
         }
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            let issues = github::list_issues(&path, scope).await;
+            let issues = if revalidate {
+                github::refetch_issues(&path, scope).await
+            } else {
+                github::list_issues(&path, scope).await
+            };
             tx.send(AppEvent::Issues {
                 path,
                 scope,
@@ -1370,7 +1384,11 @@ impl App {
                 scope,
                 issues,
             } => {
-                self.issues_in_flight.remove(&(path.clone(), scope));
+                let key = (path.clone(), scope);
+                self.issues_in_flight.remove(&key);
+                if self.issues_revalidation_owed.remove(&key) {
+                    self.fetch_issues_scoped(path.clone(), scope, true);
+                }
                 // A flow takes only its own scope's list.
                 for flow in self.start_work_flows(&path) {
                     flow.set_issues(scope, issues.clone());

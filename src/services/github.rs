@@ -237,6 +237,14 @@ pub async fn list_issues(path: &str, scope: Scope) -> IssuesResult {
     if let Some((issues, true)) = peek_issues(path, scope) {
         return issues;
     }
+    refetch_issues(path, scope).await
+}
+
+/// [`list_issues`] past a fresh cache entry: what Start work asks when it
+/// opens, since a list up to [`CACHE_TTL_SECONDS`] old misses an issue
+/// assigned since (#119). Only this scope's entry is replaced; the other's
+/// stays, unlike after [`invalidate_cache`].
+pub async fn refetch_issues(path: &str, scope: Scope) -> IssuesResult {
     let generation = state()
         .lock()
         .map(|g| g.issues.generation)

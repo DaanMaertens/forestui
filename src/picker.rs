@@ -84,6 +84,17 @@ impl<T: Searchable> SearchPicker<T> {
         }
     }
 
+    /// Highlight the first match `wanted` accepts, e.g. to keep the user's
+    /// place across a reload of the list. Whether one did; with none, the
+    /// selection stays put.
+    pub fn select_where(&mut self, wanted: impl Fn(&T) -> bool) -> bool {
+        let Some(row) = self.matches.iter().position(|&i| wanted(&self.items[i])) else {
+            return false;
+        };
+        self.selected_index = row;
+        true
+    }
+
     /// Replace the query text, e.g. with an entry the dialog has picked.
     pub fn set_query(&mut self, text: &str) {
         self.query.set_value(text);

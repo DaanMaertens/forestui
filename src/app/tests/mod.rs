@@ -23,6 +23,7 @@ mod session_mode;
 mod session_states;
 mod sessions;
 mod start_work;
+mod start_work_refresh;
 mod start_work_scope;
 mod start_work_settings;
 mod sub_issues;

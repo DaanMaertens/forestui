@@ -1098,7 +1098,9 @@ impl App {
     /// The issues are the list the repository pane loads, for the scope the
     /// settings choose. With a warm cache the picker is ready at once;
     /// otherwise it fills when the fetch folds in, so the mode step never
-    /// waits on `gh`.
+    /// waits on `gh`. Either way `gh` is asked again: a fresh cache entry
+    /// can still miss an issue assigned since, and the answer replaces the
+    /// list in place (#119).
     pub(super) fn action_start_work(&mut self) {
         let Some(repo) = self.state.selected_repository() else {
             self.notify("Select a repository first", Severity::Warning);
@@ -1112,10 +1114,11 @@ impl App {
             return;
         };
         let start_work = self.start_work_for(&path);
-        let cached = github::peek_issues(&path, start_work.scope);
+        let scope = start_work.scope;
+        let cached = github::peek_issues(&path, scope);
         let modal = StartWorkModal::new(
             repo,
-            cached.as_ref().map(|(issues, _)| issues.clone()),
+            cached.map(|(issues, _)| issues),
             start_work,
             self.settings.show_blocked_issues,
             self.settings.issue_filter,
@@ -1124,9 +1127,7 @@ impl App {
         // Nobody waits on the answer: the modes stay usable until it says
         // otherwise, and the PRs are fetched once it is in.
         self.probe_github(path.clone(), true);
-        if !matches!(cached, Some((_, true))) {
-            self.fetch_issues_for(path);
-        }
+        self.fetch_issues_scoped(path, scope, true);
     }
 
     /// Open the selected repository's settings chooser: its settings file or
