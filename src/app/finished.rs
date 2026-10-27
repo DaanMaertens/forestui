@@ -1,11 +1,11 @@
 //! Which worktrees are finished: their work item is done.
 //!
 //! [`check`] runs in the background on the worktree sweep and asks `gh` and
-//! git; [`FinishedWorktrees`] keeps its answers. They are derived state —
-//! never saved — and are judged per repository, so a result can only change
-//! the marks of the repository it was taken for, and only of worktrees that
-//! repository still has. Whether an answer means finished is
-//! [`work::is_finished`], a pure rule.
+//! git; [`FinishedWorktrees`] throttles it per repository. Its verdicts fold
+//! into the mark saved on each worktree only when they change
+//! ([`crate::models::Worktree::fold_finished_check`]), so a mark the user
+//! set by hand survives the sweep re-asking. Whether an answer means
+//! finished is [`work::is_finished`], a pure rule.
 
 use crate::models::{ItemState, Repository, WorkItemLink};
 use crate::services::git;
@@ -26,8 +26,6 @@ pub struct FinishedWorktrees {
     /// Repositories with a check running.
     running: HashSet<Uuid>,
     last_started: HashMap<Uuid, Instant>,
-    /// The finished worktrees, by repository.
-    finished: HashMap<Uuid, HashSet<Uuid>>,
 }
 
 /// Handed out when a check starts and handed back with its verdicts. Not
@@ -36,12 +34,6 @@ pub struct FinishedWorktrees {
 #[derive(Debug)]
 pub struct FinishedTicket {
     repo_id: Uuid,
-}
-
-impl FinishedTicket {
-    pub fn repo_id(&self) -> Uuid {
-        self.repo_id
-    }
 }
 
 impl FinishedWorktrees {
@@ -61,35 +53,11 @@ impl FinishedWorktrees {
         Some(FinishedTicket { repo_id })
     }
 
-    /// Fold a check's verdicts — `true` finished, `false` not, missing for
-    /// "could not tell" — into the repository's marks. `current` is the
-    /// repository's worktrees now, `None` once it is gone. Returns whether
-    /// any mark changed, which is what earns a repaint.
-    pub fn fold(
-        &mut self,
-        ticket: FinishedTicket,
-        verdicts: &HashMap<Uuid, bool>,
-        current: Option<&HashSet<Uuid>>,
-    ) -> bool {
+    /// Take back a check's ticket once its result arrives, freeing the
+    /// repository for the next check. Returns the repository it was for.
+    pub fn release(&mut self, ticket: FinishedTicket) -> Uuid {
         self.running.remove(&ticket.repo_id);
-        let Some(current) = current else {
-            return self.finished.remove(&ticket.repo_id).is_some();
-        };
-        let before = self.finished.remove(&ticket.repo_id).unwrap_or_default();
-        let after: HashSet<Uuid> = current
-            .iter()
-            .copied()
-            .filter(|id| verdicts.get(id).copied().unwrap_or(before.contains(id)))
-            .collect();
-        let changed = after != before;
-        if !after.is_empty() {
-            self.finished.insert(ticket.repo_id, after);
-        }
-        changed
-    }
-
-    pub fn contains(&self, worktree_id: Uuid) -> bool {
-        self.finished.values().any(|set| set.contains(&worktree_id))
+        ticket.repo_id
     }
 }
 

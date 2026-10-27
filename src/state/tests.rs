@@ -442,3 +442,115 @@ fn archive_toggle_persists() {
     let reloaded = AppState::load_from(dir.path().join(".forestui-config.json"));
     assert!(reloaded.repositories()[0].worktrees[0].is_archived);
 }
+
+/// A repository with one worktree, for the finished-mark tests.
+fn state_with_worktree() -> (tempfile::TempDir, AppState, Uuid, Uuid) {
+    let (dir, mut state) = temp_state();
+    let repo = Repository::new("demo".into(), "/tmp/demo".into());
+    let repo_id = repo.id;
+    state.add_repository(repo);
+    let worktree = Worktree::new("wt".into(), "b".into(), "/f/wt".into());
+    let wt_id = worktree.id;
+    state.add_worktree(repo_id, worktree);
+    (dir, state, repo_id, wt_id)
+}
+
+fn verdict(wt_id: Uuid, finished: bool) -> std::collections::HashMap<Uuid, bool> {
+    [(wt_id, finished)].into_iter().collect()
+}
+
+fn marked(state: &AppState, wt_id: Uuid) -> bool {
+    state.find_worktree(wt_id).expect("tracked").1.finished
+}
+
+/// A config from before marks were saved: the first check sets each mark
+/// from its verdict, as the derived marks used to be.
+#[test]
+fn the_first_verdict_sets_the_mark() {
+    let (_dir, mut state, repo_id, wt_id) = state_with_worktree();
+    assert!(state.fold_finished_verdicts(repo_id, &verdict(wt_id, true)));
+    assert!(marked(&state, wt_id));
+}
+
+/// The sweep finds the same answer almost every time; that must report no
+/// change, so it costs neither a repaint nor a save.
+#[test]
+fn the_same_verdict_again_changes_nothing() {
+    let (_dir, mut state, repo_id, wt_id) = state_with_worktree();
+    state.fold_finished_verdicts(repo_id, &verdict(wt_id, true));
+    assert!(!state.fold_finished_verdicts(repo_id, &verdict(wt_id, true)));
+}
+
+/// The user's Unmark of a closed issue's worktree sticks while the check
+/// keeps saying closed.
+#[test]
+fn a_hand_set_mark_survives_an_unchanged_verdict() {
+    let (dir, mut state, repo_id, wt_id) = state_with_worktree();
+    state.fold_finished_verdicts(repo_id, &verdict(wt_id, true));
+    state.set_finished(wt_id, false);
+
+    assert!(!state.fold_finished_verdicts(repo_id, &verdict(wt_id, true)));
+    assert!(!marked(&state, wt_id));
+    let mut reloaded = AppState::load_from(dir.path().join(".forestui-config.json"));
+    assert!(!reloaded.fold_finished_verdicts(repo_id, &verdict(wt_id, true)));
+    assert!(
+        !marked(&reloaded, wt_id),
+        "the Unmark did not survive a restart"
+    );
+}
+
+/// Whichever changed the mark last wins: a hand mark on an open issue
+/// stays until the issue's state changes, then follows it.
+#[test]
+fn a_changed_verdict_overrides_a_hand_set_mark() {
+    let (_dir, mut state, repo_id, wt_id) = state_with_worktree();
+    state.fold_finished_verdicts(repo_id, &verdict(wt_id, false));
+    state.set_finished(wt_id, true);
+    state.fold_finished_verdicts(repo_id, &verdict(wt_id, false));
+    assert!(marked(&state, wt_id));
+
+    assert!(state.fold_finished_verdicts(repo_id, &verdict(wt_id, true)));
+    assert!(marked(&state, wt_id), "closed: still marked");
+    assert!(state.fold_finished_verdicts(repo_id, &verdict(wt_id, false)));
+    assert!(!marked(&state, wt_id), "reopened: the mark follows");
+}
+
+/// "Could not tell" — `gh` signed out, a branch git cannot resolve —
+/// touches neither the mark nor the saved last answer.
+#[test]
+fn no_verdict_changes_nothing() {
+    let (_dir, mut state, repo_id, wt_id) = state_with_worktree();
+    state.fold_finished_verdicts(repo_id, &verdict(wt_id, true));
+    assert!(!state.fold_finished_verdicts(repo_id, &Default::default()));
+    assert!(marked(&state, wt_id));
+    let worktree = state.find_worktree(wt_id).unwrap().1;
+    assert_eq!(worktree.last_finished_check, Some(true));
+}
+
+/// Verdicts are judged per repository: one about a worktree elsewhere is
+/// not this result's to fold.
+#[test]
+fn a_verdict_about_another_repositorys_worktree_is_ignored() {
+    let (_dir, mut state, _repo_id, wt_id) = state_with_worktree();
+    let other = Repository::new("other".into(), "/tmp/other".into());
+    let other_id = other.id;
+    state.add_repository(other);
+    assert!(!state.fold_finished_verdicts(other_id, &verdict(wt_id, true)));
+    assert!(!marked(&state, wt_id));
+}
+
+#[test]
+fn a_finished_mark_persists() {
+    let (dir, mut state, _repo_id, wt_id) = state_with_worktree();
+    state.set_finished(wt_id, true);
+    let reloaded = AppState::load_from(dir.path().join(".forestui-config.json"));
+    assert!(marked(&reloaded, wt_id));
+}
+
+#[test]
+fn configs_without_finished_marks_load_cleanly() {
+    let json = r#"{"name": "wt", "branch": "b", "path": "/f/wt"}"#;
+    let worktree: Worktree = serde_json::from_str(json).unwrap();
+    assert!(!worktree.finished);
+    assert_eq!(worktree.last_finished_check, None);
+}

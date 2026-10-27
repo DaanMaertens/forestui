@@ -1156,6 +1156,24 @@ impl App {
         self.reload_detail();
     }
 
+    /// Mark or unmark the selected worktree finished. Only the mark moves:
+    /// the check's last answer stays, so the next sweep finding the same
+    /// thing leaves the user's choice alone.
+    pub(super) fn action_toggle_finished(&mut self) {
+        let Some(worktree_id) = self.state.selection.worktree_id else {
+            return;
+        };
+        let Some(finished) = self
+            .state
+            .find_worktree(worktree_id)
+            .map(|(_, w)| w.finished)
+        else {
+            return;
+        };
+        self.state.set_finished(worktree_id, !finished);
+        self.rebuild_rows();
+    }
+
     pub(super) fn action_delete(&mut self) {
         if let Some((repo, worktree)) = self.state.selected_worktree() {
             let name = worktree.name.clone();
@@ -1388,6 +1406,7 @@ impl App {
             Action::PruneFinished => self.action_prune_finished(),
             Action::RemoveRepository | Action::Delete => self.action_delete(),
             Action::Archive | Action::Unarchive => self.action_toggle_archive(),
+            Action::ToggleFinished => self.action_toggle_finished(),
         }
     }
 

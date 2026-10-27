@@ -167,7 +167,8 @@ pub struct App {
     /// Worktree scans and the changes they must not undo; see
     /// [`worktree_sync`].
     worktree_sync: worktree_sync::WorktreeSync,
-    /// Which worktrees are finished, from the check that rides on the scans.
+    /// The finished checks that ride on the scans; the marks they set are
+    /// saved on the worktrees.
     finished: finished::FinishedWorktrees,
     /// When the last periodic worktree sweep started.
     last_worktree_scan: Instant,
@@ -818,7 +819,7 @@ impl App {
                         &self.settings.branch_prefix,
                     ),
                     is_last: index == last_index,
-                    finished: self.finished.contains(worktree.id),
+                    finished: worktree.finished,
                     activity: crate::services::live::activity(
                         self.live_sessions.values(),
                         std::path::Path::new(&worktree.path),
@@ -856,7 +857,7 @@ impl App {
             .map(|repo| {
                 repo.worktrees
                     .iter()
-                    .filter(|worktree| self.finished.contains(worktree.id))
+                    .filter(|worktree| worktree.finished)
                     .map(|worktree| (worktree.id, worktree.name.clone()))
                     .collect()
             })
@@ -1505,14 +1506,11 @@ impl App {
                 }
             }
             AppEvent::WorktreesFinished { ticket, verdicts } => {
-                // Only the worktrees the repository has now: one removed
-                // while the check ran, or another repository's, is not
-                // this result's to mark.
-                let current = self
-                    .state
-                    .find_repository(ticket.repo_id())
-                    .map(|repo| repo.worktrees.iter().map(|w| w.id).collect());
-                if self.finished.fold(ticket, &verdicts, current.as_ref()) {
+                // The fold saves, and drops verdicts about worktrees the
+                // repository no longer has: one removed while the check ran,
+                // or another repository's, is not this result's to mark.
+                let repo_id = self.finished.release(ticket);
+                if self.state.fold_finished_verdicts(repo_id, &verdicts) {
                     self.redraw = true;
                     self.rebuild_rows();
                 }

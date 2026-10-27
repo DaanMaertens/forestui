@@ -530,3 +530,52 @@ fn a_base_branch_is_matched_by_its_local_name() {
     assert_eq!(local_name("feature/develop", &remotes), "feature/develop");
     assert_eq!(local_name("originx/develop", &remotes), "originx/develop");
 }
+
+/// `forestui prune` removes what the user marked by hand — a plain worktree
+/// the check has nothing to say about — and leaves the unmarked alone.
+#[tokio::test]
+async fn the_forest_prune_removes_hand_marked_worktrees() {
+    let fixture = Fixture::new("fix/done");
+    let open = fixture.clone.with_file_name("open");
+    git_in(
+        &fixture.clone,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "fix/open",
+            &open.to_string_lossy(),
+        ],
+    );
+
+    let config = fixture.clone.with_file_name(".forestui-config.json");
+    let mut state = AppState::load_from(config);
+    let mut repo = Repository::new("clone".into(), fixture.clone.to_string_lossy().into());
+    let done = Worktree::new(
+        "done".into(),
+        "fix/done".into(),
+        fixture.worktree.to_string_lossy().into(),
+    );
+    let kept = Worktree::new(
+        "open".into(),
+        "fix/open".into(),
+        open.to_string_lossy().into(),
+    );
+    let (done_id, kept_id) = (done.id, kept.id);
+    repo.worktrees = vec![done, kept];
+    state.add_repository(repo);
+    state.set_finished(done_id, true);
+
+    let results = prune_forest(&mut state).await;
+
+    assert_eq!(
+        results,
+        vec![repository(
+            "clone",
+            vec![named("done", Outcome::Removed { branch_kept: None })]
+        )]
+    );
+    assert!(state.find_worktree(done_id).is_none());
+    assert!(state.find_worktree(kept_id).is_some());
+}

@@ -1776,12 +1776,14 @@ seconds have passed since beta's last one, or the 30-second sweep — beta's
 `pr-45-retry-uploads-with-backoff` row reads `├─ ✓ pr-45-…`, dimmed, with the
 ✓ in the success colour. `feat-77-…` stays unmarked (#77 is still open), as
 does `session-caching-spike` (beta has no remote, so its session branch has no default
-branch to be merged into). Nothing is written to the config. The rule per link
-type, what each `gh` answer means, keeping a mark through a check that could
-not tell, and discarding results for a removed repository or another
-repository's worktree are unit-tested.
+branch to be merged into). The mark is saved: beta's entry in
+`.forestui-config.json` gains `"finished": true` and
+`"last_finished_check": true`. The rule per link type, what each `gh` answer
+means, the change-only fold (a check that could not tell, the same answer
+again, a changed answer, a hand toggle in between), and discarding results
+for a removed repository or another repository's worktree are unit-tested.
 **Fails if:** the ✓ never appears, an open item's worktree is marked, the
-mark is not dimmed, or a `finished` key reaches `.forestui-config.json`.
+mark is not dimmed, or the mark is not saved.
 
 ### UC-106 — Prune finished worktrees
 **Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
@@ -1804,6 +1806,20 @@ changed`), a branch git will not delete, and the fold are unit-tested.
 **Fails if:** the control shows with nothing finished or with the wrong count,
 the confirmation omits a worktree, unpushed or uncommitted work is removed, a
 skip goes unnamed, or the branch survives a prune that removed its worktree.
+
+### UC-107 — Mark a worktree finished by hand
+**Area:** Flows | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Steps:** select a plain worktree (no issue, PR or session link) and press
+`f`; scroll its pane to MANAGE. Press `f` again. Then mark it, quit and
+relaunch.
+**Expected:** the footer lists `f Finish` between `h Archive` and
+`d Delete`. After the first `f` the row reads `├─ ✓ <name>`, dimmed; MANAGE
+shows `Archive`, `Unmark finished`, `Delete`; the repository pane offers
+`Prune finished (1)`; no notification. The second `f` clears all of that and
+the button reads `Mark finished` again. A mark survives the restart and
+shows before any check has run.
+**Fails if:** a plain or archived worktree cannot be marked, the label does
+not flip, a toggle toasts, or the mark is lost on restart.
 
 ---
 
@@ -1848,20 +1864,20 @@ composite shows a difference not listed above, treat it as a regression.
 | Hand-driven, unscripted | 71–77 (77 retired) | 4 |
 | Flows & mouse | 78–89 | 8 |
 | Visual parity | 90–94 (93 retired) | 1 |
-| Start work | 99–101, 103–106 | 7 |
+| Start work | 99–101, 103–107 | 8 |
 
-**103 numbered use cases written up here (UC-97 and 98 are assertions in
+**104 numbered use cases written up here (UC-97 and 98 are assertions in
 `tu-sweep.sh` only; UC-102 was deleted with the issue cards), 3 retired with
 the `?` binding (UC-26, 59, 93) and 1 with the Create-from-issue dialog
 (UC-77) —
-99 active · 59 P0 · 81 executed live · 17 written from source only · 1 in
+100 active · 60 P0 · 82 executed live · 17 written from source only · 1 in
 progress (UC-94).**
 
 UC-01–52 were written against the Python build on 2026-08-14 (35 executed).
 UC-53–70 are the automated sweep and have been executed against **both** builds
 (UC-59 has since retired and is no longer captured);
 UC-71–76 were hand-driven against the Rust build; UC-77 is retired.
-UC-99–106 are Start work, finished worktrees and prune, swept against the Rust
+UC-99–107 are Start work, finished worktrees and prune, swept against the Rust
 build only.
 
 Written from source, never driven live: UC-02, 03, 05, 15, 18, 19, 25, 35, 37, 38,

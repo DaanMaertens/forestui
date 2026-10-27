@@ -44,6 +44,8 @@ pub enum Action {
     RemoveRepository,
     Archive,
     Unarchive,
+    /// Mark or unmark the worktree finished, which is what Prune removes.
+    ToggleFinished,
     Delete,
 }
 
@@ -300,6 +302,7 @@ fn worktree(nodes: &mut Vec<DetailNode>, app: &App) {
     let name = selected.map(|(_, w)| w.name.as_str()).unwrap_or_default();
     let branch = selected.map(|(_, w)| w.branch.as_str()).unwrap_or_default();
     let archived = selected.map(|(_, w)| w.is_archived).unwrap_or(false);
+    let finished = selected.map(|(_, w)| w.finished).unwrap_or(false);
     let deleting = selected
         .map(|(_, w)| app.worktree_sync.is_removing(w.id))
         .unwrap_or(false);
@@ -367,6 +370,15 @@ fn worktree(nodes: &mut Vec<DetailNode>, app: &App) {
             } else {
                 ControlSpec::new(Action::Archive, "Archive", theme::Variant::Normal)
             },
+            ControlSpec::new(
+                Action::ToggleFinished,
+                if finished {
+                    "Unmark finished"
+                } else {
+                    "Mark finished"
+                },
+                theme::Variant::Normal,
+            ),
             if deleting {
                 ControlSpec::disabled(Action::Delete, "Deleting…")
             } else {
