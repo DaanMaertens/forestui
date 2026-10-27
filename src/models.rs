@@ -288,6 +288,10 @@ pub struct ClaudeSession {
     pub tokens: TokenUsage,
     /// The model of the last assistant record, for the cost estimate.
     pub model: Option<String>,
+    /// The session this conversation was handed off to (Claude Code's
+    /// `continued-in` record), if it was. A superseded session gets no card:
+    /// the successor carries the conversation on.
+    pub continued_in: Option<String>,
 }
 
 /// Token counts as the API reports them, summed across a transcript.

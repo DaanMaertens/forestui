@@ -15,7 +15,7 @@
 //! forestui's own tmux server — switchable on forestui's own session,
 //! movable from another — and falling back to "elsewhere" otherwise.
 
-use crate::services::tmux;
+use crate::services::{claude_session, tmux};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -199,17 +199,83 @@ pub fn snapshot() -> Vec<LiveSession> {
             session,
             group: tmux::current_session_group().unwrap_or_default(),
         });
-    merge(
-        tmux::list_claude_windows(),
-        read_heartbeats(),
-        home,
-        tmux::pane_window,
-    )
+    let windows = tmux::list_claude_windows();
+    let beats = read_heartbeats();
+    // Only sessions that look live can hand a live conversation off, and the
+    // successor is itself one of them while it runs — so a chain is complete.
+    let ids: Vec<String> = windows
+        .iter()
+        .filter(|window| window.running)
+        .map(|window| window.session_id.clone())
+        .chain(beats.iter().map(|beat| beat.session_id.clone()))
+        .collect();
+    let continued = claude_session::continuations(&ids);
+    merge(windows, beats, home, tmux::pane_window, &continued)
 }
 
 /// Pure form of [`snapshot`], for testing: `resolve` stands in for asking
-/// tmux which window a heartbeat's pane belongs to.
+/// tmux which window a heartbeat's pane belongs to, and `continued` maps each
+/// session that handed its conversation off to the session it handed it to.
 pub fn merge(
+    windows: Vec<tmux::ClaudeWindow>,
+    beats: Vec<Heartbeat>,
+    home: Option<Home>,
+    resolve: impl Fn(&str) -> Option<tmux::PaneWindow>,
+    continued: &HashMap<String, String>,
+) -> Vec<LiveSession> {
+    supersede(places(windows, beats, home, resolve), continued)
+}
+
+/// Fold hand-offs into the live picture.
+///
+/// ← in Claude Code moves a conversation into a background daemon under a
+/// new id. The window keeps the old id and its client stays alive, while the
+/// daemon's heartbeat has no pane — so read naively, one conversation is two
+/// sessions: the old one live in the window, the new one live elsewhere. The
+/// old id is no longer the conversation, so it is dropped however alive it
+/// looks; the successor is reached through the predecessor's window, so it
+/// takes that place when its own resolved nowhere better. A successor that is
+/// not live leaves nothing: the conversation it carried has ended.
+fn supersede(sessions: Vec<LiveSession>, continued: &HashMap<String, String>) -> Vec<LiveSession> {
+    // Where each chain ends. A loop has no end, so its members inherit
+    // nothing and, being superseded, are dropped all the same.
+    let end_of = |start: &str| -> Option<String> {
+        let mut at = start;
+        for _ in 0..=continued.len() {
+            match continued.get(at) {
+                Some(next) => at = next,
+                None => return Some(at.to_string()),
+            }
+        }
+        None
+    };
+    let mut inherited: HashMap<String, LivePlace> = HashMap::new();
+    for session in &sessions {
+        if continued.contains_key(&session.session_id)
+            && !matches!(session.place, LivePlace::Elsewhere { .. })
+            && let Some(end) = end_of(&session.session_id)
+        {
+            inherited
+                .entry(end)
+                .or_insert_with(|| session.place.clone());
+        }
+    }
+    sessions
+        .into_iter()
+        .filter(|session| !continued.contains_key(&session.session_id))
+        .map(|mut session| {
+            if matches!(session.place, LivePlace::Elsewhere { .. })
+                && let Some(place) = inherited.remove(&session.session_id)
+            {
+                session.place = place;
+            }
+            session
+        })
+        .collect()
+}
+
+/// Every session that looks live, each at the best place either source knows.
+fn places(
     windows: Vec<tmux::ClaudeWindow>,
     beats: Vec<Heartbeat>,
     home: Option<Home>,

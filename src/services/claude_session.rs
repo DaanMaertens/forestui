@@ -145,9 +145,10 @@ pub fn get_sessions_for_path(path: &str, limit: usize) -> Vec<ClaudeSession> {
     sessions
 }
 
-/// Re-read one transcript. `None` means it is gone or no longer has any
-/// messages, which is how a session that was deleted while forestui was in the
-/// background leaves the list.
+/// Re-read one transcript. `None` means it is gone, no longer has any
+/// messages, or was handed off to another session, which is how a session
+/// that was deleted (or handed off) while forestui was in the background
+/// leaves the list.
 ///
 /// This is the per-card refresh: five transcripts re-read concurrently answer
 /// far sooner than one walk of a directory that may hold dozens, and each card
@@ -160,7 +161,96 @@ pub fn refresh_one(path: &str, session_id: &str) -> Option<ClaudeSession> {
     // timer, and a transcript nobody has written to parses to what it did
     // before. One of them is 60 MB.
     let modified = std::fs::metadata(&file).and_then(|m| m.modified()).ok()?;
-    parse_cached(&file, modified)
+    parse_cached(&file, modified).filter(is_card)
+}
+
+/// Which of these sessions handed their conversation off, and to whom.
+///
+/// This feeds the live scan, so it runs every few seconds over transcripts
+/// that are being written to — a full parse of a 60 MB conversation on every
+/// sweep is not affordable. Each transcript is read once and then only from
+/// where the last read stopped. The transcript is looked up by id across every
+/// project directory: a window stamp says nothing about where it was started.
+pub fn continuations(ids: &[String]) -> HashMap<String, String> {
+    continuations_in(&claude_projects_dir(), ids)
+}
+
+/// Projects-scoped form of [`continuations`], for testing.
+pub fn continuations_in(projects: &Path, ids: &[String]) -> HashMap<String, String> {
+    let ids: Vec<&String> = ids
+        .iter()
+        // The id names a file; one that could step outside the directory is
+        // not a session id, whatever produced it.
+        .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .collect();
+    if ids.is_empty() {
+        return HashMap::new();
+    }
+    let dirs: Vec<PathBuf> = std::fs::read_dir(projects)
+        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+        .unwrap_or_default();
+    ids.into_iter()
+        .filter_map(|id| {
+            let file = dirs
+                .iter()
+                .map(|dir| dir.join(format!("{id}.jsonl")))
+                .find(|file| file.is_file())?;
+            Some((id.clone(), read_continuation(&file, id)?))
+        })
+        .collect()
+}
+
+/// How far each transcript has been read for a `continued-in`, and what that
+/// found. Bounded like the parse cache, and for the same reason.
+type ContinuationCache = HashMap<PathBuf, (u64, Option<String>)>;
+
+fn continuation_cache() -> &'static Mutex<ContinuationCache> {
+    static CACHE: OnceLock<Mutex<ContinuationCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The successor this transcript's own `continued-in` names, reading only what
+/// was appended since the last call. A file that shrank was rewritten, and is
+/// read again from the start.
+fn read_continuation(file: &Path, session_id: &str) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let len = std::fs::metadata(file).ok()?.len();
+    let (mut offset, mut found) = continuation_cache()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.get(file).cloned())
+        .filter(|(offset, _)| *offset <= len)
+        .unwrap_or((0, None));
+    if offset < len {
+        let mut appended = Vec::new();
+        std::fs::File::open(file)
+            .and_then(|mut f| {
+                f.seek(SeekFrom::Start(offset))?;
+                f.take(len - offset).read_to_end(&mut appended)
+            })
+            .ok()?;
+        // A line still being written is left for the next read, which starts
+        // at its beginning; reading it now would parse half a record.
+        let complete = appended
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map_or(0, |last| last + 1);
+        for line in String::from_utf8_lossy(&appended[..complete]).lines() {
+            if let Ok(data) = serde_json::from_str::<serde_json::Value>(line.trim())
+                && let Some(next) = own_continuation(&data, session_id)
+            {
+                found = Some(next);
+            }
+        }
+        offset += complete as u64;
+        if let Ok(mut guard) = continuation_cache().lock() {
+            if guard.len() >= PARSED_CACHE_LIMIT {
+                guard.clear();
+            }
+            guard.insert(file.to_path_buf(), (offset, found.clone()));
+        }
+    }
+    found
 }
 
 /// Directory-scoped form of [`get_sessions_for_path`], for testing.
@@ -214,7 +304,9 @@ pub fn read_sessions_dir(sessions_dir: &Path, limit: usize) -> Vec<ClaudeSession
         {
             break;
         }
-        if let Some(session) = parse_cached(&file_path, modified) {
+        if let Some(session) = parse_cached(&file_path, modified)
+            && is_card(&session)
+        {
             sessions.push(session);
             sessions.sort_by_key(|s| std::cmp::Reverse(s.last_timestamp));
             sessions.truncate(limit);
@@ -302,6 +394,27 @@ fn title_field(data: &serde_json::Value, key: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+/// The successor a `continued-in` record names, if it is this session's own.
+/// Claude writes one when it hands a conversation off to a background session,
+/// which carries on under a new id. A fork copies its parent's records
+/// verbatim, so a record stamped with another session id is the parent's
+/// hand-off, not this one's.
+fn own_continuation(data: &serde_json::Value, session_id: &str) -> Option<String> {
+    if data.get("type")?.as_str()? != "continued-in"
+        || data.get("sessionId")?.as_str()? != session_id
+    {
+        return None;
+    }
+    let id = data.get("continuedInSessionId")?.as_str()?.trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// Whether a session gets a card. One whose conversation was handed off does
+/// not: its successor's card carries the conversation on.
+fn is_card(session: &ClaudeSession) -> bool {
+    session.continued_in.is_none()
+}
+
 /// Whether a `user` record is something the person actually sent.
 ///
 /// `user` is the transport, not the author: tool results come back as `user`
@@ -366,6 +479,7 @@ pub fn parse_session_file(file_path: &Path) -> Option<ClaudeSession> {
     let mut git_branch: Option<String> = None;
     let mut tokens = TokenUsage::default();
     let mut model: Option<String> = None;
+    let mut continued_in: Option<String> = None;
 
     for line in raw.lines() {
         let line = line.trim();
@@ -400,6 +514,9 @@ pub fn parse_session_file(file_path: &Path) -> Option<ClaudeSession> {
                 Some("ai-title") => ai_title = title_field(&data, "aiTitle"),
                 _ => {}
             }
+        }
+        if let Some(next) = own_continuation(&data, &session_id) {
+            continued_in = Some(next);
         }
 
         let is_user = data.get("type").and_then(|t| t.as_str()) == Some("user")
@@ -482,6 +599,7 @@ pub fn parse_session_file(file_path: &Path) -> Option<ClaudeSession> {
         git_branch,
         tokens,
         model,
+        continued_in,
     })
 }
 

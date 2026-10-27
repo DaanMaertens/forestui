@@ -71,6 +71,7 @@ async fn custom_buttons_add_one_control_per_session_and_one_at_the_top() {
         git_branch: None,
         tokens: Default::default(),
         model: None,
+        continued_in: None,
     }]);
     // Resume + YOLO + one per custom button + Rename + Pin + Del.
     assert_eq!(app.detail_items().len(), baseline + 1 + 6);

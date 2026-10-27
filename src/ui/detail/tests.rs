@@ -52,6 +52,7 @@ fn a_session() -> ClaudeSession {
         git_branch: None,
         tokens: Default::default(),
         model: None,
+        continued_in: None,
     }
 }
 

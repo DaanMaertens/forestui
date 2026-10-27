@@ -71,6 +71,26 @@ The window options and heartbeats behind that, each load-bearing:
   recorded is elsewhere, never a guessed window. The hook also re-stamps
   `@claude_session_id` on its window, healing a stale stamp left by an
   earlier launch.
+- **Hand-offs.** ← in Claude Code moves a conversation into a background
+  daemon (`claude daemon run --origin transient`) that carries on under a
+  *new* session id, with a forked transcript of the same name. The old
+  transcript ends with a `continued-in` record naming the successor. Read
+  naively that is two live sessions: the window still carries the old
+  `@claude_session_id` and its client is still alive, and the daemon's
+  heartbeat has no pane, so the new id is "live elsewhere". `live::merge`
+  therefore drops a superseded id however alive it looks, and gives the
+  successor the predecessor's window — that window *is* where the user
+  reaches the conversation, which the daemon's heartbeat cannot know, since
+  its hooks never see the pane. A successor that is not live leaves nothing
+  live: the conversation has ended. The superseded transcript gets no card.
+  The link is read from `continued-in` rather than inferred from pids (the
+  daemon is a child of the pane's `claude`): the record is Claude's own
+  statement of which id is the conversation now, whereas a process tree
+  says nothing about which session a process holds, and the daemon can host
+  more than one id. As with titles, only a record stamped with the file's
+  own `sessionId` counts — a fork copies its parent's hand-off verbatim. The
+  live scan reads each transcript incrementally from where it stopped,
+  because it runs every sweep over files that are still growing.
 - **Session state** — *busy*, *needs you* or *idle* — rides in the same
   heartbeat file as an optional `state` field. `heartbeat.sh` writes it with
   the file (busy on `UserPromptSubmit`; idle on `SessionStart`, except a
