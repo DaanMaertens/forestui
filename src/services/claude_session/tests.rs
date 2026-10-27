@@ -452,6 +452,7 @@ fn pinned_sessions_lead_in_pin_order() {
         git_branch: None,
         tokens: TokenUsage::default(),
         model: None,
+        continued_in: None,
     };
     let mut sessions = vec![mk("new", 1), mk("mid", 5), mk("old", 20), mk("ancient", 90)];
     let pinned = vec!["old".to_string(), "mid".to_string()];
@@ -509,4 +510,91 @@ fn migration_moves_files_and_removes_empty_dir() {
     migrate_dirs(&old, &new);
     assert!(new.join("a.jsonl").exists());
     assert!(!old.exists());
+}
+
+/// A hand-off to a background session (← in Claude Code) ends the old
+/// transcript with a `continued-in` record naming the successor. A fork
+/// copies its parent's records verbatim, so a `continued-in` stamped with
+/// another session's id is the parent's hand-off, not this file's.
+#[test]
+fn a_transcript_names_its_own_continuation_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let handed_off = dir.path().join("old-id.jsonl");
+    std::fs::write(
+        &handed_off,
+        "{\"type\":\"user\",\"timestamp\":\"2026-08-01T10:00:00Z\",\
+              \"message\":{\"content\":\"keep going in the background\"}}\n\
+             {\"type\":\"continued-in\",\"sessionId\":\"old-id\",\
+              \"continuedInSessionId\":\"new-id\",\"timestamp\":\"2026-08-01T10:01:00Z\"}\n",
+    )
+    .unwrap();
+    let session = parse_session_file(&handed_off).expect("a handed-off session");
+    assert_eq!(session.continued_in.as_deref(), Some("new-id"));
+
+    let fork = dir.path().join("the-fork.jsonl");
+    std::fs::write(
+        &fork,
+        "{\"type\":\"user\",\"timestamp\":\"2026-08-01T10:00:00Z\",\
+              \"message\":{\"content\":\"carried over from the parent\"}}\n\
+             {\"type\":\"continued-in\",\"sessionId\":\"the-parent\",\
+              \"continuedInSessionId\":\"elsewhere\"}\n",
+    )
+    .unwrap();
+    let forked = parse_session_file(&fork).expect("a forked session");
+    assert_eq!(forked.continued_in, None);
+}
+
+/// The live scan asks on every sweep, while the transcript keeps growing.
+/// A hand-off appended after an earlier read is still found, wherever the
+/// transcript's project directory is, and a fork's copied record is not.
+#[test]
+fn continuations_follow_a_growing_transcript_in_any_project() {
+    let projects = tempfile::tempdir().unwrap();
+    let dir = projects.path().join("-work-wt");
+    std::fs::create_dir(&dir).unwrap();
+    let live = dir.join("old-id.jsonl");
+    std::fs::write(&live, "{\"type\":\"user\",\"sessionId\":\"old-id\"}\n").unwrap();
+    std::fs::write(
+        dir.join("the-fork.jsonl"),
+        "{\"type\":\"continued-in\",\"sessionId\":\"old-id\",\"continuedInSessionId\":\"new-id\"}\n",
+    )
+    .unwrap();
+    let ids = [
+        "old-id".to_string(),
+        "the-fork".to_string(),
+        "missing".to_string(),
+    ];
+    assert!(continuations_in(projects.path(), &ids).is_empty());
+
+    let mut raw = std::fs::read_to_string(&live).unwrap();
+    raw.push_str("{\"type\":\"continued-in\",\"sessionId\":\"old-id\",\"continuedInSessionId\":\"new-id\"}\n");
+    std::fs::write(&live, raw).unwrap();
+    assert_eq!(
+        continuations_in(projects.path(), &ids),
+        HashMap::from([("old-id".to_string(), "new-id".to_string())])
+    );
+}
+
+/// A hand-off leaves two transcripts with the same name; only the successor
+/// is the conversation now, so only it is a card.
+#[test]
+fn a_handed_off_session_gets_no_card() {
+    let dir = tempfile::tempdir().unwrap();
+    let user = "{\"type\":\"user\",\"timestamp\":\"2026-08-01T10:00:00Z\",\
+                \"message\":{\"content\":\"the conversation\"}}\n";
+    std::fs::write(
+        dir.path().join("old-id.jsonl"),
+        format!(
+            "{user}{{\"type\":\"continued-in\",\"sessionId\":\"old-id\",\
+             \"continuedInSessionId\":\"new-id\"}}\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("new-id.jsonl"), user).unwrap();
+
+    let ids: Vec<String> = read_sessions_dir(dir.path(), 5)
+        .into_iter()
+        .map(|session| session.id)
+        .collect();
+    assert_eq!(ids, vec!["new-id".to_string()]);
 }

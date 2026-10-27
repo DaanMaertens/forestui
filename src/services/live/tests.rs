@@ -406,7 +406,7 @@ fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
         _ => None,
     };
 
-    let merged = merge(windows, beats, home(), resolve);
+    let merged = merge(windows, beats, home(), resolve, &HashMap::new());
     let by_id: std::collections::HashMap<&str, &LivePlace> = merged
         .iter()
         .map(|s| (s.session_id.as_str(), &s.place))
@@ -435,7 +435,13 @@ fn the_merge_ranks_stamps_resolves_panes_and_frees_exited_windows() {
     assert!(matches!(by_id["no-tmux"], LivePlace::Elsewhere { pid: 40 }));
 
     // Outside tmux entirely, every heartbeat is elsewhere.
-    let merged = merge(Vec::new(), vec![beat("x", 5, "%2")], None, |_| None);
+    let merged = merge(
+        Vec::new(),
+        vec![beat("x", 5, "%2")],
+        None,
+        |_| None,
+        &HashMap::new(),
+    );
     assert!(matches!(merged[0].place, LivePlace::Elsewhere { pid: 5 }));
 }
 
@@ -462,6 +468,7 @@ fn a_pane_resolves_only_on_our_own_tmux_server() {
             looked_up.borrow_mut().push(pane.to_string());
             Some(pane_in("$0", "forest", "@1", "forestui"))
         },
+        &HashMap::new(),
     );
     let by_id: std::collections::HashMap<&str, &LivePlace> = merged
         .iter()
@@ -497,6 +504,7 @@ fn a_pane_in_our_session_group_is_ours() {
         vec![beat("grouped", 10, "%1"), beat("ungrouped", 20, "%2")],
         Some(home),
         peer,
+        &HashMap::new(),
     );
     assert!(matches!(merged[0].place, LivePlace::Window { .. }));
     assert!(matches!(merged[1].place, LivePlace::OtherSession { .. }));
@@ -546,6 +554,7 @@ fn the_merge_carries_state_and_cwd_from_the_heartbeat() {
         vec![stamped],
         home(),
         |_| None,
+        &HashMap::new(),
     );
     let by_id: std::collections::HashMap<&str, &LiveSession> =
         merged.iter().map(|s| (s.session_id.as_str(), s)).collect();
@@ -638,4 +647,80 @@ fn a_worktree_rolls_up_the_most_urgent_state_of_its_own_windows() {
 
 fn activity_of(sessions: &[LiveSession], path: &str) -> Option<Activity> {
     activity(sessions.iter(), Path::new(path))
+}
+
+/// ← in Claude Code hands the conversation to a background daemon under a
+/// new id. The window still holds the old id and the old client is still
+/// alive, while the daemon's heartbeat has no pane. One conversation, so
+/// one live session: the successor, reachable where the predecessor was.
+#[test]
+fn a_handed_off_session_lives_on_as_its_successor_in_the_same_window() {
+    let mut successor = beat("new-id", 20, "");
+    successor.cwd = "/work/wt".into();
+    successor.state = Some(SessionState::Busy);
+    let continued = HashMap::from([("old-id".to_string(), "new-id".to_string())]);
+
+    let merged = merge(
+        vec![window("old-id", true)],
+        vec![beat("old-id", 10, "%1"), successor],
+        home(),
+        |_| None,
+        &continued,
+    );
+
+    assert_eq!(
+        merged,
+        vec![LiveSession {
+            session_id: "new-id".into(),
+            place: LivePlace::Window {
+                window_id: "@1".into(),
+                window_name: "claude:old-id".into(),
+            },
+            state: Some(SessionState::Busy),
+            cwd: Some("/work/wt".into()),
+        }]
+    );
+}
+
+/// A successor that has ended leaves nothing live: the predecessor handed
+/// the conversation away, so its own still-running client is not it.
+#[test]
+fn a_handed_off_session_whose_successor_ended_is_not_live() {
+    let continued = HashMap::from([("old-id".to_string(), "new-id".to_string())]);
+    let merged = merge(
+        vec![window("old-id", true)],
+        vec![beat("old-id", 10, "%1")],
+        home(),
+        |_| None,
+        &continued,
+    );
+    assert_eq!(merged, Vec::new());
+}
+
+/// A conversation handed off twice follows the chain to the session that
+/// has it now, and a chain that loops back on itself still ends.
+#[test]
+fn a_hand_off_chain_is_followed_to_its_end() {
+    let continued = HashMap::from([
+        ("a".to_string(), "b".to_string()),
+        ("b".to_string(), "c".to_string()),
+        ("x".to_string(), "y".to_string()),
+        ("y".to_string(), "x".to_string()),
+    ]);
+    let merged = merge(
+        vec![window("a", true), window("x", true)],
+        vec![beat("b", 20, ""), beat("c", 30, ""), beat("y", 40, "")],
+        home(),
+        |_| None,
+        &continued,
+    );
+    assert_eq!(
+        merged.len(),
+        1,
+        "only the end of the chain is live: {merged:?}"
+    );
+    assert_eq!(merged[0].session_id, "c");
+    assert!(
+        matches!(&merged[0].place, LivePlace::Window { window_name, .. } if window_name == "claude:a")
+    );
 }
