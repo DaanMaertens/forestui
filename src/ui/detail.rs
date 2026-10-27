@@ -162,7 +162,6 @@ fn render_node(pane: &mut Pane, app: &App, node: DetailNode) {
         DetailNode::Text { text, style } => pane.text(text, style),
         DetailNode::Blank => pane.blank(),
         DetailNode::Rule => pane.rule(),
-        DetailNode::PathBox { path, style } => path_box(pane, path, style),
         DetailNode::CardStart => {
             pane.card_start(pane.width.saturating_sub(RIGHT_MARGIN));
         }
@@ -610,25 +609,6 @@ fn card_edge(width: u16, left: char, right: char) -> Line<'static> {
         format!("{left}{}{right}", "─".repeat(span)),
         theme::border().bg(theme::active().bg_elevated),
     ))
-}
-
-/// A path in the boxed, elevated `.path-display` Textual used. The box hugs the
-/// path rather than filling the pane, which is how it laid out there.
-fn path_box(pane: &mut Pane, path: String, style: Style) {
-    // A forest path routinely outruns the pane. Cutting it here rather than
-    // letting the paragraph clip it keeps the box's right edge on screen; the
-    // tail was lost either way.
-    let room = pane.width.saturating_sub(2 * CARD_INSET) as usize;
-    // `truncate` adds an ellipsis, so it needs three of those cells to itself.
-    let path = if path.chars().count() > room {
-        crate::util::truncate(&path, room.saturating_sub(3))
-    } else {
-        path
-    };
-    let width = as_u16(path.chars().count()).saturating_add(2 * CARD_INSET);
-    pane.card_start(width);
-    pane.text(path, style);
-    pane.card_end();
 }
 
 /// A rename field. The caret is drawn in the text because the pane renders as

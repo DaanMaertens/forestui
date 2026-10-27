@@ -1,4 +1,4 @@
-$
+<user>@<host>:<ROOT>/src/beta$
 
 
 

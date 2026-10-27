@@ -111,11 +111,6 @@ pub enum DetailNode {
     Blank,
     /// The horizontal rule between major sections, with its margin row above.
     Rule,
-    /// A path in the elevated box that hugs its content.
-    PathBox {
-        path: String,
-        style: Style,
-    },
     /// Open a card; nodes until [`DetailNode::CardEnd`] land inside it.
     CardStart,
     CardEnd,
@@ -217,6 +212,9 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
         text(nodes, format!("Branch:     {branch}"), theme::accent());
     }
     commit_line(nodes, app);
+    // The repository pane has no `⚠ MISSING` line or disabled controls for a
+    // vanished checkout, so its path line does not claim one either.
+    path_line(nodes, path, true);
 
     let mut top = vec![
         ControlSpec::new(Action::StartWork, "Start work", theme::Variant::Primary),
@@ -233,16 +231,9 @@ fn repository(nodes: &mut Vec<DetailNode>, app: &App) {
         ));
     }
     controls(nodes, top);
-
-    nodes.push(DetailNode::Rule);
-    nodes.push(DetailNode::Section("LOCATION"));
-    nodes.push(DetailNode::PathBox {
-        path: path.to_string(),
-        style: theme::secondary(),
-    });
-
-    nodes.push(DetailNode::Rule);
-    open_in(nodes);
+    // A row of its own rather than the tail of the one above: all six would
+    // overflow a narrow pane, and a control row does not wrap.
+    controls(nodes, open_in_controls());
     // Textual ran CLAUDE straight into RECENT SESSIONS with no rule between them.
     nodes.push(DetailNode::Rule);
     claude(nodes, app);
@@ -326,25 +317,14 @@ fn worktree(nodes: &mut Vec<DetailNode>, app: &App) {
         text(nodes, line, theme::muted());
     }
     commit_line(nodes, app);
+    path_line(nodes, &app.meta.path, app.meta.path_exists);
 
-    controls(nodes, vec![sync_control(app, !app.meta.path_exists)]);
+    // The session cards are what this pane is visited for, so everything
+    // above them is folded into the header: one control row, one rule.
+    let mut top = vec![sync_control(app, !app.meta.path_exists)];
+    top.extend(open_in_controls());
+    controls(nodes, top);
 
-    nodes.push(DetailNode::Rule);
-    nodes.push(DetailNode::Section("LOCATION"));
-    if app.meta.path_exists {
-        nodes.push(DetailNode::PathBox {
-            path: app.meta.path.clone(),
-            style: theme::secondary(),
-        });
-    } else {
-        nodes.push(DetailNode::PathBox {
-            path: format!("{}  (missing)", app.meta.path),
-            style: theme::destructive(),
-        });
-    }
-
-    nodes.push(DetailNode::Rule);
-    open_in(nodes);
     nodes.push(DetailNode::Rule);
     claude(nodes, app);
     sessions(nodes, app);
@@ -421,16 +401,29 @@ fn sync_control(app: &App, missing_directory: bool) -> ControlSpec {
     }
 }
 
-fn open_in(nodes: &mut Vec<DetailNode>) {
-    nodes.push(DetailNode::Section("OPEN IN"));
-    controls(
-        nodes,
-        vec![
-            ControlSpec::new(Action::Editor, "Editor", theme::Variant::Normal),
-            ControlSpec::new(Action::Terminal, "Terminal", theme::Variant::Normal),
-            ControlSpec::new(Action::Files, "Files", theme::Variant::Normal),
-        ],
-    );
+/// The header's `Path:` line. A directory that is gone says so on the line
+/// itself, in the destructive style the `⚠ MISSING` line above it wears.
+fn path_line(nodes: &mut Vec<DetailNode>, path: &str, exists: bool) {
+    if exists {
+        text(nodes, format!("Path:       {path}"), theme::secondary());
+    } else {
+        text(
+            nodes,
+            format!("Path:       {path}  (missing)"),
+            theme::destructive(),
+        );
+    }
+}
+
+/// Editor, Terminal and Files: the controls that open the selection's
+/// directory somewhere else. They ride the header's control rows rather than
+/// a section of their own.
+fn open_in_controls() -> Vec<ControlSpec> {
+    vec![
+        ControlSpec::new(Action::Editor, "Editor", theme::Variant::Normal),
+        ControlSpec::new(Action::Terminal, "Terminal", theme::Variant::Normal),
+        ControlSpec::new(Action::Files, "Files", theme::Variant::Normal),
+    ]
 }
 
 /// One launch vocabulary everywhere: the CLAUDE section and every session

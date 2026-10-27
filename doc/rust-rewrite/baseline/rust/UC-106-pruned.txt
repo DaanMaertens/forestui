@@ -5,21 +5,11 @@
   alpha                                │  Repository: beta
 ▼ beta                                 │  Branch:     main
 ├─ session-caching-spike [session/cachi│  Commit:     <sha> (<rel>)
-└─ feat-77-dark-mode-for-the-dashboard │
-▼ gamma                                │  ┌────────────┐ ┌────────────────────────┐
-└─ gamma-imported [feat/imported]      │  │ Start work │ │ ↓ Git Pull (No remote) │
+└─ feat-77-dark-mode-for-the-dashboard │  Path:       <ROOT>/src/beta
+▼ gamma                                │
+└─ gamma-imported [feat/imported]      │  ┌────────────┐ ┌────────────────────────┐
+                                       │  │ Start work │ │ ↓ Git Pull (No remote) │
                                        │  └────────────┘ └────────────────────────┘
-                                       │
-                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
-                                       │
-                                       │  LOCATION
-                                       │  ┌────────────────────────────────┐
-                                       │  │ <ROOT>/src/beta │
-                                       │  └────────────────────────────────┘
-                                       │
-                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
-                                       │
-                                       │  OPEN IN
                                        │
                                        │  ┌────────┐ ┌──────────┐ ┌───────┐
                                        │  │ Editor │ │ Terminal │ │ Files │
@@ -34,11 +24,21 @@
                                        │  └────────┘ └──────┘ └──────┘
                                        │
                                        │  CLAUDE: RECENT SESSIONS
-                                       │  No sessions found                    Pruning 1 worktree…
-                                       │                                       Pruned nothing. Skipped 'pr-45-retry-uploads-with-backoff'
-                                       │  ──────────────────────────────────── (no remote to push to).
-                                       │                                       Pruning 1 worktree…
-                                       │  MANAGE                               Pruned 'pr-45-retry-uploads-with-backoff'.
+                                       │  No sessions found
+                                       │
+                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
+                                       │
+                                       │  MANAGE
                                        │  Settings for sweep-user/alpha
+                                       │
+                                       │  ┌─────────────────────┐ ┌───────────────────┐
+                                       │  │ Repository settings │ │ Remove Repository │
+                                       │  └─────────────────────┘ └───────────────────┘
+                                       │                                       Pruning 1 worktree…
+                                       │                                       Pruned nothing. Skipped 'pr-45-retry-uploads-with-backoff'
+                                       │                                       (no remote to push to).
+                                       │                                       Pruning 1 worktree…
+                                       │                                       Pruned 'pr-45-retry-uploads-with-backoff'.
+                                       │
  a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  f Finish  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

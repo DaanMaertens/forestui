@@ -7,25 +7,11 @@
   beta                                 │  Branch:     feat/wt-a
                                        │  Based on:   main (<sha>)
                                        │  Commit:     <sha> (<rel>)
+                                       │  Path:       <ROOT>/forest/alpha/wt-a
                                        │
-                                       │  ┌────────────────────────┐
-                                       │  │ ↓ Git Pull (No remote) │
-                                       │  └────────────────────────┘
-                                       │
-                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
-                                       │
-                                       │  LOCATION
-                                       │  ┌─────────────────────────────────────────┐
-                                       │  │ <ROOT>/forest/alpha/wt-a │
-                                       │  └─────────────────────────────────────────┘
-                                       │
-                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
-                                       │
-                                       │  OPEN IN
-                                       │
-                                       │  ┌────────┐ ┌──────────┐ ┌───────┐
-                                       │  │ Editor │ │ Terminal │ │ Files │
-                                       │  └────────┘ └──────────┘ └───────┘
+                                       │  ┌────────────────────────┐ ┌────────┐ ┌──────────┐ ┌───────┐
+                                       │  │ ↓ Git Pull (No remote) │ │ Editor │ │ Terminal │ │ Files │
+                                       │  └────────────────────────┘ └────────┘ └──────────┘ └───────┘
                                        │
                                        │  ─────────────────────────────────────────────────────────────────────────────────────────────
                                        │
@@ -38,7 +24,21 @@
                                        │  CLAUDE: RECENT SESSIONS
                                        │  No sessions found
                                        │
-                                       │  ──────────────────────────────────── Opened terminal in term:alpha:wt-a
+                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
+                                       │
+                                       │  RENAME
+                                       │  Worktree name  wt-a
+                                       │  Branch name    feat/wt-a
+                                       │
+                                       │  ─────────────────────────────────────────────────────────────────────────────────────────────
+                                       │
+                                       │  MANAGE
+                                       │
+                                       │  ┌─────────┐ ┌───────────────┐ ┌────────┐
+                                       │  │ Archive │ │ Mark finished │ │ Delete │
+                                       │  └─────────┘ └───────────────┘ └────────┘
+                                       │
+                                       │                                       Opened terminal in term:alpha:wt-a
                                        │
  a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  f Finish  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>* 1:edit:alpha:wt-a  2:term:alpha:wt-a  3:files:alpha:wt-a  4:claude:alpha:wt-a  5:yol>"<host>" <clock>

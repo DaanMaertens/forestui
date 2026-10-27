@@ -118,68 +118,183 @@ fn buffer_text(buffer: &Buffer) -> String {
         .join("\n")
 }
 
-/// Textual put a `Rule()` between the major sections, and the pane read as
-/// one flat list without them.
+/// Row of the first line containing `needle`.
+fn row_of(screen: &str, needle: &str) -> usize {
+    screen
+        .lines()
+        .position(|row| row.contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} is not on screen:\n{screen}"))
+}
+
+/// Rules between two lines. A rule is the only line that is nothing but the
+/// horizontal glyph; a card's edges start with a corner.
+fn rules_between(screen: &str, from: &str, to: &str) -> usize {
+    let rows: Vec<&str> = screen.lines().collect();
+    rows[row_of(screen, from)..row_of(screen, to)]
+        .iter()
+        .filter(|row| row.trim().starts_with("──"))
+        .count()
+}
+
+/// Each needle starts lower on screen than the one before it.
+fn assert_top_down(screen: &str, needles: &[&str]) {
+    for pair in needles.windows(2) {
+        assert!(
+            row_of(screen, pair[0]) < row_of(screen, pair[1]),
+            "{:?} is not above {:?}:\n{screen}",
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
+/// Each needle sits on the label row of `row`, left to right in this order.
+fn assert_one_row(screen: &str, row: usize, needles: &[&str]) {
+    let line = screen.lines().nth(row).unwrap_or_default();
+    let mut from = 0;
+    for needle in needles {
+        let at = line[from..]
+            .find(needle)
+            .unwrap_or_else(|| panic!("{needle:?} is not after byte {from} of {line:?}"));
+        from += at + needle.len();
+    }
+}
+
+/// The session cards are what the pane is for, so the path and the open-in
+/// controls fold into the header instead of costing a section each: the
+/// first card has to start near the top, not below the fold.
 #[tokio::test]
-async fn sections_are_separated_by_rules() {
+async fn worktree_pane_leads_with_header_then_claude() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = test_app(&dir);
+    with_worktree(&mut app);
+    app.meta = event::DetailMeta {
+        path: "/tmp/forest/demo/wt".into(),
+        commit_hash: Some("f2bf2d4".into()),
+        has_remote: true,
+        path_exists: true,
+        ..event::DetailMeta::default()
+    };
+    app.sessions = Some(vec![a_session()]);
+    let screen = render(&mut app);
+
+    assert_top_down(
+        &screen,
+        &[
+            "WORKTREE",
+            "Branch:     feat/x",
+            "Commit:     f2bf2d4",
+            "Path:       /tmp/forest/demo/wt",
+            "↓ Git Pull",
+            "CLAUDE: NEW SESSION",
+            "CLAUDE: RECENT SESSIONS",
+            "Refactor the detail pane",
+            "RENAME",
+            "MANAGE",
+        ],
+    );
+    assert_one_row(
+        &screen,
+        row_of(&screen, "↓ Git Pull"),
+        &["↓ Git Pull", "Editor", "Terminal", "Files"],
+    );
+    assert_eq!(rules_between(&screen, "↓ Git Pull", "CLAUDE: NEW"), 1);
+    assert_eq!(rules_between(&screen, "CLAUDE: NEW", "RENAME"), 1);
+    assert_eq!(rules_between(&screen, "RENAME", "MANAGE"), 1);
+    assert!(!screen.contains("LOCATION"), "{screen}");
+    // Focus walks the controls in the order they are drawn.
+    assert_eq!(
+        app.detail_items()[..5],
+        [
+            DetailItem::Action(Action::Sync),
+            DetailItem::Action(Action::Editor),
+            DetailItem::Action(Action::Terminal),
+            DetailItem::Action(Action::Files),
+            DetailItem::Action(Action::ClaudeNew),
+        ]
+    );
+    assert!(!screen.contains("OPEN IN"), "{screen}");
+}
+
+/// The repository pane folds the same way, except that Editor / Terminal /
+/// Files take a row of their own: beside Start work, Git Pull and Prune
+/// finished, six controls overflow a narrow pane, and control rows do not
+/// wrap.
+#[tokio::test]
+async fn repository_pane_leads_with_header_then_claude() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut app = test_app(&dir);
     with_repository(&mut app);
     // Loaded but empty, so the whole pane fits on screen unscrolled.
     app.sessions = Some(vec![]);
-
-    /// Whether a rule sits between two lines. A rule is the only line that is
-    /// nothing but the horizontal glyph; a card's edges start with a corner.
-    fn rule_between(screen: &str, from: &str, to: &str) -> bool {
-        let rows: Vec<&str> = screen.lines().collect();
-        let row_of = |needle: &str| {
-            rows.iter()
-                .position(|row| row.contains(needle))
-                .unwrap_or_else(|| panic!("{needle:?} is not on screen:\n{screen}"))
-        };
-        (row_of(from)..row_of(to)).any(|y| rows[y].trim().starts_with("──"))
-    }
-
     let screen = render(&mut app);
-    assert!(
-        rule_between(&screen, "Repository: demo", "LOCATION"),
-        "{screen}"
+
+    assert_top_down(
+        &screen,
+        &[
+            "MAIN REPOSITORY",
+            "Repository: demo",
+            "Path:       /tmp/demo",
+            "Start work",
+            "Editor",
+            "CLAUDE: NEW SESSION",
+            "CLAUDE: RECENT SESSIONS",
+            "MANAGE",
+        ],
     );
-    assert!(rule_between(&screen, "LOCATION", "OPEN IN"), "{screen}");
-    assert!(rule_between(&screen, "OPEN IN", "CLAUDE"), "{screen}");
-    assert!(
-        rule_between(&screen, "RECENT SESSIONS", "MANAGE"),
-        "{screen}"
+    assert_one_row(
+        &screen,
+        row_of(&screen, "Start work"),
+        &["Start work", "↓ Git Pull"],
     );
-    // Nothing sits between the sessions and MANAGE any more, so one rule,
-    // not the two the issues section left behind when it went.
-    let rows: Vec<&str> = screen.lines().collect();
-    let row_of = |needle: &str| {
-        rows.iter()
-            .position(|row| row.contains(needle))
-            .unwrap_or_else(|| panic!("{needle:?} is not on screen:\n{screen}"))
-    };
-    let rules = rows[row_of("RECENT SESSIONS")..row_of("MANAGE")]
-        .iter()
-        .filter(|row| row.trim().starts_with("──"))
-        .count();
-    assert_eq!(rules, 1, "{screen}");
+    assert_one_row(
+        &screen,
+        row_of(&screen, "Editor"),
+        &["Editor", "Terminal", "Files"],
+    );
+    // The two control rows stack with no header or rule between them, only
+    // the blank margin every control row keeps above itself.
+    assert_eq!(row_of(&screen, "Editor"), row_of(&screen, "Start work") + 4);
+    assert_eq!(rules_between(&screen, "Editor", "CLAUDE: NEW"), 1);
+    // CLAUDE ran straight into RECENT SESSIONS in Textual, and does here too.
+    assert_eq!(rules_between(&screen, "CLAUDE: NEW", "RECENT SESSIONS"), 0);
+    // Nothing sits between the sessions and MANAGE, so one rule.
+    assert_eq!(rules_between(&screen, "RECENT SESSIONS", "MANAGE"), 1);
+    assert!(!screen.contains("LOCATION"), "{screen}");
+    assert!(!screen.contains("OPEN IN"), "{screen}");
     assert!(!screen.contains("GITHUB ISSUES"), "{screen}");
-    // CLAUDE ran straight into RECENT SESSIONS there, and does here too.
-    assert!(
-        !rule_between(&screen, "CLAUDE", "RECENT SESSIONS"),
-        "{screen}"
-    );
+}
 
+/// What the layout is for: on an ordinary 40-row terminal, the first
+/// session's title is on screen without scrolling.
+#[tokio::test]
+async fn the_first_session_card_is_above_the_fold() {
     let dir = tempfile::tempdir().expect("tempdir");
-    app.state = AppState::load_from(dir.path().join(".forestui-config.json"));
-    with_worktree(&mut app);
-    let screen = render(&mut app);
-    assert!(
-        rule_between(&screen, "RECENT SESSIONS", "RENAME"),
-        "{screen}"
-    );
-    assert!(rule_between(&screen, "Branch name", "MANAGE"), "{screen}");
+    let mut app = test_app(&dir);
+    // Every header line a worktree can carry, so the header is at its tallest.
+    let repository = Repository::new("demo".into(), "/tmp/demo".into());
+    let repo_id = repository.id;
+    app.state.add_repository(repository);
+    let mut worktree = Worktree::new("wt".into(), "feat/x".into(), "/tmp/forest/demo/wt".into());
+    worktree.base_branch = Some("main".into());
+    worktree.created_from_ref = Some("f2bf2d4".into());
+    let worktree_id = worktree.id;
+    app.state.add_worktree(repo_id, worktree);
+    app.state.select_worktree(repo_id, worktree_id);
+    app.meta = event::DetailMeta {
+        path: "/tmp/forest/demo/wt".into(),
+        commit_hash: Some("f2bf2d4".into()),
+        commit_time: Some(Utc::now()),
+        has_remote: true,
+        path_exists: true,
+        ..event::DetailMeta::default()
+    };
+    app.sessions = Some(vec![a_session()]);
+    // A 40-row terminal leaves 38 to the pane: the title bar and the footer
+    // take one row each.
+    let screen = buffer_text(&render_buffer(&mut app, 100, 38));
+
+    assert!(screen.contains("Refactor the detail pane"), "{screen}");
 }
 
 /// Sessions were `.session-item` boxes, not bare lines: a border in the
@@ -493,27 +608,46 @@ async fn repository_detail_renders_its_sections() {
 
     assert!(screen.contains("MAIN REPOSITORY"), "{screen}");
     assert!(screen.contains("Repository: demo"), "{screen}");
-    assert!(screen.contains("LOCATION"), "{screen}");
-    assert!(screen.contains("/tmp/demo"), "{screen}");
+    assert!(screen.contains("Path:       /tmp/demo"), "{screen}");
     assert!(screen.contains("CLAUDE"), "{screen}");
     assert!(screen.contains("│ Claude │"), "{screen}");
 }
 
 #[tokio::test]
 async fn missing_worktree_directory_is_flagged() {
+    // Compares a rendered colour against the active theme.
+    let _guard = crate::theme::test_lock();
+    crate::theme::set_active("forest-dark");
     let dir = tempfile::tempdir().expect("tempdir");
     let mut app = test_app(&dir);
     with_worktree(&mut app);
     app.meta = event::DetailMeta {
         path: "/tmp/forest/demo/wt".into(),
         path_exists: false,
+        has_remote: true,
         ..event::DetailMeta::default()
     };
-    let screen = render(&mut app);
+    let buffer = render_buffer(&mut app, 100, TALL);
+    let screen = buffer_text(&buffer);
 
     assert!(screen.contains("⚠ MISSING"), "{screen}");
-    assert!(screen.contains("(missing)"), "{screen}");
+    assert!(
+        screen.contains("Path:       /tmp/forest/demo/wt  (missing)"),
+        "{screen}"
+    );
+    let (x, y) = find_cell(&buffer, "(missing)");
+    assert_eq!(
+        buffer.cell((x, y)).map(|cell| cell.fg),
+        crate::theme::destructive().fg,
+        "the missing path is drawn in the destructive style"
+    );
     assert!(screen.contains("Git Pull (Directory missing)"), "{screen}");
+    // A remote to pull from does not matter when there is no directory.
+    let sync = app
+        .drawn_items
+        .iter()
+        .find(|(item, _)| *item == DetailItem::Action(Action::Sync));
+    assert_eq!(sync.map(|(_, enabled)| *enabled), Some(false));
 }
 
 /// The invariant: rendered control N is `detail_items()[N]`, so the counts
@@ -684,11 +818,12 @@ async fn clicking_a_control_maps_to_its_item() {
             .expect("item is rendered")
     };
 
-    // Editor, Terminal and Files share a line, so getting these three right
-    // is what proves the x extents are, and not just the rows. The CLAUDE
+    // Git Pull, Editor, Terminal and Files share a line, so getting these
+    // four right is what proves the x extents are, and not just the rows. The CLAUDE
     // section's launch button and the card's resume button are told apart
     // by label: "Claude" starts a session, "Resume" goes back to one.
     for (label, nth, item) in [
+        ("Git Pull", 0, DetailItem::Action(Action::Sync)),
         ("Editor", 0, DetailItem::Action(Action::Editor)),
         ("Terminal", 0, DetailItem::Action(Action::Terminal)),
         ("Files", 0, DetailItem::Action(Action::Files)),
