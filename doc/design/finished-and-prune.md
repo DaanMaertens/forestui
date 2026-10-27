@@ -11,9 +11,23 @@ remote default branch for a worktree from before that was recorded;
 that base, the parent issue's branch, is merged: its issue normally stays open
 until the parent's PR lands, so either one finishes it
 (`work::is_sub_issue_finished`). The check never reads repository settings,
-so `forestui prune` judges the same way without them. The marks are derived and never saved.
-A worktree the check could not answer for (`gh` signed out, no remote default
-branch) keeps its previous mark — "could not tell" must not unmark it.
+so `forestui prune` judges the same way without them.
+
+**The mark is saved on the worktree, and the check writes only changes.**
+`Worktree.finished` is the mark; `Worktree.last_finished_check` is the
+check's last answer. A verdict that differs from the last answer (or the
+first one ever) sets the mark and is saved as the new last answer; the same
+answer again leaves the mark alone (`Worktree::fold_finished_check`, applied
+per repository by `AppState::fold_finished_verdicts`). The user toggles the
+mark on any worktree — `f`, or **Mark finished** / **Unmark finished** beside
+Archive — without touching the last answer. So whichever changed the mark
+last wins: an Unmark of a closed issue's worktree sticks across sweeps and
+restarts, and the issue being reopened (a changed answer) unmarks it again.
+Who set a mark is not recorded; it looks the same either way. A worktree the
+check could not answer for (`gh` signed out, no remote default branch) gets
+no verdict, which changes neither field — "could not tell" must not unmark it.
+The check task sends verdicts as data and the main loop's fold saves, so the
+marks show at startup before any check has run.
 
 **Prune is one routine, `prune::prune_worktree`**, shared by the repository
 pane's **Prune finished (N)** and `forestui prune`. It skips a worktree with
@@ -23,8 +37,10 @@ removes it and force-deletes its local branch. In the App each removal starts
 through `WorktreeSync` like a Delete, and one task hands every ticket back in
 `WorktreesPruned`, so the user gets one notification for the whole prune.
 The CLI has no `WorktreeSync`: `prune::prune_forest` reconciles each
-repository against git, runs the same finished check, and prunes through
-`prune_tracked`. It is a one-shot dispatched in `main` before `ensure_tmux`,
+repository against git, runs the same finished check, folds it into the saved
+marks by the same rule (saving them), and prunes every marked worktree —
+hand-marked ones included, and saved marks even with `gh` signed out —
+through `prune_tracked`. Its safety rules hold whatever set the mark. It is a one-shot dispatched in `main` before `ensure_tmux`,
 so it never starts tmux. It is also the one writer of `.forestui-config.json`
 outside the main loop, tolerated because a running App heals: its next save
 restores the pruned entries and its next scan drops them, directories gone.

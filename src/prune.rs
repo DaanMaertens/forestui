@@ -5,8 +5,8 @@
 //! **Prune finished** and `forestui prune` run the same steps and word their
 //! outcome the same way. It does not decide which worktrees are finished —
 //! the caller passes the ones it judged finished. The rest of the module is
-//! the command line's side: [`prune_forest`] judges them with the same check
-//! the App's sidebar marks come from.
+//! the command line's side: [`prune_forest`] folds the same check into the
+//! saved marks the App's sidebar shows, and prunes the marked.
 //!
 //! A Delete from the App shares the branch half: once its worktree is gone,
 //! [`delete_branch_if_pushed`] deletes the branch under the same rule, so
@@ -316,9 +316,10 @@ pub struct RepositoryPrune {
 /// `forestui prune`: every repository in the forest, brought in step with
 /// git the way a worktree scan would, then its finished worktrees pruned.
 ///
-/// Finished is judged by the same check the sidebar marks come from, so a
-/// worktree nobody could answer for — `gh` signed out, no remote default
-/// branch — is left alone, as it would be unmarked in the App.
+/// The check's verdicts fold into the saved marks by the App's rule first,
+/// so what is pruned is what the sidebar marks: hand-set marks included,
+/// and a worktree nobody could answer for — `gh` signed out, no remote
+/// default branch — keeps whatever mark it had saved.
 pub async fn prune_forest(state: &mut AppState) -> Vec<RepositoryPrune> {
     let repo_ids: Vec<Uuid> = state.repositories().iter().map(|repo| repo.id).collect();
     let mut results = Vec::with_capacity(repo_ids.len());
@@ -341,12 +342,19 @@ pub async fn prune_forest(state: &mut AppState) -> Vec<RepositoryPrune> {
         let name = repo.name.clone();
         let verdicts =
             crate::app::finished::check(&source, &crate::app::finished::linked(repo)).await;
-        let finished: Vec<Uuid> = repo
-            .worktrees
-            .iter()
-            .map(|worktree| worktree.id)
-            .filter(|id| verdicts.get(id) == Some(&true))
-            .collect();
+        // The App's fold, so a mark the user set or cleared by hand stands
+        // here as it does in the sidebar, and the new answers are saved.
+        state.fold_finished_verdicts(repo_id, &verdicts);
+        let finished: Vec<Uuid> = state
+            .find_repository(repo_id)
+            .map(|repo| {
+                repo.worktrees
+                    .iter()
+                    .filter(|worktree| worktree.finished)
+                    .map(|worktree| worktree.id)
+                    .collect()
+            })
+            .unwrap_or_default();
         let outcomes = prune_tracked(state, &finished).await;
         results.push(RepositoryPrune { name, outcomes });
     }

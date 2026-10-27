@@ -224,8 +224,9 @@ pub enum AppEvent {
     /// finished, `false` not, absent when the check could not tell.
     ///
     /// `ticket` goes back to
-    /// [`FinishedWorktrees`](crate::app::finished::FinishedWorktrees), which
-    /// keeps the marks — derived state, never saved.
+    /// [`FinishedWorktrees`](crate::app::finished::FinishedWorktrees); the
+    /// verdicts fold into the marks saved on the worktrees, by
+    /// [`AppState::fold_finished_verdicts`](crate::state::AppState::fold_finished_verdicts).
     WorktreesFinished {
         ticket: FinishedTicket,
         verdicts: std::collections::HashMap<Uuid, bool>,

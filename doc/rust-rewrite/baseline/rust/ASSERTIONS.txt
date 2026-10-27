@@ -72,7 +72,7 @@ PASS UC-104    nothing-created                                expected=6        
 PASS UC-105    merged-pr-marked                               expected=yes                          actual=yes
 PASS UC-105    open-issue-unmarked                            expected=no                           actual=no
 PASS UC-105    session-unmarked                               expected=no                           actual=no
-PASS UC-105    mark-not-saved                                 expected=False                        actual=False
+PASS UC-105    mark-saved                                     expected=True                         actual=True
 PASS UC-72     cancel-closes-confirm                          expected=no                           actual=no
 PASS UC-72     cancel-keeps-dir                               expected=yes                          actual=yes
 PASS UC-72     cancel-keeps-entry                             expected=True                         actual=True

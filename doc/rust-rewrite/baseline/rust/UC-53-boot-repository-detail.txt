@@ -40,5 +40,5 @@
                                        │  │                                                               │ Resume │ │ YOLO │ │ Opus ││
                                        │  │ claude: looking at the card layout now                        └────────┘ └──────┘ └──────┘│
                                        │  │ user: and then check it against the python build                ┌────────┐ ┌─────┐ ┌─────┐│
- a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  d Delete  S Settings  r Refresh  A Archived
+ a Add Repo  q Quit  s Start  e Editor  t Term  o Files  n Claude  y YOLO  h Archive  f Finish  d Delete  S Settings  r Refresh  A Archived
 [forestui-0:forestui-dev-<hhmm>*                                                                                      "<host>" <clock>

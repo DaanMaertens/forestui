@@ -18,6 +18,12 @@ load in both directions across that one-release gap:
 
 Partial files load cleanly because every field is defaulted.
 
+Not everything in `.forestui-config.json` is something the user typed: a
+worktree's `finished` mark and `last_finished_check` are written by the
+finished check's fold as well as by the user, and both default to absent
+(see `finished-and-prune.md`), so a config from before them loads unmarked
+and the first check fills them in.
+
 Both files are written via `util::write_atomically` (sibling temp file +
 rename). A corrupt config deliberately loads as *empty* state so a bad byte
 never blocks startup — which is exactly why the write itself must never be

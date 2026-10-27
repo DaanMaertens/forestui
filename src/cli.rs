@@ -75,7 +75,8 @@ pub enum Command {
     /// Remove finished worktrees and their local branches, then exit.
     ///
     /// The same prune as the repository pane's **Prune finished**, run over
-    /// every repository in the forest without the UI and without tmux.
+    /// every repository in the forest without the UI and without tmux. It
+    /// prunes every worktree marked finished, by the check or by hand.
     /// Worktrees with uncommitted or unpushed work are skipped and listed.
     Prune {
         /// Path to the forest directory (default: ~/forest)
