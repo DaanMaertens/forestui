@@ -330,6 +330,35 @@ impl AppState {
         }
     }
 
+    pub fn set_finished(&mut self, worktree_id: Uuid, finished: bool) {
+        self.update_worktree(worktree_id, |w| w.finished = finished);
+    }
+
+    /// Fold a finished check of `repo_id` into its worktrees' saved marks —
+    /// `true` finished, `false` not, missing for "could not tell", which
+    /// changes nothing. Verdicts about worktrees the repository no longer
+    /// has are dropped. Saves, and returns true, only when a mark or a last
+    /// answer changed.
+    pub fn fold_finished_verdicts(
+        &mut self,
+        repo_id: Uuid,
+        verdicts: &std::collections::HashMap<Uuid, bool>,
+    ) -> bool {
+        let Some(repo) = self.repositories.iter_mut().find(|r| r.id == repo_id) else {
+            return false;
+        };
+        let mut changed = false;
+        for worktree in &mut repo.worktrees {
+            if let Some(&finished) = verdicts.get(&worktree.id) {
+                changed |= worktree.fold_finished_check(finished);
+            }
+        }
+        if changed {
+            self.save();
+        }
+        changed
+    }
+
     pub fn set_archived(&mut self, worktree_id: Uuid, archived: bool) {
         self.update_worktree(worktree_id, |w| w.is_archived = archived);
     }

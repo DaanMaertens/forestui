@@ -146,6 +146,16 @@ pub struct Worktree {
     /// pull request into that branch is merged.
     #[serde(default)]
     pub parent_issue: Option<i64>,
+    /// Its work is done, so Prune removes it. Set by the user or by the
+    /// finished check, whichever changed it last — see
+    /// [`Worktree::fold_finished_check`].
+    #[serde(default)]
+    pub finished: bool,
+    /// The finished check's last answer, `None` before it has given one.
+    /// Kept so the check writes the mark only when its answer changes and a
+    /// hand-set mark survives the sweep re-asking the same question.
+    #[serde(default)]
+    pub last_finished_check: Option<bool>,
 }
 
 /// The record on a worktree of which work item it was started for.
@@ -196,7 +206,22 @@ impl Worktree {
             created_from_ref: None,
             work_item: None,
             parent_issue: None,
+            finished: false,
+            last_finished_check: None,
         }
+    }
+
+    /// Fold one verdict of the finished check into the saved mark: a new
+    /// answer sets the mark, the answer it gave last time leaves it alone,
+    /// so whichever of the user and the check changed it last wins. Returns
+    /// whether anything changed.
+    pub fn fold_finished_check(&mut self, finished: bool) -> bool {
+        if self.last_finished_check == Some(finished) {
+            return false;
+        }
+        self.last_finished_check = Some(finished);
+        self.finished = finished;
+        true
     }
 }
 
