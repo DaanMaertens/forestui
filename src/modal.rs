@@ -1087,22 +1087,35 @@ impl StartWorkModal {
     }
 
     /// Fill the item list once the issues for `scope` have loaded; a list
-    /// for the other scope is not this flow's. Issues already loaded are
-    /// kept: replacing the list under a half-typed query would move the
-    /// selection out from under the user. A failure is not a list, so the
-    /// retry behind a cached one takes its place, keeping what was typed.
+    /// for the other scope is not this flow's. A later list — the refetch
+    /// behind a cached one — takes its place under what was typed, with
+    /// the highlighted issue still highlighted if it is still listed, so a
+    /// newly assigned issue shows up without moving the user's place
+    /// (#119). A failure says less than a list that loaded, so it never
+    /// replaces one.
     pub fn set_issues(&mut self, scope: Scope, issues: IssuesResult) {
-        if scope != self.scope || matches!(self.issues, Some(Ok(_))) {
+        if scope != self.scope || (issues.is_err() && matches!(self.issues, Some(Ok(_)))) {
             return;
         }
         self.issues = Some(issues);
         if self.mode == WorkMode::PrReview {
             return;
         }
-        if let Some(picker) = self.picker.take() {
+        let highlighted = self.picker.take().and_then(|picker| {
             self.query_after_reload = Some(picker.query().value().to_string());
-        }
+            match picker.selected() {
+                Some(work::ItemEntry::Issue(entry)) => Some(entry.issue.number),
+                _ => None,
+            }
+        });
         self.fill_picker();
+        if let Some(number) = highlighted
+            && let Some(picker) = self.picker.as_mut()
+        {
+            picker.select_where(
+                |entry| matches!(entry, work::ItemEntry::Issue(e) if e.issue.number == number),
+            );
+        }
     }
 
     /// Take the settings in effect once the repository's own are known. A

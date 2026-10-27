@@ -142,21 +142,19 @@ impl App {
     }
 
     /// Fill an open Start work's lists for the scope it now lists: the
-    /// cached issues at once, refreshed behind when stale, and the PRs —
-    /// which are never cached — from `gh`.
+    /// cached issues at once, always refreshed behind — even a fresh entry
+    /// can miss an issue assigned since — and the PRs, which are never
+    /// cached, from `gh`.
     pub(super) fn list_for_flow(&mut self, path: &str) {
         let Some(scope) = self.flow_scope(path) else {
             return;
         };
-        let cached = github::peek_issues(path, scope);
-        if let Some((issues, _)) = &cached {
+        if let Some((issues, _)) = github::peek_issues(path, scope) {
             for flow in self.start_work_flows(path) {
                 flow.set_issues(scope, issues.clone());
             }
         }
-        if !matches!(cached, Some((_, true))) {
-            self.fetch_issues_scoped(path.to_string(), scope);
-        }
+        self.fetch_issues_scoped(path.to_string(), scope, true);
         if matches!(self.repo_key(path), Some(Some(_))) {
             self.fetch_pull_requests(path);
         }

@@ -91,3 +91,16 @@ fn setting_the_query_matches_again() {
     assert_eq!(match_texts(&picker), vec!["fix/bug"]);
     assert_eq!(selected_text(&picker), Some("fix/bug"));
 }
+
+/// The first match `wanted` accepts is highlighted; with none, the
+/// selection stays where it was.
+#[test]
+fn select_where_highlights_the_first_accepted_match() {
+    let mut picker = SearchPicker::new(branches(&["main", "feat/login", "fix/bug"]), "");
+
+    assert!(picker.select_where(|b| b.search_text() == "fix/bug"));
+    assert_eq!(selected_text(&picker), Some("fix/bug"));
+
+    assert!(!picker.select_where(|b| b.search_text() == "gone"));
+    assert_eq!(selected_text(&picker), Some("fix/bug"));
+}
