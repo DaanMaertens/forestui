@@ -1034,8 +1034,9 @@ if [ "$LABEL" = "rust" ]; then
   assert UC-105 merged-pr-marked "yes" "$(screen_has '[├└]─ ✓ pr-45')"
   assert UC-105 open-issue-unmarked "no" "$(screen_has '✓ feat-77')"
   assert UC-105 session-unmarked "no" "$(screen_has '✓ session-caching')"
-  assert UC-105 mark-not-saved "False" \
-    "$(cfg "any('finished' in w for r in d['repositories'] for w in r['worktrees'])")"
+  # The mark is saved on the worktree, beside the check's last answer.
+  assert UC-105 mark-saved "True" \
+    "$(cfg "any(w.get('finished') and w.get('last_finished_check') for r in d['repositories'] for w in r['worktrees'] if w['name'].startswith('pr-45'))")"
 fi
 
 # --- UC-72: delete a worktree, clean and dirty ---------------------------------
