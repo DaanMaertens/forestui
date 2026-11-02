@@ -254,9 +254,38 @@ pub fn session_state(state: crate::services::live::SessionState) -> Style {
     let theme = active();
     Style::default().fg(match state {
         SessionState::NeedsYou => theme.warning,
-        SessionState::Busy => theme.accent,
+        SessionState::Busy => busy_colour(theme),
         SessionState::Idle => theme.success,
     })
+}
+
+/// Busy wears the accent, except where a palette publishes one value as both
+/// accent and success (Forest Dark, both Gruvboxes, Monokai, Everforest): there busy
+/// would read as idle. Keyed on the clash, not on theme names, so a new theme
+/// is covered too. The fallback rotates the accent's channels a third of the
+/// way round the hue wheel — a green accent turns blue or violet, away from
+/// both the idle green and the needs-you amber — then leans it 30% toward
+/// `text_primary`, which lifts its contrast on dark and light backgrounds
+/// alike.
+fn busy_colour(theme: &Theme) -> Color {
+    if theme.accent != theme.success {
+        return theme.accent;
+    }
+    let (Some(accent), Some(text)) = (hex(theme.accent), hex(theme.text_primary)) else {
+        return theme.text_secondary;
+    };
+    // (r, g, b) -> (b, r, g): a 120° hue turn.
+    let rotated = ((accent & 0xFF) << 16) | (accent >> 8);
+    rgb(mix(rotated, text, 70))
+}
+
+/// The inverse of [`rgb`]; `None` for the named and indexed colours no theme
+/// uses.
+fn hex(color: Color) -> Option<u32> {
+    let Color::Rgb(r, g, b) = color else {
+        return None;
+    };
+    Some((u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b))
 }
 
 pub fn destructive() -> Style {

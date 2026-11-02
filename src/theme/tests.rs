@@ -65,3 +65,69 @@ fn text_contrasts_with_backgrounds_in_every_theme() {
         }
     }
 }
+
+fn luma(color: Color) -> i32 {
+    let Color::Rgb(r, g, b) = color else {
+        panic!("themes are all Rgb");
+    };
+    (r as i32 * 299 + g as i32 * 587 + b as i32 * 114) / 1000
+}
+
+/// Busy, idle and needs-you must never share a colour: the sidebar name is
+/// the one place a session's state shows at a glance, and five published
+/// palettes use one value for both `accent` and `success`.
+#[test]
+fn session_states_have_distinct_colours_in_every_theme() {
+    use crate::services::live::SessionState;
+    let _guard = test_lock();
+    for theme in THEMES {
+        set_active(theme.slug);
+        let fg = |state| session_state(state).fg.expect("state styles set fg");
+        let (busy, idle, needs_you) = (
+            fg(SessionState::Busy),
+            fg(SessionState::Idle),
+            fg(SessionState::NeedsYou),
+        );
+        assert_ne!(busy, idle, "{}: busy looks idle", theme.slug);
+        assert_ne!(busy, needs_you, "{}: busy looks like needs-you", theme.slug);
+        // A worktree with no session shows its name in text_primary.
+        assert_ne!(
+            busy, theme.text_primary,
+            "{}: busy looks sessionless",
+            theme.slug
+        );
+        if theme.accent != theme.success {
+            assert_eq!(busy, theme.accent, "{}: busy left the accent", theme.slug);
+        } else {
+            // Not merely unequal: a fallback one step off idle would pass
+            // `assert_ne!` and still look the same.
+            for (label, other) in [("idle", idle), ("needs-you", needs_you)] {
+                let distance = channel_distance(busy, other);
+                assert!(
+                    distance >= 80,
+                    "{}: busy vs {label} channel distance {distance}",
+                    theme.slug
+                );
+            }
+            for (label, bg) in [("bg", theme.bg), ("bg_selected", theme.bg_selected)] {
+                let distance = (luma(busy) - luma(bg)).abs();
+                assert!(
+                    distance >= 60,
+                    "{}: busy vs {label} distance {distance}",
+                    theme.slug
+                );
+            }
+        }
+    }
+}
+
+/// Sum of per-channel differences: crude, but enough to tell two colours
+/// that only differ in a rounding step from two a reader can tell apart.
+fn channel_distance(a: Color, b: Color) -> i32 {
+    let (Color::Rgb(ar, ag, ab), Color::Rgb(br, bg, bb)) = (a, b) else {
+        panic!("themes are all Rgb");
+    };
+    (i32::from(ar) - i32::from(br)).abs()
+        + (i32::from(ag) - i32::from(bg)).abs()
+        + (i32::from(ab) - i32::from(bb)).abs()
+}
