@@ -14,10 +14,46 @@ fn peek_returns_the_last_scan() {
 }
 
 #[test]
-fn folder_naming_replaces_slashes() {
+fn folder_naming_leaves_no_slashes() {
     let folder = path_to_claude_folder("/tmp");
     assert!(!folder.contains('/'));
     assert!(folder.starts_with('-') || folder.contains("tmp"));
+}
+
+/// Claude Code writes `/home/me/forest/demo/My Feature Work` under
+/// `-home-me-forest-demo-My-Feature-Work` (#131). Reading the spaced name
+/// instead found nothing, so the worktree never showed a session.
+#[test]
+fn folder_naming_matches_claude_for_spaces() {
+    assert_eq!(
+        path_to_claude_folder("/nowhere/forest/demo/My Feature Work"),
+        "-nowhere-forest-demo-My-Feature-Work"
+    );
+}
+
+/// Not only spaces: Claude Code turns every character that is not an ASCII
+/// letter or digit into a dash. The expected names are modelled on real
+/// transcript folders, e.g. a `.claude/worktrees` checkout becomes
+/// `--claude-worktrees`.
+#[test]
+fn folder_naming_matches_claude_for_punctuation() {
+    assert_eq!(
+        path_to_claude_folder("/nowhere/forestui/.claude/worktrees/foamy_noodle"),
+        "-nowhere-forestui--claude-worktrees-foamy-noodle"
+    );
+    assert_eq!(
+        path_to_claude_folder("/nowhere/by-exact-name. Change it, with tests."),
+        "-nowhere-by-exact-name--Change-it--with-tests-"
+    );
+}
+
+/// JavaScript's regex sees UTF-16 code units: `é` is one, `🌲` is two.
+#[test]
+fn folder_naming_counts_non_ascii_as_claude_does() {
+    assert_eq!(
+        path_to_claude_folder("/nowhere/café 🌲"),
+        "-nowhere-caf----"
+    );
 }
 
 /// The session list is only useful if it shows the name the user gave the
