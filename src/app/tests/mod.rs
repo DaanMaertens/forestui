@@ -28,6 +28,7 @@ mod start_work_scope;
 mod start_work_settings;
 mod sub_issues;
 mod update_notice;
+mod worktree_keys;
 mod worktrees;
 
 /// Starts a change the way its flow does — `begin` is

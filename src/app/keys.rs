@@ -1,6 +1,6 @@
 //! Keyboard input: global hotkeys, focus movement, and the rename fields.
 
-use super::{Action, App, DetailItem, Field, Focus, PAGE_STEP};
+use super::{Action, App, DetailItem, Field, Focus, PAGE_STEP, SidebarRow};
 use crate::modal::{AddRepositoryModal, Modal, SettingsModal};
 use crate::ui::widgets::{TextInput, is_plain_press};
 
@@ -123,6 +123,16 @@ impl App {
             _ => {}
         }
 
+        // `[` / `]` switch worktree from either pane — the arrows only do that
+        // with the sidebar focused, and they are not in the footer because it
+        // is full at 140 columns.
+        if let KeyCode::Char(step @ ('[' | ']')) = key.code
+            && is_plain_press(key)
+        {
+            self.step_worktree(step == ']');
+            return;
+        }
+
         // K/J reorder the *pinned* sessions while the cursor is on one of a
         // pinned card's controls. Contextual on purpose: the footer is full,
         // and outside a pinned card the keys mean nothing — recency orders the
@@ -185,6 +195,42 @@ impl App {
         }
     }
 
+    /// Select the next (or previous) worktree row, wrapping around and
+    /// skipping repository rows. From a repository row the nearest worktree
+    /// in that direction wins.
+    fn step_worktree(&mut self, forward: bool) {
+        let stops: Vec<usize> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| matches!(row, SidebarRow::Worktree { .. }))
+            .map(|(index, _)| index)
+            .collect();
+        let current = self.sidebar_index;
+        let target = if forward {
+            stops
+                .iter()
+                .find(|&&index| index > current)
+                .or(stops.first())
+        } else {
+            stops
+                .iter()
+                .rev()
+                .find(|&&index| index < current)
+                .or(stops.last())
+        };
+        let Some(&target) = target else {
+            return;
+        };
+        if target == current {
+            return;
+        }
+        self.sidebar_index = target;
+        self.select_current_row();
+        // So a following Up/Down carries on through the sidebar from here.
+        self.focus = Focus::Sidebar;
+    }
+
     /// Route a key to a focused rename field. Returns true when consumed.
     fn handle_field_key(&mut self, field: Field, key: ratatui::crossterm::event::KeyEvent) -> bool {
         use ratatui::crossterm::event::KeyCode;
@@ -204,8 +250,7 @@ impl App {
         // field swallows every printable key, so the global hotkeys are
         // unreachable from here otherwise.
         if key.code == KeyCode::Esc {
-            self.reset_rename_fields();
-            self.focus = Focus::Sidebar;
+            self.return_focus_to_sidebar();
             return true;
         }
 
@@ -214,6 +259,19 @@ impl App {
             Field::BranchName => &mut self.branch_input,
         };
         input.apply_edit_key(key)
+    }
+
+    /// Hand focus back to the sidebar, discarding an unsaved edit in a
+    /// focused rename field the way Escape does. Coming back to forestui does
+    /// this too: the arrows should switch worktree again, and a half-typed
+    /// name left behind in another window is not one to keep.
+    pub(super) fn return_focus_to_sidebar(&mut self) {
+        if self.focus == Focus::Detail
+            && let Some((DetailItem::Field(_), _)) = self.drawn_items.get(self.detail_index)
+        {
+            self.reset_rename_fields();
+        }
+        self.focus = Focus::Sidebar;
     }
 
     fn reset_rename_fields(&mut self) {

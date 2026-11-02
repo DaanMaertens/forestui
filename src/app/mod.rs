@@ -1692,6 +1692,10 @@ impl App {
                 // Not `reload_detail`: that is for a *new* selection and resets
                 // the focus index and scroll, which would yank the pane out
                 // from under someone who just switched back to the window.
+                // Focus is the exception: after a hop into a Claude window
+                // the arrows should switch worktree again (#133). A modal
+                // keeps its keys regardless — it sits above `focus`.
+                self.return_focus_to_sidebar();
                 self.last_session_refresh = Instant::now();
                 self.refresh_visible_sessions();
                 self.scan_live_sessions();
