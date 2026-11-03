@@ -294,11 +294,14 @@ async fn the_cursor_row_keeps_the_session_state_colour() {
         (Focus::Sidebar, palette.accent_dark),
         (Focus::Detail, palette.bg_selected),
     ] {
-        for (state, colour) in [
-            (SessionState::NeedsYou, palette.warning),
-            (SessionState::Busy, palette.accent),
-            (SessionState::Idle, palette.success),
+        for state in [
+            SessionState::NeedsYou,
+            SessionState::Busy,
+            SessionState::Idle,
         ] {
+            let colour = crate::theme::session_state(state)
+                .fg
+                .expect("state styles set fg");
             let (_dir, mut app) = app_with_fixture();
             let Some(SidebarRow::Worktree {
                 name,
