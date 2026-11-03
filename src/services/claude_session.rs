@@ -1,7 +1,7 @@
 //! Reading and relocating Claude Code session history.
 //!
 //! Claude Code stores one JSONL file per session under
-//! `~/.claude/projects/<path-with-slashes-replaced-by-dashes>/`.
+//! `~/.claude/projects/<path-with-every-non-alphanumeric-replaced-by-a-dash>/`.
 
 use crate::models::{ClaudeSession, SessionTurn, Speaker, TokenUsage};
 use chrono::{DateTime, TimeZone, Utc};
@@ -77,9 +77,26 @@ fn fingerprint(sessions_dir: &Path) -> Fingerprint {
 }
 
 /// Convert a filesystem path to Claude's folder naming convention.
+///
+/// Claude Code slugs with `/[^a-zA-Z0-9]/g` → `-`, not just the slashes:
+/// replacing only `/` read a folder that never exists for any path with a
+/// space or a dot in it, and the worktree showed no sessions (#131). The
+/// regex runs over JavaScript's UTF-16 code units, so a character outside
+/// the BMP becomes two dashes; counting `len_utf16` keeps such names equal.
+///
+/// Claude Code also truncates a slug longer than 200 characters and appends a
+/// hash of the path; that case is not matched here.
 pub fn path_to_claude_folder(path: &str) -> String {
     let resolved = crate::util::expand_and_resolve(path);
-    resolved.to_string_lossy().replace('/', "-")
+    let mut folder = String::new();
+    for c in resolved.to_string_lossy().chars() {
+        if c.is_ascii_alphanumeric() {
+            folder.push(c);
+        } else {
+            folder.extend(std::iter::repeat_n('-', c.len_utf16()));
+        }
+    }
+    folder
 }
 
 pub fn claude_projects_dir() -> PathBuf {
