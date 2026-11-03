@@ -205,13 +205,16 @@ forestui --no-focus-events
 ### Keyboard Shortcuts
 
 Focus moves between the sidebar and the detail pane with `Tab`. Inside either
-pane, `↑`/`↓` move and `Enter` activates.
+pane, `↑`/`↓` move and `Enter` activates. Coming back to forestui from another
+window puts focus back on the sidebar, so the arrows switch worktree again.
+`[` and `]` switch worktree from either pane.
 
 | Key | Action |
 |-----|--------|
 | `Tab` | Switch focus between sidebar and detail pane |
 | `↑` / `↓` | Move within the focused pane |
 | `PgUp` / `PgDn` | Page the sidebar, or scroll the detail pane |
+| `[` / `]` | Previous / next worktree, from either pane (wraps around) |
 | `Enter` | Select a row / activate the focused control |
 | `a` | Add repository |
 | `s` | Start work (an issue, a single session, a PR review, or a plain worktree) |

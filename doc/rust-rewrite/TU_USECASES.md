@@ -1821,6 +1821,33 @@ shows before any check has run.
 **Fails if:** a plain or archived worktree cannot be marked, the label does
 not flip, a toggle toasts, or the mark is lost on restart.
 
+### UC-108 — `[` / `]` switch worktree from either pane, and wrap
+**Area:** Sidebar | **Priority:** P0 | 🟢 EXECUTED (Rust)
+**Setup:** UC-09's tree plus a second worktree under `beta` (say `wt-b`), so
+the order is `alpha`, `wt-two`, `beta`, `wt-b`.
+**Steps:**
+1. Select `wt-two`; `Tab` into the detail pane.
+2. `tu press --name fui ]`; `sleep 1.2`; `tu screenshot --name fui`
+3. `tu press --name fui ]`; `sleep 1.2`; `tu screenshot --name fui`
+4. `tu press --name fui [`; `sleep 1.2`; `tu screenshot --name fui`
+5. Open a Claude window from a session card (or `n`), press the back key,
+   then `tu press --name fui Down`, then `tu press --name fui ]`.
+
+**Expected:**
+- Step 2 selects `wt-b`, skipping the `beta` repository row, and the sidebar
+  holds focus (its highlight, not the detail pane's).
+- Step 3 wraps to `wt-two`; step 4 wraps back to `wt-b`.
+- Step 5: back in forestui the sidebar holds focus, so `Down` moves the
+  sidebar selection rather than the detail-pane cursor, and `]` moves on to
+  the next worktree.
+- The footer is unchanged: `[` / `]` are documented in the README, not the
+  footer, which is full at 140 columns.
+
+**Fails if:** a bracket lands on a repository row, stops at either end, needs
+`Tab` first, or the arrows walk the detail pane after a return from a Claude
+window. Archived rows, collapsed repositories, a rename field typing the
+bracket, and a modal keeping its keys are unit-tested.
+
 ---
 
 ## Known visual divergences (accepted, not defects)
